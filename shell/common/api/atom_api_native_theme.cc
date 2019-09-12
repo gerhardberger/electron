@@ -7,7 +7,7 @@
 #include <string>
 
 #include "native_mate/dictionary.h"
-#include "native_mate/object_template_builder.h"
+#include "native_mate/object_template_builder_deprecated.h"
 #include "shell/common/node_includes.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/native_theme/native_theme.h"

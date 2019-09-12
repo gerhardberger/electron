@@ -32,7 +32,7 @@
 #include "content/public/browser/storage_partition.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
 #include "native_mate/dictionary.h"
-#include "native_mate/object_template_builder.h"
+#include "native_mate/object_template_builder_deprecated.h"
 #include "net/base/completion_repeating_callback.h"
 #include "net/base/load_flags.h"
 #include "net/http/http_auth_handler_factory.h"
