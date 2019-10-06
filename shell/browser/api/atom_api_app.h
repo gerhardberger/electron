@@ -207,6 +207,11 @@ class App : public AtomBrowserClient::Delegate,
   bool CanBrowserClientUseCustomSiteInstance();
 
 #if defined(OS_MACOSX)
+  float GetSystemOutputVolume();
+  float GetSystemInputVolume();
+  void SetSystemOutputVolume(float volume);
+  void SetSystemInputVolume(float volume);
+
   bool MoveToApplicationsFolder(gin_helper::ErrorThrower,
                                 mate::Arguments* args);
   bool IsInApplicationsFolder();
