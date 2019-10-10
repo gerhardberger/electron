@@ -7,9 +7,15 @@
 
 // Rip global off of window (which is also global) so that webpack doesn't
 // auto replace it with a looped reference to this file
-const _global = (self as any || window as any).global as NodeJS.Global
-const process = _global.process
-const Buffer = _global.Buffer
+
+// @AROUND: Addressing Worklet case properly, where no window or self exists.
+let _global: NodeJS.Global | undefined;
+try {
+  _global = ((self as any) || (window as any)).global as NodeJS.Global;
+} catch {}
+
+const process = _global ? _global.process : undefined;
+const Buffer = _global ? _global.Buffer : undefined;
 
 export {
   _global,
