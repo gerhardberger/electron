@@ -65,8 +65,6 @@
 #endif
 
 #if defined(OS_MACOSX)
-#include <AudioToolbox/AudioServices.h>
-#include <CoreAudio/CoreAudio.h>
 #include <CoreFoundation/CoreFoundation.h>
 #include "shell/browser/ui/cocoa/atom_bundle_mover.h"
 #endif
@@ -546,75 +544,6 @@ void OnIconDataAvailable(util::Promise<gfx::Image> promise, gfx::Image icon) {
   }
 }
 
-#if defined(OS_MACOSX)
-AudioDeviceID obtainDefaultAudioDevice(AudioObjectPropertySelector selector) {
-  AudioDeviceID deviceID = kAudioObjectUnknown;
-  AudioObjectPropertyAddress address;
-  UInt32 size = sizeof(deviceID);
-
-  address.mSelector = selector;
-  address.mScope = kAudioObjectPropertyScopeGlobal;
-  address.mElement = kAudioObjectPropertyElementMaster;
-
-  if (!AudioObjectHasProperty(kAudioObjectSystemObject, &address)) {
-    return deviceID;
-  }
-
-  OSStatus err = AudioObjectGetPropertyData(kAudioObjectSystemObject, &address,
-                                            0, NULL, &size, &deviceID);
-  if (err != noErr) {
-    return kAudioObjectUnknown;
-  }
-
-  return deviceID;
-}
-
-float getSystemVolume(AudioDeviceID defaultDeviceID,
-                      AudioObjectPropertyScope scope) {
-  AudioObjectPropertyAddress address;
-  float volume = 0;
-  UInt32 size = sizeof(volume);
-
-  if (defaultDeviceID == kAudioObjectUnknown) {
-    return 0.0;
-  }
-
-  address.mSelector = kAudioHardwareServiceDeviceProperty_VirtualMasterVolume;
-  address.mScope = scope;
-  address.mElement = kAudioObjectPropertyElementMaster;
-
-  OSStatus err = AudioObjectGetPropertyData(defaultDeviceID, &address, 0, NULL,
-                                            &size, &volume);
-  if (err != noErr) {
-    return 0.0;
-  }
-
-  return volume > 1.0 ? 1.0 : (volume < 0.0 ? 0.0 : volume);
-}
-
-void setSystemVolume(float volume,
-                     AudioDeviceID defaultDeviceID,
-                     AudioObjectPropertyScope scope) {
-  AudioObjectPropertyAddress address;
-
-  if (defaultDeviceID == kAudioObjectUnknown) {
-    return;
-  }
-
-  address.mSelector = kAudioHardwareServiceDeviceProperty_VirtualMasterVolume;
-  address.mScope = scope;
-  address.mElement = kAudioObjectPropertyElementMaster;
-
-  float newValue = volume > 1.0 ? 1.0 : (volume < 0.0 ? 0.0 : volume);
-
-  OSStatus err = AudioObjectSetPropertyData(defaultDeviceID, &address, 0, NULL,
-                                            sizeof(newValue), &newValue);
-  if (err != noErr) {
-    std::cout << "Could not set audio volume" << std::endl;
-  }
-}
-#endif
-
 }  // namespace
 
 App::App(v8::Isolate* isolate) {
@@ -628,6 +557,8 @@ App::App(v8::Isolate* isolate) {
       base::ProcessMetrics::CreateCurrentProcessMetrics());
   app_metrics_[pid] = std::move(process_metric);
   Init(isolate);
+
+  SetupAudioEventPassing();
 }
 
 App::~App() {
@@ -1480,32 +1411,6 @@ v8::Local<v8::Value> App::GetDockAPI(v8::Isolate* isolate) {
   }
   return v8::Local<v8::Value>::New(isolate, dock_);
 }
-
-float App::GetSystemOutputVolume() {
-  return getSystemVolume(
-      obtainDefaultAudioDevice(kAudioHardwarePropertyDefaultOutputDevice),
-      kAudioDevicePropertyScopeOutput);
-}
-
-float App::GetSystemInputVolume() {
-  return getSystemVolume(
-      obtainDefaultAudioDevice(kAudioHardwarePropertyDefaultInputDevice),
-      kAudioDevicePropertyScopeInput);
-}
-
-void App::SetSystemOutputVolume(float volume) {
-  return setSystemVolume(
-      volume,
-      obtainDefaultAudioDevice(kAudioHardwarePropertyDefaultOutputDevice),
-      kAudioDevicePropertyScopeOutput);
-}
-
-void App::SetSystemInputVolume(float volume) {
-  return setSystemVolume(
-      volume,
-      obtainDefaultAudioDevice(kAudioHardwarePropertyDefaultInputDevice),
-      kAudioDevicePropertyScopeInput);
-}
 #endif
 
 // static
@@ -1579,6 +1484,10 @@ void App::BuildPrototype(v8::Isolate* isolate,
       .SetMethod("getSystemInputVolume", &App::GetSystemInputVolume)
       .SetMethod("setSystemOutputVolume", &App::SetSystemOutputVolume)
       .SetMethod("setSystemInputVolume", &App::SetSystemInputVolume)
+      .SetMethod("isSystemOutputMuted", &App::IsSystemOutputMuted)
+      .SetMethod("isSystemInputMuted", &App::IsSystemInputMuted)
+      .SetMethod("setSystemOutputMuted", &App::SetSystemOutputMuted)
+      .SetMethod("setSystemInputMuted", &App::SetSystemInputMuted)
 #endif
       .SetMethod("setAboutPanelOptions",
                  base::BindRepeating(&Browser::SetAboutPanelOptions, browser))

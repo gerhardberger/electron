@@ -211,6 +211,11 @@ class App : public AtomBrowserClient::Delegate,
   float GetSystemInputVolume();
   void SetSystemOutputVolume(float volume);
   void SetSystemInputVolume(float volume);
+  void SetupAudioEventPassing();
+  bool IsSystemOutputMuted();
+  bool IsSystemInputMuted();
+  void SetSystemOutputMuted(bool muted);
+  void SetSystemInputMuted(bool muted);
 
   bool MoveToApplicationsFolder(gin_helper::ErrorThrower,
                                 mate::Arguments* args);
