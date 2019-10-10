@@ -1,0 +1,39 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Heilig Benedek <benecene@gmail.com>
+Date: Tue, 8 Oct 2019 23:15:11 +0200
+Subject: throttling_prevention_passed_to_iframes
+
+
+diff --git a/content/browser/renderer_host/render_widget_host_impl.cc b/content/browser/renderer_host/render_widget_host_impl.cc
+index ebe6315a98f9654d2cbc54c09f79a17f18e267a7..bfc94b51c584f4d1843365546a6354595ff4ae68 100644
+--- a/content/browser/renderer_host/render_widget_host_impl.cc
++++ b/content/browser/renderer_host/render_widget_host_impl.cc
+@@ -675,7 +675,27 @@ void RenderWidgetHostImpl::WasHidden() {
+   if (is_hidden_)
+     return;
+
+-  if (disable_hidden_)
++  bool disable_hidden = disable_hidden_;
++  RenderWidgetHost* parent_host;
++  auto* view = static_cast<RenderWidgetHostViewBase*>(GetView());
++  if (view && view->IsRenderWidgetHostViewChildFrame()) {
++    auto* parent_view = static_cast<RenderWidgetHostViewBase*>(
++      static_cast<RenderWidgetHostViewChildFrame*>(view)->GetParentView());
++    for (auto& it : g_routing_id_widget_map.Get()) {
++      RenderWidgetHost* widget = it.second;
++
++      if (static_cast<RenderWidgetHostViewBase*>(widget->GetView()) == parent_view) {
++        parent_host = widget;
++      }
++    }
++
++    auto* impl = static_cast<content::RenderWidgetHostImpl*>(parent_host);
++    if (impl) {
++     disable_hidden = impl->disable_hidden_;
++    }
++  }
++
++  if (disable_hidden)
+     return;
+
+   RejectMouseLockOrUnlockIfNecessary();

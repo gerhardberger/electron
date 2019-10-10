@@ -1,0 +1,45 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Heilig Benedek <benecene@gmail.com>
+Date: Tue, 8 Oct 2019 21:59:58 +0200
+Subject: audio_jitter_buffer_max_packets_zero
+
+
+diff --git a/api/peer_connection_interface.h b/api/peer_connection_interface.h
+index 4c6f6a12ec08563dfff74fcbc757fbd1174be039..5e0a1526a8192401e03c3795ce32c189fe6ab268 100644
+--- a/api/peer_connection_interface.h
++++ b/api/peer_connection_interface.h
+@@ -347,7 +347,7 @@ class RTC_EXPORT PeerConnectionInterface : public rtc::RefCountInterface {
+
+     static const int kUndefined = -1;
+     // Default maximum number of packets in the audio jitter buffer.
+-    static const int kAudioJitterBufferMaxPackets = 200;
++    static const int kAudioJitterBufferMaxPackets = 0;
+     // ICE connection receiving timeout for aggressive configuration.
+     static const int kAggressiveIceConnectionReceivingTimeout = 1000;
+
+diff --git a/media/engine/webrtc_voice_engine.cc b/media/engine/webrtc_voice_engine.cc
+index 1125780b46c8e43ac857ce6c897246a3733302fb..186ef82be8a991c21e9023e0d75348b103054711 100644
+--- a/media/engine/webrtc_voice_engine.cc
++++ b/media/engine/webrtc_voice_engine.cc
+@@ -431,7 +431,7 @@ bool WebRtcVoiceEngine::ApplyOptions(const AudioOptions& options_in) {
+     RTC_LOG(LS_INFO) << "NetEq capacity is "
+                      << *options.audio_jitter_buffer_max_packets;
+     audio_jitter_buffer_max_packets_ =
+-        std::max(20, *options.audio_jitter_buffer_max_packets);
++        std::max(0, *options.audio_jitter_buffer_max_packets);
+   }
+   if (options.audio_jitter_buffer_fast_accelerate) {
+     RTC_LOG(LS_INFO) << "NetEq fast mode? "
+diff --git a/media/engine/webrtc_voice_engine.h b/media/engine/webrtc_voice_engine.h
+index c1a687b3012ff6e8c1573cb4f4ee27013718c10a..3c6eaa3d714b67846115e880d553ceae69a3a7c8 100644
+--- a/media/engine/webrtc_voice_engine.h
++++ b/media/engine/webrtc_voice_engine.h
+@@ -123,7 +123,7 @@ class WebRtcVoiceEngine final : public VoiceEngineInterface {
+   // defaults for options which are not provided.
+   absl::optional<bool> experimental_ns_;
+   // Jitter buffer settings for new streams.
+-  size_t audio_jitter_buffer_max_packets_ = 200;
++  size_t audio_jitter_buffer_max_packets_ = 0;
+   bool audio_jitter_buffer_fast_accelerate_ = false;
+   int audio_jitter_buffer_min_delay_ms_ = 0;
+   bool audio_jitter_buffer_enable_rtx_handling_ = false;

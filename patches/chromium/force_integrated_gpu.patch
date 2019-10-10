@@ -1,0 +1,36 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Heilig Benedek <benecene@gmail.com>
+Date: Wed, 9 Oct 2019 12:11:36 +0200
+Subject: force_integrated_gpu
+
+
+diff --git a/gpu/config/gpu_switching.cc b/gpu/config/gpu_switching.cc
+index b585f0ad7cfdf450610d065a86bf605c309c14ea..18d5641e1db44d1f688cc8eb8900c577310dafb7 100644
+--- a/gpu/config/gpu_switching.cc
++++ b/gpu/config/gpu_switching.cc
+@@ -31,12 +31,6 @@ typedef void* PlatformPixelFormatObj;
+ 
+ PlatformPixelFormatObj g_discrete_pixel_format_obj = nullptr;
+ 
+-bool ContainsWorkaround(const std::vector<int32_t>& workarounds,
+-                        int32_t workaround) {
+-  return (std::find(workarounds.begin(), workarounds.end(), workaround) !=
+-          workarounds.end());
+-}
+-
+ void ForceDiscreteGPU() {
+   if (g_discrete_pixel_format_obj)
+     return;
+@@ -80,10 +74,10 @@ bool SwitchableGPUsSupported(const GPUInfo& gpu_info,
+ void InitializeSwitchableGPUs(
+     const std::vector<int32_t>& driver_bug_workarounds) {
+   gl::GLContext::SetSwitchableGPUsSupported();
+-  if (ContainsWorkaround(driver_bug_workarounds, FORCE_HIGH_PERFORMANCE_GPU)) {
++  if (false) {
+     gl::GLContext::SetForcedGpuPreference(gl::GpuPreference::kHighPerformance);
+     ForceDiscreteGPU();
+-  } else if (ContainsWorkaround(driver_bug_workarounds, FORCE_LOW_POWER_GPU)) {
++  } else if (true) {
+     gl::GLContext::SetForcedGpuPreference(gl::GpuPreference::kLowPower);
+   }
+ }
