@@ -5,10 +5,10 @@ Subject: audioworklet_realtime_thread_default_true
 
 
 diff --git a/third_party/blink/renderer/platform/scheduler/common/thread.cc b/third_party/blink/renderer/platform/scheduler/common/thread.cc
-index b657a3c80c1c47547c69c4d55c553305e52c3e0f..c11fb1e90c3c0f7980ca3b1f087875468de8ab94 100644
+index a6ff1ca90d4c0f7e1bc81bd4e834535f5d278480..85dbf3a80bd2507e674d3e711b60b531410b59b8 100644
 --- a/third_party/blink/renderer/platform/scheduler/common/thread.cc
 +++ b/third_party/blink/renderer/platform/scheduler/common/thread.cc
-@@ -90,10 +90,13 @@ std::unique_ptr<Thread> Thread::CreateWebAudioThread() {
+@@ -100,10 +100,13 @@ std::unique_ptr<Thread> Thread::CreateWebAudioThread() {
    // WebAudio uses a thread with |DISPLAY| priority to avoid glitch when the
    // system is under the high pressure. Note that the main browser thread also
    // runs with same priority. (see: crbug.com/734539)
@@ -23,6 +23,6 @@ index b657a3c80c1c47547c69c4d55c553305e52c3e0f..c11fb1e90c3c0f7980ca3b1f08787546
 +
 +  // @AROUND: we always use real-time priority for the AudioWorklet thread
 +  params.thread_priority = base::ThreadPriority::REALTIME_AUDIO;
-
+ 
    return CreateThread(params);
  }

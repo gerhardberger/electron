@@ -83,3 +83,4 @@ build_fix_when_building_with_enable_plugins_false.patch
 audioworklet_realtime_thread_default_true.patch
 throttling_prevention_passed_to_iframes.patch
 force_integrated_gpu.patch
+disable_bgcolor_dcheck.patch

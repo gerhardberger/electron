@@ -5,13 +5,13 @@ Subject: throttling_prevention_passed_to_iframes
 
 
 diff --git a/content/browser/renderer_host/render_widget_host_impl.cc b/content/browser/renderer_host/render_widget_host_impl.cc
-index ebe6315a98f9654d2cbc54c09f79a17f18e267a7..bfc94b51c584f4d1843365546a6354595ff4ae68 100644
+index 553167fa07a3acee25434cfd71a968a112d56752..6759380c597b9e2875b01daa3440425c47d28713 100644
 --- a/content/browser/renderer_host/render_widget_host_impl.cc
 +++ b/content/browser/renderer_host/render_widget_host_impl.cc
-@@ -675,7 +675,27 @@ void RenderWidgetHostImpl::WasHidden() {
+@@ -672,7 +672,27 @@ void RenderWidgetHostImpl::WasHidden() {
    if (is_hidden_)
      return;
-
+ 
 -  if (disable_hidden_)
 +  bool disable_hidden = disable_hidden_;
 +  RenderWidgetHost* parent_host;
@@ -35,5 +35,5 @@ index ebe6315a98f9654d2cbc54c09f79a17f18e267a7..bfc94b51c584f4d1843365546a635459
 +
 +  if (disable_hidden)
      return;
-
+ 
    RejectMouseLockOrUnlockIfNecessary();
