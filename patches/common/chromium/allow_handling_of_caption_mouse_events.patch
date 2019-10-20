@@ -1,0 +1,266 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Heilig Benedek <benecene@gmail.com>
+Date: Sun, 20 Oct 2019 21:39:58 +0200
+Subject: allow_handling_of_caption_mouse_events
+
+This patches allows us to handle mouse events in the renderer that happen over the
+caption part of the window (draggable regions for example).
+
+diff --git a/content/browser/renderer_host/legacy_render_widget_host_win.cc b/content/browser/renderer_host/legacy_render_widget_host_win.cc
+index d2dd02a743a9bc908b6f8438ccac9dd85aa0a281..4f4de21e624925e422eb13b35021c42eb115f330 100644
+--- a/content/browser/renderer_host/legacy_render_widget_host_win.cc
++++ b/content/browser/renderer_host/legacy_render_widget_host_win.cc
+@@ -260,12 +260,12 @@ LRESULT LegacyRenderWidgetHostHWND::OnMouseRange(UINT message,
+                                                  WPARAM w_param,
+                                                  LPARAM l_param,
+                                                  BOOL& handled) {
+-  if (message == WM_MOUSEMOVE) {
++  if (message == WM_MOUSEMOVE || message == WM_NCMOUSEMOVE) {
+     if (!mouse_tracking_enabled_) {
+       mouse_tracking_enabled_ = true;
+       TRACKMOUSEEVENT tme;
+       tme.cbSize = sizeof(tme);
+-      tme.dwFlags = TME_LEAVE;
++      tme.dwFlags = TME_NONCLIENT | TME_LEAVE;
+       tme.hwndTrack = hwnd();
+       tme.dwHoverTime = 0;
+       TrackMouseEvent(&tme);
+@@ -289,13 +289,11 @@ LRESULT LegacyRenderWidgetHostHWND::OnMouseRange(UINT message,
+     bool msg_handled = false;
+     ret = GetWindowEventTarget(GetParent())->HandleMouseMessage(
+         message, w_param, l_param, &msg_handled);
+-    handled = msg_handled;
+     // If the parent did not handle non client mouse messages, we call
+     // DefWindowProc on the message with the parent window handle. This
+     // ensures that WM_SYSCOMMAND is generated for the parent and we are
+     // out of the picture.
+-    if (!handled &&
+-         (message >= WM_NCMOUSEMOVE && message <= WM_NCXBUTTONDBLCLK)) {
++    if (message >= WM_NCMOUSEMOVE && message <= WM_NCXBUTTONDBLCLK) {
+       ret = ::DefWindowProc(GetParent(), message, w_param, l_param);
+       handled = TRUE;
+     }
+diff --git a/content/browser/renderer_host/render_widget_host_view_event_handler.cc b/content/browser/renderer_host/render_widget_host_view_event_handler.cc
+index 4e2075be4cf34e53a1dc5118d5daf5b893f90d63..18d0aabef1c47e7e14673b04fda9c2f6bd331550 100644
+--- a/content/browser/renderer_host/render_widget_host_view_event_handler.cc
++++ b/content/browser/renderer_host/render_widget_host_view_event_handler.cc
+@@ -640,7 +640,7 @@ bool RenderWidgetHostViewEventHandler::CanRendererHandleEvent(
+     case WM_NCXBUTTONDOWN:
+     case WM_NCXBUTTONUP:
+     case WM_NCXBUTTONDBLCLK:
+-      return false;
++      return true;
+     default:
+       break;
+   }
+diff --git a/third_party/blink/renderer/core/layout/layout_object.cc b/third_party/blink/renderer/core/layout/layout_object.cc
+index d138360ca59f82c4f507d0a57d56bf262b4d56da..ad83cf7182e2b554bc96e67781a6904fd9653304 100644
+--- a/third_party/blink/renderer/core/layout/layout_object.cc
++++ b/third_party/blink/renderer/core/layout/layout_object.cc
+@@ -2370,6 +2370,13 @@ void LayoutObject::StyleDidChange(StyleDifference diff,
+     AddSubtreePaintPropertyUpdateReason(
+         SubtreePaintPropertyUpdateReason::kTransformStyleChanged);
+   }
++
++  if (old_style &&
++      style_->DraggableRegionMode() != old_style->DraggableRegionMode()) {
++    if (LocalFrameView* view = GetFrameView()) {
++      view->UpdateDocumentAnnotatedRegions();
++    }
++  }
+ }
+ 
+ void LayoutObject::ApplyPseudoStyleChanges(const ComputedStyle* old_style) {
+diff --git a/ui/events/blink/web_input_event_builders_win.cc b/ui/events/blink/web_input_event_builders_win.cc
+index 33bc7d3c448b67fd1acf2a97f5b99e2aa8eaad86..92bccd07480b55a22685a06d6117c06945e9d833 100644
+--- a/ui/events/blink/web_input_event_builders_win.cc
++++ b/ui/events/blink/web_input_event_builders_win.cc
+@@ -52,6 +52,10 @@ WebMouseEvent WebMouseEventBuilder::Build(
+       else
+         button = WebMouseEvent::Button::kNoButton;
+       break;
++    case WM_NCMOUSEMOVE:
++      type = WebInputEvent::kMouseMove;
++      button = WebMouseEvent::Button::kNoButton;
++      break;
+     case WM_MOUSELEAVE:
+     case WM_NCMOUSELEAVE:
+       // TODO(rbyers): This should be MouseLeave but is disabled temporarily.
+@@ -62,21 +66,29 @@ WebMouseEvent WebMouseEventBuilder::Build(
+       // current window) since none is specified for this event
+       lparam = GetRelativeCursorPos(hwnd);
+       break;
++    case WM_NCLBUTTONDOWN:
++    case WM_NCLBUTTONDBLCLK:
+     case WM_LBUTTONDOWN:
+     case WM_LBUTTONDBLCLK:
+       type = WebInputEvent::kMouseDown;
+       button = WebMouseEvent::Button::kLeft;
+       break;
++    case WM_NCMBUTTONDOWN:
++    case WM_NCMBUTTONDBLCLK:
+     case WM_MBUTTONDOWN:
+     case WM_MBUTTONDBLCLK:
+       type = WebInputEvent::kMouseDown;
+       button = WebMouseEvent::Button::kMiddle;
+       break;
++    case WM_NCRBUTTONDOWN:
++    case WM_NCRBUTTONDBLCLK:
+     case WM_RBUTTONDOWN:
+     case WM_RBUTTONDBLCLK:
+       type = WebInputEvent::kMouseDown;
+       button = WebMouseEvent::Button::kRight;
+       break;
++    case WM_NCXBUTTONDOWN:
++    case WM_NCXBUTTONDBLCLK:
+     case WM_XBUTTONDOWN:
+     case WM_XBUTTONDBLCLK:
+       type = WebInputEvent::kMouseDown;
+@@ -85,18 +97,22 @@ WebMouseEvent WebMouseEventBuilder::Build(
+       else if ((HIWORD(wparam) & XBUTTON2))
+         button = WebMouseEvent::Button::kForward;
+       break;
++    case WM_NCLBUTTONUP:
+     case WM_LBUTTONUP:
+       type = WebInputEvent::kMouseUp;
+       button = WebMouseEvent::Button::kLeft;
+       break;
++    case WM_NCMBUTTONUP:
+     case WM_MBUTTONUP:
+       type = WebInputEvent::kMouseUp;
+       button = WebMouseEvent::Button::kMiddle;
+       break;
++    case WM_NCRBUTTONUP:
+     case WM_RBUTTONUP:
+       type = WebInputEvent::kMouseUp;
+       button = WebMouseEvent::Button::kRight;
+       break;
++    case WM_NCXBUTTONUP:
+     case WM_XBUTTONUP:
+       type = WebInputEvent::kMouseUp;
+       if ((HIWORD(wparam) & XBUTTON1))
+@@ -111,20 +127,38 @@ WebMouseEvent WebMouseEventBuilder::Build(
+   // set modifiers:
+   int modifiers =
+       ui::EventFlagsToWebEventModifiers(ui::GetModifiersFromKeyState());
+-  if (wparam & MK_CONTROL)
+-    modifiers |= WebInputEvent::kControlKey;
+-  if (wparam & MK_SHIFT)
+-    modifiers |= WebInputEvent::kShiftKey;
+-  if (wparam & MK_LBUTTON)
+-    modifiers |= WebInputEvent::kLeftButtonDown;
+-  if (wparam & MK_MBUTTON)
+-    modifiers |= WebInputEvent::kMiddleButtonDown;
+-  if (wparam & MK_RBUTTON)
+-    modifiers |= WebInputEvent::kRightButtonDown;
+-  if (wparam & MK_XBUTTON1)
+-    modifiers |= WebInputEvent::kBackButtonDown;
+-  if (wparam & MK_XBUTTON2)
+-    modifiers |= WebInputEvent::kForwardButtonDown;
++
++  if (message >= WM_NCMOUSEMOVE && message <= WM_NCXBUTTONDBLCLK) {
++    if((::GetKeyState(VK_CONTROL) & 0x100) != 0)
++      modifiers |= WebInputEvent::kControlKey;
++    if((::GetKeyState(VK_SHIFT) & 0x100) != 0)
++      modifiers |= WebInputEvent::kShiftKey;
++    if((::GetKeyState(VK_LBUTTON) & 0x100) != 0)
++      modifiers |= WebInputEvent::kLeftButtonDown;
++    if((::GetKeyState(VK_MBUTTON) & 0x100) != 0)
++      modifiers |= WebInputEvent::kMiddleButtonDown;
++    if((::GetKeyState(VK_RBUTTON) & 0x100) != 0)
++      modifiers |= WebInputEvent::kRightButtonDown;
++    if((::GetKeyState(VK_XBUTTON1) & 0x100) != 0)
++      modifiers |= WebInputEvent::kBackButtonDown;
++    if((::GetKeyState(VK_XBUTTON2) & 0x100) != 0)
++      modifiers |= WebInputEvent::kForwardButtonDown;
++  } else {
++    if (wparam & MK_CONTROL)
++      modifiers |= WebInputEvent::kControlKey;
++    if (wparam & MK_SHIFT)
++      modifiers |= WebInputEvent::kShiftKey;
++    if (wparam & MK_LBUTTON)
++      modifiers |= WebInputEvent::kLeftButtonDown;
++    if (wparam & MK_MBUTTON)
++      modifiers |= WebInputEvent::kMiddleButtonDown;
++    if (wparam & MK_RBUTTON)
++      modifiers |= WebInputEvent::kRightButtonDown;
++    if (wparam & MK_XBUTTON1)
++      modifiers |= WebInputEvent::kBackButtonDown;
++    if (wparam & MK_XBUTTON2)
++      modifiers |= WebInputEvent::kForwardButtonDown;
++  }  
+ 
+   WebMouseEvent result(type, modifiers, time_stamp);
+   result.pointer_type = pointer_type;
+diff --git a/ui/views/win/hwnd_message_handler.cc b/ui/views/win/hwnd_message_handler.cc
+index 0f1cf879163eb9bb3d3fc52c41c32f254f0682b9..9b862b6c3a866a7ec6ec7622b59331e5054cff91 100644
+--- a/ui/views/win/hwnd_message_handler.cc
++++ b/ui/views/win/hwnd_message_handler.cc
+@@ -806,8 +806,8 @@ void HWNDMessageHandler::ClearNativeFocus() {
+ }
+ 
+ void HWNDMessageHandler::SetCapture() {
+-  DCHECK(!HasCapture());
+-  ::SetCapture(hwnd());
++  if (!HasCapture())
++    ::SetCapture(hwnd());
+ }
+ 
+ void HWNDMessageHandler::ReleaseCapture() {
+@@ -2921,11 +2921,19 @@ LRESULT HWNDMessageHandler::HandleMouseEventInternal(UINT message,
+   // There are cases where the code handling the message destroys the window,
+   // so use the weak ptr to check if destruction occured or not.
+   base::WeakPtr<HWNDMessageHandler> ref(msg_handler_weak_factory_.GetWeakPtr());
++  bool had_capture = HasCapture();
+   bool handled = delegate_->HandleMouseEvent(&event);
++  if (HasCapture() && !had_capture)
++    ReleaseCapture();
+ 
+   if (!ref.get())
+     return 0;
+ 
++  // We need special processing for mouse input on the caption.
++  // Please refer to the HandleMouseInputForCaption() function for more
++  // information.
++  HandleMouseInputForCaption(message, w_param, l_param);
++
+   if (!handled && message == WM_NCLBUTTONDOWN && w_param != HTSYSMENU &&
+       w_param != HTCAPTION &&
+       delegate_->GetFrameMode() == FrameMode::CUSTOM_DRAWN) {
+@@ -2937,12 +2945,6 @@ LRESULT HWNDMessageHandler::HandleMouseEventInternal(UINT message,
+     handled = true;
+   }
+ 
+-  // We need special processing for mouse input on the caption.
+-  // Please refer to the HandleMouseInputForCaption() function for more
+-  // information.
+-  if (!handled)
+-    handled = HandleMouseInputForCaption(message, w_param, l_param);
+-
+   if (ref.get())
+     SetMsgHandled(handled);
+   return 0;
+@@ -3239,6 +3241,7 @@ bool HWNDMessageHandler::HandleMouseInputForCaption(unsigned int message,
+           should_handle_pending_ncl_button_down = false;
+         }
+       }
++      HandleMouseEventInternal(WM_NCLBUTTONUP, w_param, l_param, true);
+       if (should_handle_pending_ncl_button_down) {
+         l_param = MAKELPARAM(caption_left_button_click_pos_.x(),
+                              caption_left_button_click_pos_.y());
+diff --git a/ui/wm/core/compound_event_filter.cc b/ui/wm/core/compound_event_filter.cc
+index 69ae9071d9349a5b0d7c3aa6fa52f251a547c2a3..f19c140eeb285e142dcd7453dd4df99ea1791573 100644
+--- a/ui/wm/core/compound_event_filter.cc
++++ b/ui/wm/core/compound_event_filter.cc
+@@ -126,7 +126,10 @@ void CompoundEventFilter::UpdateCursor(aura::Window* target,
+       if (target->delegate()) {
+         int window_component =
+             target->delegate()->GetNonClientComponent(event->location());
+-        cursor = CursorForWindowComponent(window_component);
++        gfx::NativeCursor border_cursor =
++            CursorForWindowComponent(window_component);
++        if (border_cursor != ui::CursorType::kNull)
++          cursor = border_cursor;
+       } else {
+         // Allow the OS to handle non client cursors if we don't have a
+         // a delegate to handle the non client hittest.

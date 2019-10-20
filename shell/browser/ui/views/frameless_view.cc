@@ -65,6 +65,9 @@ gfx::Rect FramelessView::GetWindowBoundsForClientBounds(
 }
 
 int FramelessView::NonClientHitTest(const gfx::Point& cursor) {
+  if (!bounds().Contains(cursor))
+    return HTNOWHERE;
+
   if (frame_->IsFullscreen())
     return HTCLIENT;
 

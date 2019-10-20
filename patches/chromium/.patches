@@ -84,3 +84,4 @@ audioworklet_realtime_thread_default_true.patch
 throttling_prevention_passed_to_iframes.patch
 force_integrated_gpu.patch
 disable_bgcolor_dcheck.patch
+allow_handling_of_caption_mouse_events.patch

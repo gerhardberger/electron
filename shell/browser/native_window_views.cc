@@ -1308,11 +1308,6 @@ views::View* NativeWindowViews::GetContentsView() {
 bool NativeWindowViews::ShouldDescendIntoChildForEventHandling(
     gfx::NativeView child,
     const gfx::Point& location) {
-  // App window should claim mouse events that fall within the draggable region.
-  if (draggable_region() &&
-      draggable_region()->contains(location.x(), location.y()))
-    return false;
-
   // And the events on border for dragging resizable frameless window.
   if (!has_frame() && CanResize()) {
     FramelessView* frame =
