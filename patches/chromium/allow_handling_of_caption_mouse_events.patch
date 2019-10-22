@@ -7,10 +7,10 @@ This patches allows us to handle mouse events in the renderer that happen over t
 caption part of the window (draggable regions for example).
 
 diff --git a/content/browser/renderer_host/legacy_render_widget_host_win.cc b/content/browser/renderer_host/legacy_render_widget_host_win.cc
-index d2dd02a743a9bc908b6f8438ccac9dd85aa0a281..4f4de21e624925e422eb13b35021c42eb115f330 100644
+index f8b060832fd246c9bda99c7c69da8f950d761af1..50e6497cb17ddd4d653e769e983b4360b3311a5d 100644
 --- a/content/browser/renderer_host/legacy_render_widget_host_win.cc
 +++ b/content/browser/renderer_host/legacy_render_widget_host_win.cc
-@@ -260,12 +260,12 @@ LRESULT LegacyRenderWidgetHostHWND::OnMouseRange(UINT message,
+@@ -272,12 +272,12 @@ LRESULT LegacyRenderWidgetHostHWND::OnMouseRange(UINT message,
                                                   WPARAM w_param,
                                                   LPARAM l_param,
                                                   BOOL& handled) {
@@ -25,7 +25,7 @@ index d2dd02a743a9bc908b6f8438ccac9dd85aa0a281..4f4de21e624925e422eb13b35021c42e
        tme.hwndTrack = hwnd();
        tme.dwHoverTime = 0;
        TrackMouseEvent(&tme);
-@@ -289,13 +289,11 @@ LRESULT LegacyRenderWidgetHostHWND::OnMouseRange(UINT message,
+@@ -301,13 +301,11 @@ LRESULT LegacyRenderWidgetHostHWND::OnMouseRange(UINT message,
      bool msg_handled = false;
      ret = GetWindowEventTarget(GetParent())->HandleMouseMessage(
          message, w_param, l_param, &msg_handled);
@@ -41,10 +41,10 @@ index d2dd02a743a9bc908b6f8438ccac9dd85aa0a281..4f4de21e624925e422eb13b35021c42e
        handled = TRUE;
      }
 diff --git a/content/browser/renderer_host/render_widget_host_view_event_handler.cc b/content/browser/renderer_host/render_widget_host_view_event_handler.cc
-index 4e2075be4cf34e53a1dc5118d5daf5b893f90d63..18d0aabef1c47e7e14673b04fda9c2f6bd331550 100644
+index caaec4aabb9375099bb9b40c3b4e6b30d8857a02..2400a9fc4a2e8b8e6769513db7d092ca79052336 100644
 --- a/content/browser/renderer_host/render_widget_host_view_event_handler.cc
 +++ b/content/browser/renderer_host/render_widget_host_view_event_handler.cc
-@@ -640,7 +640,7 @@ bool RenderWidgetHostViewEventHandler::CanRendererHandleEvent(
+@@ -646,7 +646,7 @@ bool RenderWidgetHostViewEventHandler::CanRendererHandleEvent(
      case WM_NCXBUTTONDOWN:
      case WM_NCXBUTTONUP:
      case WM_NCXBUTTONDBLCLK:
@@ -54,10 +54,10 @@ index 4e2075be4cf34e53a1dc5118d5daf5b893f90d63..18d0aabef1c47e7e14673b04fda9c2f6
        break;
    }
 diff --git a/third_party/blink/renderer/core/layout/layout_object.cc b/third_party/blink/renderer/core/layout/layout_object.cc
-index d138360ca59f82c4f507d0a57d56bf262b4d56da..ad83cf7182e2b554bc96e67781a6904fd9653304 100644
+index f25b4e614ae8c74a6ed91dbbc9b974e0df571bc9..dd0f771d875a32ef54fab62ed57aeee38e5416d0 100644
 --- a/third_party/blink/renderer/core/layout/layout_object.cc
 +++ b/third_party/blink/renderer/core/layout/layout_object.cc
-@@ -2370,6 +2370,13 @@ void LayoutObject::StyleDidChange(StyleDifference diff,
+@@ -2400,6 +2400,13 @@ void LayoutObject::StyleDidChange(StyleDifference diff,
      AddSubtreePaintPropertyUpdateReason(
          SubtreePaintPropertyUpdateReason::kTransformStyleChanged);
    }
@@ -72,7 +72,7 @@ index d138360ca59f82c4f507d0a57d56bf262b4d56da..ad83cf7182e2b554bc96e67781a6904f
  
  void LayoutObject::ApplyPseudoStyleChanges(const ComputedStyle* old_style) {
 diff --git a/ui/events/blink/web_input_event_builders_win.cc b/ui/events/blink/web_input_event_builders_win.cc
-index 33bc7d3c448b67fd1acf2a97f5b99e2aa8eaad86..92bccd07480b55a22685a06d6117c06945e9d833 100644
+index 33bc7d3c448b67fd1acf2a97f5b99e2aa8eaad86..ccc733aef0857aecc3f2fe639a6bddcfcf67cd2d 100644
 --- a/ui/events/blink/web_input_event_builders_win.cc
 +++ b/ui/events/blink/web_input_event_builders_win.cc
 @@ -52,6 +52,10 @@ WebMouseEvent WebMouseEventBuilder::Build(
@@ -188,15 +188,15 @@ index 33bc7d3c448b67fd1acf2a97f5b99e2aa8eaad86..92bccd07480b55a22685a06d6117c069
 +      modifiers |= WebInputEvent::kBackButtonDown;
 +    if (wparam & MK_XBUTTON2)
 +      modifiers |= WebInputEvent::kForwardButtonDown;
-+  }  
++  }
  
    WebMouseEvent result(type, modifiers, time_stamp);
    result.pointer_type = pointer_type;
 diff --git a/ui/views/win/hwnd_message_handler.cc b/ui/views/win/hwnd_message_handler.cc
-index 0f1cf879163eb9bb3d3fc52c41c32f254f0682b9..9b862b6c3a866a7ec6ec7622b59331e5054cff91 100644
+index 77b9204e6bd50fd25fdf0edb276489fe67e4fcac..facaa1b99e39d6c508e919b4205eec340437375d 100644
 --- a/ui/views/win/hwnd_message_handler.cc
 +++ b/ui/views/win/hwnd_message_handler.cc
-@@ -806,8 +806,8 @@ void HWNDMessageHandler::ClearNativeFocus() {
+@@ -861,8 +861,8 @@ void HWNDMessageHandler::ClearNativeFocus() {
  }
  
  void HWNDMessageHandler::SetCapture() {
@@ -207,7 +207,7 @@ index 0f1cf879163eb9bb3d3fc52c41c32f254f0682b9..9b862b6c3a866a7ec6ec7622b59331e5
  }
  
  void HWNDMessageHandler::ReleaseCapture() {
-@@ -2921,11 +2921,19 @@ LRESULT HWNDMessageHandler::HandleMouseEventInternal(UINT message,
+@@ -2990,11 +2990,19 @@ LRESULT HWNDMessageHandler::HandleMouseEventInternal(UINT message,
    // There are cases where the code handling the message destroys the window,
    // so use the weak ptr to check if destruction occured or not.
    base::WeakPtr<HWNDMessageHandler> ref(msg_handler_weak_factory_.GetWeakPtr());
@@ -227,7 +227,7 @@ index 0f1cf879163eb9bb3d3fc52c41c32f254f0682b9..9b862b6c3a866a7ec6ec7622b59331e5
    if (!handled && message == WM_NCLBUTTONDOWN && w_param != HTSYSMENU &&
        w_param != HTCAPTION &&
        delegate_->GetFrameMode() == FrameMode::CUSTOM_DRAWN) {
-@@ -2937,12 +2945,6 @@ LRESULT HWNDMessageHandler::HandleMouseEventInternal(UINT message,
+@@ -3006,12 +3014,6 @@ LRESULT HWNDMessageHandler::HandleMouseEventInternal(UINT message,
      handled = true;
    }
  
@@ -240,7 +240,7 @@ index 0f1cf879163eb9bb3d3fc52c41c32f254f0682b9..9b862b6c3a866a7ec6ec7622b59331e5
    if (ref.get())
      SetMsgHandled(handled);
    return 0;
-@@ -3239,6 +3241,7 @@ bool HWNDMessageHandler::HandleMouseInputForCaption(unsigned int message,
+@@ -3316,6 +3318,7 @@ bool HWNDMessageHandler::HandleMouseInputForCaption(unsigned int message,
            should_handle_pending_ncl_button_down = false;
          }
        }
@@ -249,10 +249,10 @@ index 0f1cf879163eb9bb3d3fc52c41c32f254f0682b9..9b862b6c3a866a7ec6ec7622b59331e5
          l_param = MAKELPARAM(caption_left_button_click_pos_.x(),
                               caption_left_button_click_pos_.y());
 diff --git a/ui/wm/core/compound_event_filter.cc b/ui/wm/core/compound_event_filter.cc
-index 69ae9071d9349a5b0d7c3aa6fa52f251a547c2a3..f19c140eeb285e142dcd7453dd4df99ea1791573 100644
+index 624298a5b72a0eba5ba702142557650495e00d2f..06879e785a2940569a91e906e4a3fc720ecb5c38 100644
 --- a/ui/wm/core/compound_event_filter.cc
 +++ b/ui/wm/core/compound_event_filter.cc
-@@ -126,7 +126,10 @@ void CompoundEventFilter::UpdateCursor(aura::Window* target,
+@@ -101,7 +101,10 @@ void CompoundEventFilter::UpdateCursor(aura::Window* target,
        if (target->delegate()) {
          int window_component =
              target->delegate()->GetNonClientComponent(event->location());

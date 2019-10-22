@@ -5,10 +5,10 @@ Subject: throttling_prevention_passed_to_iframes
 
 
 diff --git a/content/browser/renderer_host/render_widget_host_impl.cc b/content/browser/renderer_host/render_widget_host_impl.cc
-index 553167fa07a3acee25434cfd71a968a112d56752..6759380c597b9e2875b01daa3440425c47d28713 100644
+index 29603fc302f32765deaebbd6199a9e460372cbb9..7dd2f4822048e7dcf1739927e7eb7ca9233c5b4a 100644
 --- a/content/browser/renderer_host/render_widget_host_impl.cc
 +++ b/content/browser/renderer_host/render_widget_host_impl.cc
-@@ -672,7 +672,27 @@ void RenderWidgetHostImpl::WasHidden() {
+@@ -676,7 +676,27 @@ void RenderWidgetHostImpl::WasHidden() {
    if (is_hidden_)
      return;
  

@@ -1,0 +1,32 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Heilig Benedek <benecene@gmail.com>
+Date: Mon, 21 Oct 2019 12:11:19 +0200
+Subject: remove-added-delay
+
+
+diff --git a/third_party/blink/renderer/platform/audio/audio_destination.cc b/third_party/blink/renderer/platform/audio/audio_destination.cc
+index ad2ac3c5a1541cc31cb228e9cb5b69baddb0b9a3..27aeaf4d15fb2c7209bbdeeefce5b0456be51fe2 100644
+--- a/third_party/blink/renderer/platform/audio/audio_destination.cc
++++ b/third_party/blink/renderer/platform/audio/audio_destination.cc
+@@ -221,18 +221,20 @@ void AudioDestination::RequestRender(size_t frames_requested,
+       frames_elapsed_ / static_cast<double>(web_audio_device_->SampleRate()) -
+       delay;
+   output_position_.timestamp = delay_timestamp;
+-  base::TimeTicks callback_request = base::TimeTicks::Now();
++  // base::TimeTicks callback_request = base::TimeTicks::Now();
+ 
+   for (size_t pushed_frames = 0; pushed_frames < frames_to_render;
+        pushed_frames += audio_utilities::kRenderQuantumFrames) {
+     // If platform buffer is more than two times longer than |framesToProcess|
+     // we do not want output position to get stuck so we promote it
+     // using the elapsed time from the moment it was initially obtained.
++#if 0
+     if (callback_buffer_size_ > audio_utilities::kRenderQuantumFrames * 2) {
+       double delta = (base::TimeTicks::Now() - callback_request).InSecondsF();
+       output_position_.position += delta;
+       output_position_.timestamp += delta;
+     }
++#endif
+ 
+     // Some implementations give only rough estimation of |delay| so
+     // we might have negative estimation |outputPosition| value.

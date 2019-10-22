@@ -1,14 +1,14 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Heilig Benedek <benecene@gmail.com>
-Date: Fri, 11 Oct 2019 14:54:44 +0200
+Date: Mon, 21 Oct 2019 11:31:54 +0200
 Subject: disable_bgcolor_dcheck
 
 
 diff --git a/content/browser/renderer_host/render_widget_host_view_base.cc b/content/browser/renderer_host/render_widget_host_view_base.cc
-index 34673d9ab62311c458a581f98865014f01c4bcc0..42756ff22d25b8b08e061588ee4cd64379039b3b 100644
+index 3dc776ac982fdd5d4d15bd3afdf208810340db4e..0ce2017496f94a321c850a936fbe769fe9c0f4b4 100644
 --- a/content/browser/renderer_host/render_widget_host_view_base.cc
 +++ b/content/browser/renderer_host/render_widget_host_view_base.cc
-@@ -306,8 +306,8 @@ void RenderWidgetHostViewBase::SetBackgroundColor(SkColor color) {
+@@ -303,8 +303,8 @@ void RenderWidgetHostViewBase::SetBackgroundColor(SkColor color) {
    // TODO(danakj): OPAQUE colors only make sense for main frame widgets,
    // as child frames are always transparent background. We should move this to
    // RenderView instead.

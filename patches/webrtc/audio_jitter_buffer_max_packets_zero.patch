@@ -4,19 +4,6 @@ Date: Tue, 8 Oct 2019 21:59:58 +0200
 Subject: audio_jitter_buffer_max_packets_zero
 
 
-diff --git a/api/peer_connection_interface.h b/api/peer_connection_interface.h
-index bdada31343eddd8e9e00d595650d22050e1bfc25..d344f2aae874b6ae91c4a56458173e21b498bad9 100644
---- a/api/peer_connection_interface.h
-+++ b/api/peer_connection_interface.h
-@@ -353,7 +353,7 @@ class RTC_EXPORT PeerConnectionInterface : public rtc::RefCountInterface {
-
-     static const int kUndefined = -1;
-     // Default maximum number of packets in the audio jitter buffer.
--    static const int kAudioJitterBufferMaxPackets = 200;
-+    static const int kAudioJitterBufferMaxPackets = 0;
-     // ICE connection receiving timeout for aggressive configuration.
-     static const int kAggressiveIceConnectionReceivingTimeout = 1000;
-
 diff --git a/media/engine/webrtc_voice_engine.cc b/media/engine/webrtc_voice_engine.cc
 index 55a2826ca9fb9f2e8bc01342d04ee68d807dc405..37e3df3fce54ef4c08e65a04d51b5974105f9be1 100644
 --- a/media/engine/webrtc_voice_engine.cc
@@ -30,16 +17,3 @@ index 55a2826ca9fb9f2e8bc01342d04ee68d807dc405..37e3df3fce54ef4c08e65a04d51b5974
    }
    if (options.audio_jitter_buffer_fast_accelerate) {
      RTC_LOG(LS_INFO) << "NetEq fast mode? "
-diff --git a/media/engine/webrtc_voice_engine.h b/media/engine/webrtc_voice_engine.h
-index eb9f3ad4f54ef6b992cebff4090f4a33027b9d57..1100cac6b431f2936283999856fa672a90a59bfd 100644
---- a/media/engine/webrtc_voice_engine.h
-+++ b/media/engine/webrtc_voice_engine.h
-@@ -130,7 +130,7 @@ class WebRtcVoiceEngine final : public VoiceEngineInterface {
-   absl::optional<bool> delay_agnostic_aec_;
-   absl::optional<bool> experimental_ns_;
-   // Jitter buffer settings for new streams.
--  size_t audio_jitter_buffer_max_packets_ = 200;
-+  size_t audio_jitter_buffer_max_packets_ = 0;
-   bool audio_jitter_buffer_fast_accelerate_ = false;
-   int audio_jitter_buffer_min_delay_ms_ = 0;
-   bool audio_jitter_buffer_enable_rtx_handling_ = false;
