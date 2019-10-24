@@ -1,0 +1,184 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Heilig Benedek <benecene@gmail.com>
+Date: Thu, 24 Oct 2019 15:38:01 +0200
+Subject: fixed_jitter_buffer
+
+
+diff --git a/audio/channel_receive.cc b/audio/channel_receive.cc
+index 603a52f79169ec7909c4c3d9c23287ecbe52eb55..9354130ceb5cb4c897005fd32521fcd2f882e37d 100644
+--- a/audio/channel_receive.cc
++++ b/audio/channel_receive.cc
+@@ -82,13 +82,15 @@ AudioCodingModule::Config AcmConfig(
+     rtc::scoped_refptr<AudioDecoderFactory> decoder_factory,
+     absl::optional<AudioCodecPairId> codec_pair_id,
+     size_t jitter_buffer_max_packets,
+-    bool jitter_buffer_fast_playout) {
++    bool jitter_buffer_fast_playout,
++    int min_delay_ms) {
+   AudioCodingModule::Config acm_config;
+   acm_config.decoder_factory = decoder_factory;
+   acm_config.neteq_config.codec_pair_id = codec_pair_id;
+   acm_config.neteq_config.max_packets_in_buffer = jitter_buffer_max_packets;
+   acm_config.neteq_config.enable_fast_accelerate = jitter_buffer_fast_playout;
+   acm_config.neteq_config.enable_muted_state = true;
++  acm_config.neteq_config.should_fix_target_level = min_delay_ms > 0;
+ 
+   return acm_config;
+ }
+@@ -471,7 +473,8 @@ ChannelReceive::ChannelReceive(
+       acm_receiver_(AcmConfig(decoder_factory,
+                               codec_pair_id,
+                               jitter_buffer_max_packets,
+-                              jitter_buffer_fast_playout)),
++                              jitter_buffer_fast_playout,
++                              jitter_buffer_min_delay_ms)),
+       _outputAudioLevel(),
+       ntp_estimator_(clock),
+       playout_timestamp_rtp_(0),
+diff --git a/call/audio_receive_stream.h b/call/audio_receive_stream.h
+index 0b764a19955248460dc86b2ba2a2026ad1b412b8..670b869a1075eb8b63e10d265ff9fc05aab6720e 100644
+--- a/call/audio_receive_stream.h
++++ b/call/audio_receive_stream.h
+@@ -129,6 +129,7 @@ class AudioReceiveStream {
+     bool jitter_buffer_fast_accelerate = false;
+     int jitter_buffer_min_delay_ms = 0;
+     bool jitter_buffer_enable_rtx_handling = false;
++    bool should_fix_target_level = false;
+ 
+     // Identifier for an A/V synchronization group. Empty string to disable.
+     // TODO(pbos): Synchronize streams in a sync group, not just one video
+diff --git a/modules/audio_coding/neteq/delay_manager.cc b/modules/audio_coding/neteq/delay_manager.cc
+index 5d6dc0066b0e85d2e5cbe6bf6f67b748c7aad6a9..83cc2667fb664362d5b489e42caf8e67b00d8824 100644
+--- a/modules/audio_coding/neteq/delay_manager.cc
++++ b/modules/audio_coding/neteq/delay_manager.cc
+@@ -159,7 +159,8 @@ DelayManager::DelayManager(size_t max_packets_in_buffer,
+                            DelayPeakDetector* peak_detector,
+                            const TickTimer* tick_timer,
+                            StatisticsCalculator* statistics,
+-                           std::unique_ptr<Histogram> histogram)
++                           std::unique_ptr<Histogram> histogram,
++                           bool should_fix_target_level)
+     : first_packet_received_(false),
+       max_packets_in_buffer_(max_packets_in_buffer),
+       histogram_(std::move(histogram)),
+@@ -183,7 +184,8 @@ DelayManager::DelayManager(size_t max_packets_in_buffer,
+       enable_rtx_handling_(enable_rtx_handling),
+       deceleration_target_level_offset_ms_(
+           GetDecelerationTargetLevelOffsetMs()),
+-      extra_delay_ms_(GetExtraDelayMs()) {
++      extra_delay_ms_(GetExtraDelayMs()),
++      should_fix_target_level_(should_fix_target_level) {
+   assert(peak_detector);  // Should never be NULL.
+   RTC_CHECK(histogram_);
+   RTC_DCHECK_GE(base_minimum_delay_ms_, 0);
+@@ -199,7 +201,8 @@ std::unique_ptr<DelayManager> DelayManager::Create(
+     bool enable_rtx_handling,
+     DelayPeakDetector* peak_detector,
+     const TickTimer* tick_timer,
+-    StatisticsCalculator* statistics) {
++    StatisticsCalculator* statistics,
++    bool should_fix_target_level) {
+   int quantile;
+   std::unique_ptr<Histogram> histogram;
+   HistogramMode mode;
+@@ -218,7 +221,7 @@ std::unique_ptr<DelayManager> DelayManager::Create(
+   return absl::make_unique<DelayManager>(
+       max_packets_in_buffer, base_minimum_delay_ms, quantile, mode,
+       enable_rtx_handling, peak_detector, tick_timer, statistics,
+-      std::move(histogram));
++      std::move(histogram), should_fix_target_level);
+ }
+ 
+ DelayManager::~DelayManager() {}
+@@ -305,10 +308,15 @@ int DelayManager::Update(uint16_t sequence_number,
+         break;
+       }
+     }
+-    // Calculate new |target_level_| based on updated statistics.
+-    target_level_ = CalculateTargetLevel(iat_packets, reordered);
+-
+-    LimitTargetLevel();
++    if (should_fix_target_level_) {
++      target_level_ = max_packets_in_buffer_ << 8;
++      target_level_ = std::max(target_level_, 1 << 8);
++    } if (!should_fix_target_level_) {
++      // Calculate new |target_level_| based on updated statistics.
++      target_level_ = CalculateTargetLevel(iat_packets, reordered);
++
++      LimitTargetLevel();
++    }
+   }  // End if (packet_len_ms > 0).
+ 
+   if (enable_rtx_handling_ && reordered &&
+@@ -442,7 +450,11 @@ void DelayManager::Reset() {
+   histogram_->Reset();
+   delay_history_.clear();
+   base_target_level_ = 4;
+-  target_level_ = base_target_level_ << 8;
++  if (should_fix_target_level_) {
++    target_level_ = max_packets_in_buffer_ << 8;
++  } else {
++    target_level_ = base_target_level_ << 8;
++  }
+   packet_iat_stopwatch_ = tick_timer_->GetNewStopwatch();
+   last_pack_cng_or_dtmf_ = 1;
+ }
+diff --git a/modules/audio_coding/neteq/delay_manager.h b/modules/audio_coding/neteq/delay_manager.h
+index 642de4db78d50fa007ac7d19fae72f97c4594ae6..f6bf49e8375d2c981a0cac0b8690a89cca07dc32 100644
+--- a/modules/audio_coding/neteq/delay_manager.h
++++ b/modules/audio_coding/neteq/delay_manager.h
+@@ -42,7 +42,8 @@ class DelayManager {
+                DelayPeakDetector* peak_detector,
+                const TickTimer* tick_timer,
+                StatisticsCalculator* statistics,
+-               std::unique_ptr<Histogram> histogram);
++               std::unique_ptr<Histogram> histogram,
++               bool should_fix_target_level);
+ 
+   // Create a DelayManager object. Notify the delay manager that the packet
+   // buffer can hold no more than |max_packets_in_buffer| packets (i.e., this
+@@ -54,7 +55,8 @@ class DelayManager {
+                                               bool enable_rtx_handling,
+                                               DelayPeakDetector* peak_detector,
+                                               const TickTimer* tick_timer,
+-                                              StatisticsCalculator* statistics);
++                                              StatisticsCalculator* statistics,
++                                              bool should_fix_target_level);
+ 
+   virtual ~DelayManager();
+ 
+@@ -211,6 +213,8 @@ class DelayManager {
+   const absl::optional<int> deceleration_target_level_offset_ms_;
+   const absl::optional<int> extra_delay_ms_;
+ 
++  bool should_fix_target_level_;
++
+   RTC_DISALLOW_COPY_AND_ASSIGN(DelayManager);
+ };
+ 
+diff --git a/modules/audio_coding/neteq/include/neteq.h b/modules/audio_coding/neteq/include/neteq.h
+index 0224b37765425a31051b0f90d9d6bdbceba1a8c8..e379508da494510464d0190a18746b5d92a4e63c 100644
+--- a/modules/audio_coding/neteq/include/neteq.h
++++ b/modules/audio_coding/neteq/include/neteq.h
+@@ -139,6 +139,7 @@ class NetEq {
+     bool enable_rtx_handling = false;
+     absl::optional<AudioCodecPairId> codec_pair_id;
+     bool for_test_no_time_stretching = false;  // Use only for testing.
++    bool should_fix_target_level = false;
+   };
+ 
+   enum ReturnCodes { kOK = 0, kFail = -1 };
+diff --git a/modules/audio_coding/neteq/neteq_impl.cc b/modules/audio_coding/neteq/neteq_impl.cc
+index f17884224d50d13cd6cf28162ada266692d53f02..123e20b132e9aa6bdcfcd1ce84aa784ff872f2e6 100644
+--- a/modules/audio_coding/neteq/neteq_impl.cc
++++ b/modules/audio_coding/neteq/neteq_impl.cc
+@@ -75,7 +75,8 @@ NetEqImpl::Dependencies::Dependencies(
+                                          config.enable_rtx_handling,
+                                          delay_peak_detector.get(),
+                                          tick_timer.get(),
+-                                         stats.get())),
++                                         stats.get(),
++                                         config.should_fix_target_level)),
+       dtmf_buffer(new DtmfBuffer(config.sample_rate_hz)),
+       dtmf_tone_generator(new DtmfToneGenerator),
+       packet_buffer(

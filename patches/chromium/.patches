@@ -85,5 +85,5 @@ throttling_prevention_passed_to_iframes.patch
 force_integrated_gpu.patch
 allow_handling_of_caption_mouse_events.patch
 disable_bgcolor_dcheck.patch
-reuse-vp8-objects.patch
 remove-added-delay.patch
+reuse_vp8_objects_and_vector_freezes.patch

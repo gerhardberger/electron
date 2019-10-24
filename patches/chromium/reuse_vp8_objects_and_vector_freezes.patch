@@ -1,0 +1,376 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Heilig Benedek <benecene@gmail.com>
+Date: Thu, 24 Oct 2019 15:36:44 +0200
+Subject: reuse_vp8_objects_and_vector_freezes
+
+
+diff --git a/third_party/blink/renderer/modules/webaudio/audio_worklet_global_scope.cc b/third_party/blink/renderer/modules/webaudio/audio_worklet_global_scope.cc
+index ae1686cc67737ecbff773c3e5b500952126a01b0..eec158094a583c6c3645a93ede4d71495d8fe359 100644
+--- a/third_party/blink/renderer/modules/webaudio/audio_worklet_global_scope.cc
++++ b/third_party/blink/renderer/modules/webaudio/audio_worklet_global_scope.cc
+@@ -174,12 +174,14 @@ AudioWorkletProcessor* AudioWorkletGlobalScope::CreateProcessor(
+ 
+ bool AudioWorkletGlobalScope::Process(
+     AudioWorkletProcessor* processor,
+-    Vector<AudioBus*>* input_buses,
+-    Vector<AudioBus*>* output_buses,
++    std::vector<AudioBus*>* input_buses,
++    std::vector<AudioBus*>* output_buses,
+     HashMap<String, std::unique_ptr<AudioFloatArray>>* param_value_map) {
+   CHECK_GE(input_buses->size(), 0u);
+   CHECK_GE(output_buses->size(), 0u);
+ 
++  TRACE_EVENT0("webaudio", "AudioWorkletGlobalScope::Process");
++
+   ScriptState* script_state = ScriptController()->GetScriptState();
+   ScriptState::Scope scope(script_state);
+ 
+@@ -198,7 +200,18 @@ bool AudioWorkletGlobalScope::Process(
+   // is no need to externalize the array buffers.
+ 
+   // 1st arg of JS callback: inputs
+-  v8::Local<v8::Array> inputs = v8::Array::New(isolate, input_buses->size());
++  v8::Local<v8::Array> inputs =
++      v8::Local<v8::Array>::New(isolate, processor->inputs_);
++
++  // Check if we have already a presistent object with same length.
++  if (inputs.IsEmpty() || inputs->Length() != input_buses->size()) {
++    // Create new persistent refernce to reuse it accross Process() calls.
++    processor->inputs_.Reset(
++        isolate,
++        v8::Array::New(isolate, static_cast<uint32_t>(input_buses->size())));
++    inputs = v8::Local<v8::Array>::New(isolate, processor->inputs_);
++  }
++
+   uint32_t input_bus_index = 0;
+   for (auto* const input_bus : *input_buses) {
+     // If |input_bus| is null, then the input is not connected, and
+@@ -207,25 +220,50 @@ bool AudioWorkletGlobalScope::Process(
+     unsigned number_of_channels = input_bus ? input_bus->NumberOfChannels() : 1;
+     size_t bus_length = input_bus ? input_bus->length() : 0;
+ 
+-    v8::Local<v8::Array> channels = v8::Array::New(isolate, number_of_channels);
+     bool success;
+-    if (!inputs
+-             ->CreateDataProperty(current_context, input_bus_index++, channels)
+-             .To(&success)) {
+-      return false;
++    v8::Local<v8::Value> value;
++    v8::Local<v8::Array> channels;
++
++    // Check if we can reuse current object.
++    if (inputs->Get(current_context, input_bus_index).ToLocal(&value) &&
++        value->IsArray()) {
++      channels =
++          value->ToObject(current_context).ToLocalChecked().As<v8::Array>();
+     }
+-    for (uint32_t channel_index = 0; channel_index < number_of_channels;
+-         ++channel_index) {
+-      v8::Local<v8::ArrayBuffer> array_buffer =
+-          v8::ArrayBuffer::New(isolate, bus_length * sizeof(float));
+-      v8::Local<v8::Float32Array> float32_array =
+-          v8::Float32Array::New(array_buffer, 0, bus_length);
+-      if (!channels
+-               ->CreateDataProperty(current_context, channel_index,
+-                                    float32_array)
++    if (channels.IsEmpty() || channels->Length() != number_of_channels) {
++      channels = v8::Array::New(isolate, number_of_channels);
++
++      if (!inputs
++               ->CreateDataProperty(current_context, input_bus_index, channels)
+                .To(&success)) {
+         return false;
+       }
++    }
++    input_bus_index++;
++    for (uint32_t channel_index = 0; channel_index < number_of_channels;
++         ++channel_index) {
++      v8::Local<v8::ArrayBuffer> array_buffer;
++      v8::Local<v8::Float32Array> float32_array;
++
++      if (channels->Get(current_context, channel_index).ToLocal(&value) &&
++          value->IsFloat32Array()) {
++        float32_array = value->ToObject(current_context)
++                            .ToLocalChecked()
++                            .As<v8::Float32Array>();
++        array_buffer = float32_array->Buffer();
++      }
++      if (float32_array.IsEmpty() || float32_array->Length() != bus_length) {
++        array_buffer =
++            v8::ArrayBuffer::New(isolate, bus_length * sizeof(float));
++        float32_array = v8::Float32Array::New(array_buffer, 0, bus_length);
++
++        if (!channels
++                 ->CreateDataProperty(current_context, channel_index,
++                                      float32_array)
++                 .To(&success)) {
++          return false;
++        }
++      }
+       const v8::ArrayBuffer::Contents& contents = array_buffer->GetContents();
+       if (input_bus) {
+         memcpy(contents.Data(), input_bus->Channel(channel_index)->Data(),
+@@ -235,45 +273,85 @@ bool AudioWorkletGlobalScope::Process(
+   }
+ 
+   // 2nd arg of JS callback: outputs
+-  v8::Local<v8::Array> outputs = v8::Array::New(isolate, output_buses->size());
++  v8::Local<v8::Array> outputs =
++      v8::Local<v8::Array>::New(isolate, processor->outputs_);
++
++  // Check if we have already a presistent object with same length.
++  if (outputs.IsEmpty() || outputs->Length() != output_buses->size()) {
++    // Create new persistent refernce to reuse it accross Process() calls.
++    processor->outputs_.Reset(
++        isolate,
++        v8::Array::New(isolate, static_cast<uint32_t>(output_buses->size())));
++    outputs = v8::Local<v8::Array>::New(isolate, processor->outputs_);
++  }
++
+   uint32_t output_bus_counter = 0;
+ 
+   // |output_array_buffers| stores underlying array buffers so that we can copy
+   // them back to |output_buses|.
+-  Vector<Vector<v8::Local<v8::ArrayBuffer>>> output_array_buffers;
+-  output_array_buffers.ReserveInitialCapacity(output_buses->size());
++  std::vector<std::vector<v8::Local<v8::ArrayBuffer>>> output_array_buffers(
++      static_cast<uint32_t>(output_buses->size()));
+ 
+   for (auto* const output_bus : *output_buses) {
+-    output_array_buffers.UncheckedAppend(Vector<v8::Local<v8::ArrayBuffer>>());
+-    output_array_buffers.back().ReserveInitialCapacity(
+-        output_bus->NumberOfChannels());
+-    v8::Local<v8::Array> channels =
+-        v8::Array::New(isolate, output_bus->NumberOfChannels());
+     bool success;
+-    if (!outputs
+-             ->CreateDataProperty(current_context, output_bus_counter++,
+-                                  channels)
+-             .To(&success)) {
+-      return false;
++    v8::Local<v8::Value> value;
++    v8::Local<v8::Array> channels;
++
++    // Check if we can reuse current object.
++    if (outputs->Get(current_context, output_bus_counter).ToLocal(&value) &&
++        value->IsArray()) {
++      channels =
++          value->ToObject(current_context).ToLocalChecked().As<v8::Array>();
+     }
+-    for (uint32_t channel_index = 0;
+-         channel_index < output_bus->NumberOfChannels(); ++channel_index) {
+-      v8::Local<v8::ArrayBuffer> array_buffer =
+-          v8::ArrayBuffer::New(isolate, output_bus->length() * sizeof(float));
+-      v8::Local<v8::Float32Array> float32_array =
+-          v8::Float32Array::New(array_buffer, 0, output_bus->length());
+-      if (!channels
+-               ->CreateDataProperty(current_context, channel_index,
+-                                    float32_array)
++    if (channels.IsEmpty() ||
++        channels->Length() != output_bus->NumberOfChannels()) {
++      channels = v8::Array::New(isolate, output_bus->NumberOfChannels());
++
++      if (!outputs
++               ->CreateDataProperty(current_context, output_bus_counter,
++                                    channels)
+                .To(&success)) {
+         return false;
+       }
+-      output_array_buffers.back().UncheckedAppend(array_buffer);
+     }
++
++    for (uint32_t channel_index = 0;
++         channel_index < output_bus->NumberOfChannels(); ++channel_index) {
++      v8::Local<v8::ArrayBuffer> array_buffer;
++      v8::Local<v8::Float32Array> float32_array;
++
++      if (channels->Get(current_context, channel_index).ToLocal(&value) &&
++          value->IsFloat32Array()) {
++        float32_array = value->ToObject(current_context)
++                            .ToLocalChecked()
++                            .As<v8::Float32Array>();
++        array_buffer = float32_array->Buffer();
++      }
++      if (float32_array.IsEmpty() ||
++          float32_array->Length() != output_bus->length()) {
++        array_buffer =
++            v8::ArrayBuffer::New(isolate, output_bus->length() * sizeof(float));
++        float32_array =
++            v8::Float32Array::New(array_buffer, 0, output_bus->length());
++
++        if (!channels
++                 ->CreateDataProperty(current_context, channel_index,
++                                      float32_array)
++                 .To(&success)) {
++          return false;
++        }
++      }
++
++      output_array_buffers[output_bus_counter].push_back(array_buffer);
++    }
++    output_bus_counter++;
+   }
+ 
++  if (processor->params_.IsEmpty())
++    processor->params_.Reset(isolate, v8::Object::New(isolate));
+   // 3rd arg of JS callback: param_values
+-  v8::Local<v8::Object> param_values = v8::Object::New(isolate);
++  v8::Local<v8::Object> param_values =
++      v8::Local<v8::Object>::New(isolate, processor->params_);
+   for (const auto& param : *param_value_map) {
+     const String& param_name = param.key;
+     const AudioFloatArray* param_array = param.value.get();
+@@ -288,19 +366,34 @@ bool AudioWorkletGlobalScope::Process(
+         break;
+       }
+     }
+-
+-    v8::Local<v8::ArrayBuffer> array_buffer =
+-        v8::ArrayBuffer::New(isolate, array_size * sizeof(float));
+-    v8::Local<v8::Float32Array> float32_array =
+-        v8::Float32Array::New(array_buffer, 0, array_size);
+     bool success;
+-    if (!param_values
+-             ->CreateDataProperty(current_context,
+-                                  V8String(isolate, param_name.IsolatedCopy()),
+-                                  float32_array)
+-             .To(&success)) {
+-      return false;
++    v8::Local<v8::Value> value;
++    v8::Local<v8::Array> channels;
++    v8::Local<v8::ArrayBuffer> array_buffer;
++    v8::Local<v8::Float32Array> float32_array;
++
++    if (param_values
++            ->Get(current_context, V8String(isolate, param_name.IsolatedCopy()))
++            .ToLocal(&value) &&
++        value->IsFloat32Array()) {
++      float32_array = value->ToObject(current_context)
++                          .ToLocalChecked()
++                          .As<v8::Float32Array>();
++      array_buffer = float32_array->Buffer();
+     }
++    if (float32_array.IsEmpty() || float32_array->Length() != array_size) {
++      array_buffer = v8::ArrayBuffer::New(isolate, array_size * sizeof(float));
++      float32_array = v8::Float32Array::New(array_buffer, 0, array_size);
++
++      if (!param_values
++               ->CreateDataProperty(
++                   current_context,
++                   V8String(isolate, param_name.IsolatedCopy()), float32_array)
++               .To(&success)) {
++        return false;
++      }
++    }
++
+     const v8::ArrayBuffer::Contents& contents = array_buffer->GetContents();
+     memcpy(contents.Data(), param_array->Data(), array_size * sizeof(float));
+   }
+diff --git a/third_party/blink/renderer/modules/webaudio/audio_worklet_global_scope.h b/third_party/blink/renderer/modules/webaudio/audio_worklet_global_scope.h
+index 6166e0bc986ede0bc8c277b79a3a89c78c363689..f0443a2b639820c3fb7f09e691d45aa8e52d3ea2 100644
+--- a/third_party/blink/renderer/modules/webaudio/audio_worklet_global_scope.h
++++ b/third_party/blink/renderer/modules/webaudio/audio_worklet_global_scope.h
+@@ -81,8 +81,8 @@ class MODULES_EXPORT AudioWorkletGlobalScope final : public WorkletGlobalScope {
+   // AudioWorkletProcessor, along with given AudioBuffer from the audio graph.
+   bool Process(
+       AudioWorkletProcessor*,
+-      Vector<AudioBus*>* input_buses,
+-      Vector<AudioBus*>* output_buses,
++      std::vector<AudioBus*>* input_buses,
++      std::vector<AudioBus*>* output_buses,
+       HashMap<String, std::unique_ptr<AudioFloatArray>>* param_value_map);
+ 
+   AudioWorkletProcessorDefinition* FindDefinition(const String& name);
+diff --git a/third_party/blink/renderer/modules/webaudio/audio_worklet_node.cc b/third_party/blink/renderer/modules/webaudio/audio_worklet_node.cc
+index 858b0250877e6bc674ca71a430eb343fcc71ffb1..323f8c86dd5547af7c27072a8c397bf667232152 100644
+--- a/third_party/blink/renderer/modules/webaudio/audio_worklet_node.cc
++++ b/third_party/blink/renderer/modules/webaudio/audio_worklet_node.cc
+@@ -85,12 +85,14 @@ scoped_refptr<AudioWorkletHandler> AudioWorkletHandler::Create(
+ void AudioWorkletHandler::Process(uint32_t frames_to_process) {
+   DCHECK(Context()->IsAudioThread());
+ 
++  TRACE_EVENT0("webaudio", "AudioWorkletHandler::Process");
++
+   // Render and update the node state when the processor is ready with no error.
+   // We also need to check if the global scope is valid before we request
+   // the rendering in the AudioWorkletGlobalScope.
+   if (processor_ && !processor_->hasErrorOccured()) {
+-    Vector<AudioBus*> input_buses;
+-    Vector<AudioBus*> output_buses;
++    std::vector<AudioBus*> input_buses;
++    std::vector<AudioBus*> output_buses;
+     for (unsigned i = 0; i < NumberOfInputs(); ++i) {
+       // If the input is not connected, inform the processor of that
+       // fact by setting the bus to null.
+diff --git a/third_party/blink/renderer/modules/webaudio/audio_worklet_processor.cc b/third_party/blink/renderer/modules/webaudio/audio_worklet_processor.cc
+index 8c19bd3b628a0ca9eb1b418acbfff30410329e93..61870679d978f4bfcd9080e42b0b644c14ffcbc3 100644
+--- a/third_party/blink/renderer/modules/webaudio/audio_worklet_processor.cc
++++ b/third_party/blink/renderer/modules/webaudio/audio_worklet_processor.cc
+@@ -34,8 +34,8 @@ AudioWorkletProcessor::AudioWorkletProcessor(
+     : global_scope_(global_scope), processor_port_(port), name_(name) {}
+ 
+ bool AudioWorkletProcessor::Process(
+-    Vector<AudioBus*>* input_buses,
+-    Vector<AudioBus*>* output_buses,
++    std::vector<AudioBus*>* input_buses,
++    std::vector<AudioBus*>* output_buses,
+     HashMap<String, std::unique_ptr<AudioFloatArray>>* param_value_map) {
+   DCHECK(global_scope_->IsContextThread());
+   DCHECK(!hasErrorOccured());
+diff --git a/third_party/blink/renderer/modules/webaudio/audio_worklet_processor.h b/third_party/blink/renderer/modules/webaudio/audio_worklet_processor.h
+index e5e9aedcac02658af50f1c7f1da2ff5a49f0ecd6..b20a920ff1fd0395573e0c195357d80050ceb32d 100644
+--- a/third_party/blink/renderer/modules/webaudio/audio_worklet_processor.h
++++ b/third_party/blink/renderer/modules/webaudio/audio_worklet_processor.h
+@@ -45,8 +45,8 @@ class MODULES_EXPORT AudioWorkletProcessor : public ScriptWrappable {
+ 
+   // |AudioWorkletHandler| invokes this method to process audio.
+   bool Process(
+-      Vector<AudioBus*>* input_buses,
+-      Vector<AudioBus*>* output_buses,
++      std::vector<AudioBus*>* input_buses,
++      std::vector<AudioBus*>* output_buses,
+       HashMap<String, std::unique_ptr<AudioFloatArray>>* param_value_map);
+ 
+   const String& Name() const { return name_; }
+@@ -61,6 +61,8 @@ class MODULES_EXPORT AudioWorkletProcessor : public ScriptWrappable {
+   void Trace(blink::Visitor*) override;
+ 
+  private:
++  friend class AudioWorkletGlobalScope;
++
+   Member<AudioWorkletGlobalScope> global_scope_;
+   Member<MessagePort> processor_port_;
+ 
+@@ -68,6 +70,10 @@ class MODULES_EXPORT AudioWorkletProcessor : public ScriptWrappable {
+ 
+   AudioWorkletProcessorErrorState error_state_ =
+       AudioWorkletProcessorErrorState::kNoError;
++
++  v8::UniquePersistent<v8::Array> inputs_;
++  v8::UniquePersistent<v8::Array> outputs_;
++  v8::UniquePersistent<v8::Object> params_;
+ };
+ 
+ }  // namespace blink
+diff --git a/third_party/blink/renderer/platform/audio/push_pull_fifo.cc b/third_party/blink/renderer/platform/audio/push_pull_fifo.cc
+index 2c4517f6d6e4be398c3ccdd493425383d152edde..be28f5df4f26a85f1f218475dae91b589a1f0395 100644
+--- a/third_party/blink/renderer/platform/audio/push_pull_fifo.cc
++++ b/third_party/blink/renderer/platform/audio/push_pull_fifo.cc
+@@ -105,6 +105,8 @@ void PushPullFIFO::Push(const AudioBus* input_bus) {
+   // Update the number of frames available in FIFO.
+   frames_available_ =
+       std::min(frames_available_ + input_bus_length, fifo_length_);
++  TRACE_COUNTER1("webaudio", "PushPullFIFO.push_frames_available",
++                 frames_available_);
+   DCHECK_EQ((index_read_ + frames_available_) % fifo_length_, index_write_);
+ }
+ 
+@@ -196,6 +198,8 @@ size_t PushPullFIFO::Pull(AudioBus* output_bus, size_t frames_requested) {
+ 
+   // Update the number of frames in FIFO.
+   frames_available_ -= frames_to_fill;
++  TRACE_COUNTER1("webaudio", "PushPullFIFO.pull_frames_available",
++                 frames_available_);
+   DCHECK_EQ((index_read_ + frames_available_) % fifo_length_, index_write_);
+ 
+   pull_count_++;
