@@ -199,6 +199,8 @@ class TopLevelWindow : public mate::TrackableObject<TopLevelWindow>,
   void PreviewFile(const std::string& path, mate::Arguments* args);
   void CloseFilePreview();
   void SetGTKDarkThemeEnabled(bool use_dark_theme);
+  bool HasThickFrame();
+  void SetThickFrame(bool thick_frame);
 
   // Public getters of NativeWindow.
   v8::Local<v8::Value> GetContentView() const;

@@ -870,6 +870,14 @@ void TopLevelWindow::SetGTKDarkThemeEnabled(bool use_dark_theme) {
   window_->SetGTKDarkThemeEnabled(use_dark_theme);
 }
 
+bool TopLevelWindow::HasThickFrame() {
+  return window_->HasThickFrame();
+}
+
+void TopLevelWindow::SetThickFrame(bool thick_frame) {
+  window_->SetThickFrame(thick_frame);
+}
+
 v8::Local<v8::Value> TopLevelWindow::GetContentView() const {
   if (content_view_.IsEmpty())
     return v8::Null(isolate());
@@ -1198,6 +1206,8 @@ void TopLevelWindow::BuildPrototype(v8::Isolate* isolate,
       .SetMethod("setThumbnailToolTip", &TopLevelWindow::SetThumbnailToolTip)
       .SetMethod("setAppDetails", &TopLevelWindow::SetAppDetails)
 #endif
+      .SetMethod("hasThickFrame", &TopLevelWindow::HasThickFrame)
+      .SetMethod("setThickFrame", &TopLevelWindow::SetThickFrame)
       .SetProperty("id", &TopLevelWindow::GetID);
 }
 

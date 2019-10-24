@@ -1390,6 +1390,16 @@ void NativeWindowViews::MoveBehindTaskBarIfNeeded() {
   // TODO(julien.isorce): Implement X11 case.
 }
 
+bool NativeWindowViews::HasThickFrame() {
+  return (::GetWindowLong(GetAcceleratedWidget(), GWL_STYLE) & WS_THICKFRAME) !=
+         0;
+}
+
+void NativeWindowViews::SetThickFrame(bool thick_frame) {
+  thick_frame_ = thick_frame;
+  FlipWindowStyle(GetAcceleratedWidget(), thick_frame_, WS_THICKFRAME);
+}
+
 // static
 NativeWindow* NativeWindow::Create(const mate::Dictionary& options,
                                    NativeWindow* parent) {

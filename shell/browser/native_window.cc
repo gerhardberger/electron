@@ -582,6 +582,12 @@ const views::Widget* NativeWindow::GetWidget() const {
   return widget();
 }
 
+bool NativeWindow::HasThickFrame() {
+  return false;
+}
+
+void NativeWindow::SetThickFrame(bool thick_frame) {}
+
 // static
 void NativeWindowRelay::CreateForWebContents(
     content::WebContents* web_contents,

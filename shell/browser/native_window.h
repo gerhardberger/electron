@@ -294,6 +294,9 @@ class NativeWindow : public base::SupportsUserData,
 
   std::list<NativeBrowserView*> browser_views() const { return browser_views_; }
 
+  virtual bool HasThickFrame();
+  virtual void SetThickFrame(bool thick_frame);
+
  protected:
   NativeWindow(const mate::Dictionary& options, NativeWindow* parent);
 

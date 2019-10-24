@@ -157,6 +157,9 @@ class NativeWindowViews : public NativeWindow,
 
 #if defined(OS_WIN)
   TaskbarHost& taskbar_host() { return taskbar_host_; }
+
+  bool HasThickFrame() override;
+  void SetThickFrame(bool thick_frame) override;
 #endif
 
  private:
