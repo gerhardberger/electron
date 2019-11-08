@@ -101,15 +101,20 @@ void BrowserWindow::UpdateDraggableRegions(
 
   // Draggable regions is implemented by having the whole web view draggable
   // (mouseDownCanMoveWindow) and overlaying regions that are not draggable.
+  std::vector<mojom::DraggableRegionPtr> clonedRegions;
+  for (const auto& r : regions) {
+    clonedRegions.push_back(r.Clone());
+  }
+
   draggable_regions_.clear();
-  for (const auto& r : regions)
+  for (const auto& r : clonedRegions)
     draggable_regions_.push_back(r.Clone());
   std::vector<gfx::Rect> drag_exclude_rects;
-  if (regions.empty()) {
+  if (clonedRegions.empty()) {
     drag_exclude_rects.push_back(gfx::Rect(0, 0, webViewWidth, webViewHeight));
   } else {
     drag_exclude_rects = CalculateNonDraggableRegions(
-        DraggableRegionsToSkRegion(regions), webViewWidth, webViewHeight);
+        DraggableRegionsToSkRegion(clonedRegions), webViewWidth, webViewHeight);
   }
 
   auto browser_views = window_->browser_views();
