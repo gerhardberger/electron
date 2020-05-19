@@ -647,6 +647,10 @@ App::App() {
       content::PROCESS_TYPE_BROWSER, base::GetCurrentProcessHandle(),
       base::ProcessMetrics::CreateCurrentProcessMetrics());
   app_metrics_[pid] = std::move(process_metric);
+
+#if defined(OS_MAC)
+  SetupAudioEventPassing();
+#endif
 }
 
 App::~App() {
@@ -1518,6 +1522,100 @@ std::string App::GetUserAgentFallback() {
   return ElectronBrowserClient::Get()->GetUserAgent();
 }
 
+#if defined(OS_WIN)
+IAudioEndpointVolume* GetEndpointVolume(bool is_output) {
+  IMMDeviceEnumerator* deviceEnumerator = NULL;
+  CoCreateInstance(__uuidof(MMDeviceEnumerator), NULL, CLSCTX_INPROC_SERVER,
+                   __uuidof(IMMDeviceEnumerator), (LPVOID*)&deviceEnumerator);
+  IMMDevice* defaultDevice = NULL;
+
+  deviceEnumerator->GetDefaultAudioEndpoint(is_output ? eRender : eCapture,
+                                            eConsole, &defaultDevice);
+  deviceEnumerator->Release();
+  deviceEnumerator = NULL;
+
+  IAudioEndpointVolume* endpointVolume = NULL;
+  defaultDevice->Activate(__uuidof(IAudioEndpointVolume), CLSCTX_INPROC_SERVER,
+                          NULL, (LPVOID*)&endpointVolume);
+  defaultDevice->Release();
+  defaultDevice = NULL;
+
+  return endpointVolume;
+}
+
+IAudioEndpointVolume* GetOutputEndpointVolume() {
+  return GetEndpointVolume(true);
+}
+
+IAudioEndpointVolume* GetInputEndpointVolume() {
+  return GetEndpointVolume(false);
+}
+
+float App::GetSystemOutputVolume() {
+  IAudioEndpointVolume* endpointVolume = GetOutputEndpointVolume();
+  float currentVolume = 0;
+
+  endpointVolume->GetMasterVolumeLevelScalar(&currentVolume);
+
+  endpointVolume->Release();
+  return currentVolume;
+}
+
+float App::GetSystemInputVolume() {
+  IAudioEndpointVolume* endpointVolume = GetInputEndpointVolume();
+  float currentVolume = 0;
+
+  endpointVolume->GetMasterVolumeLevelScalar(&currentVolume);
+
+  endpointVolume->Release();
+  return currentVolume;
+}
+
+void App::SetSystemOutputVolume(float volume) {
+  IAudioEndpointVolume* endpointVolume = GetOutputEndpointVolume();
+  endpointVolume->SetMasterVolumeLevelScalar(volume, NULL);
+  endpointVolume->Release();
+}
+
+void App::SetSystemInputVolume(float volume) {
+  IAudioEndpointVolume* endpointVolume = GetInputEndpointVolume();
+  endpointVolume->SetMasterVolumeLevelScalar(volume, NULL);
+  endpointVolume->Release();
+}
+
+void App::SetupAudioEventPassing() {
+  CoInitialize(NULL);
+}
+
+void App::TeardownAudioEventPassing() {
+  CoUninitialize();
+}
+
+bool App::IsSystemOutputMuted() {
+  IAudioEndpointVolume* endpointVolume = GetOutputEndpointVolume();
+  BOOL muted = FALSE;
+  endpointVolume->GetMute(&muted);
+  return muted == TRUE;
+}
+
+bool App::IsSystemInputMuted() {
+  IAudioEndpointVolume* endpointVolume = GetInputEndpointVolume();
+  BOOL muted = FALSE;
+  endpointVolume->GetMute(&muted);
+  return muted == TRUE;
+}
+
+void App::SetSystemOutputMuted(bool muted) {
+  IAudioEndpointVolume* endpointVolume = GetOutputEndpointVolume();
+  endpointVolume->SetMute(muted, NULL);
+}
+
+void App::SetSystemInputMuted(bool muted) {
+  IAudioEndpointVolume* endpointVolume = GetInputEndpointVolume();
+  endpointVolume->SetMute(muted, NULL);
+}
+#endif
+
 #if defined(OS_MAC)
 bool App::MoveToApplicationsFolder(gin_helper::ErrorThrower thrower,
                                    gin::Arguments* args) {
@@ -1753,9 +1851,19 @@ gin::ObjectTemplateBuilder App::GetObjectTemplateBuilder(v8::Isolate* isolate) {
                  base::BindRepeating(&Browser::ResignCurrentActivity, browser))
       .SetMethod("updateCurrentActivity",
                  base::BindRepeating(&Browser::UpdateCurrentActivity, browser))
+#endif
+#if defined(OS_MAC) || defined(OS_WIN)
       .SetMethod("moveToApplicationsFolder", &App::MoveToApplicationsFolder)
       .SetMethod("isInApplicationsFolder", &App::IsInApplicationsFolder)
       .SetMethod("setActivationPolicy", &App::SetActivationPolicy)
+      .SetMethod("getSystemOutputVolume", &App::GetSystemOutputVolume)
+      .SetMethod("getSystemInputVolume", &App::GetSystemInputVolume)
+      .SetMethod("setSystemOutputVolume", &App::SetSystemOutputVolume)
+      .SetMethod("setSystemInputVolume", &App::SetSystemInputVolume)
+      .SetMethod("isSystemOutputMuted", &App::IsSystemOutputMuted)
+      .SetMethod("isSystemInputMuted", &App::IsSystemInputMuted)
+      .SetMethod("setSystemOutputMuted", &App::SetSystemOutputMuted)
+      .SetMethod("setSystemInputMuted", &App::SetSystemInputMuted)
 #endif
       .SetMethod("setAboutPanelOptions",
                  base::BindRepeating(&Browser::SetAboutPanelOptions, browser))

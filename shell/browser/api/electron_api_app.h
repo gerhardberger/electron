@@ -217,6 +217,19 @@ class App : public ElectronBrowserClient::Delegate,
   void SetUserAgentFallback(const std::string& user_agent);
   std::string GetUserAgentFallback();
 
+#if defined(OS_MAC) || defined(OS_WIN)
+  float GetSystemOutputVolume();
+  float GetSystemInputVolume();
+  void SetSystemOutputVolume(float volume);
+  void SetSystemInputVolume(float volume);
+  void SetupAudioEventPassing();
+  void TeardownAudioEventPassing();
+  bool IsSystemOutputMuted();
+  bool IsSystemInputMuted();
+  void SetSystemOutputMuted(bool muted);
+  void SetSystemInputMuted(bool muted);
+#endif
+
 #if defined(OS_MAC)
   void SetActivationPolicy(gin_helper::ErrorThrower thrower,
                            const std::string& policy);
