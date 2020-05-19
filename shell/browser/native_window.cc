@@ -683,6 +683,12 @@ std::string NativeWindow::GetAccessibleTitle() {
   return base::UTF16ToUTF8(accessible_title_);
 }
 
+bool NativeWindow::HasThickFrame() {
+  return false;
+}
+
+void NativeWindow::SetThickFrame(bool thick_frame) {}
+
 // static
 int32_t NativeWindow::next_id_ = 0;
 

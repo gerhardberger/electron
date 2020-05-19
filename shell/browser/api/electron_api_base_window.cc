@@ -980,6 +980,14 @@ void BaseWindow::SetGTKDarkThemeEnabled(bool use_dark_theme) {
   window_->SetGTKDarkThemeEnabled(use_dark_theme);
 }
 
+bool BaseWindow::HasThickFrame() {
+  return window_->HasThickFrame();
+}
+
+void BaseWindow::SetThickFrame(bool thick_frame) {
+  window_->SetThickFrame(thick_frame);
+}
+
 v8::Local<v8::Value> BaseWindow::GetContentView() const {
   if (content_view_.IsEmpty())
     return v8::Null(isolate());
@@ -1322,6 +1330,8 @@ void BaseWindow::BuildPrototype(v8::Isolate* isolate,
       .SetMethod("setThumbnailToolTip", &BaseWindow::SetThumbnailToolTip)
       .SetMethod("setAppDetails", &BaseWindow::SetAppDetails)
 #endif
+      .SetMethod("hasThickFrame", &BaseWindow::HasThickFrame)
+      .SetMethod("setThickFrame", &BaseWindow::SetThickFrame)
       .SetProperty("id", &BaseWindow::GetID);
 }
 

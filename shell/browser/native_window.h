@@ -263,6 +263,9 @@ class NativeWindow : public base::SupportsUserData,
       content::WebContents*,
       const content::NativeWebKeyboardEvent& event) {}
 
+  virtual bool HasThickFrame();
+  virtual void SetThickFrame(bool thick_frame);
+
   // Public API used by platform-dependent delegates and observers to send UI
   // related notifications.
   void NotifyWindowRequestPreferredWith(int* width);
