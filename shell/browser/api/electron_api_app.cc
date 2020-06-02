@@ -70,6 +70,8 @@
 #include "ui/gfx/image/image.h"
 
 #if defined(OS_WIN)
+#include <endpointvolume.h>
+#include <mmdeviceapi.h>
 #include "base/strings/utf_string_conversions.h"
 #include "shell/browser/ui/win/jump_list.h"
 #endif
@@ -1851,11 +1853,11 @@ gin::ObjectTemplateBuilder App::GetObjectTemplateBuilder(v8::Isolate* isolate) {
                  base::BindRepeating(&Browser::ResignCurrentActivity, browser))
       .SetMethod("updateCurrentActivity",
                  base::BindRepeating(&Browser::UpdateCurrentActivity, browser))
-#endif
-#if defined(OS_MAC) || defined(OS_WIN)
       .SetMethod("moveToApplicationsFolder", &App::MoveToApplicationsFolder)
       .SetMethod("isInApplicationsFolder", &App::IsInApplicationsFolder)
       .SetMethod("setActivationPolicy", &App::SetActivationPolicy)
+#endif
+#if defined(OS_MAC) || defined(OS_WIN)
       .SetMethod("getSystemOutputVolume", &App::GetSystemOutputVolume)
       .SetMethod("getSystemInputVolume", &App::GetSystemInputVolume)
       .SetMethod("setSystemOutputVolume", &App::SetSystemOutputVolume)
