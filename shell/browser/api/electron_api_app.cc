@@ -1529,7 +1529,7 @@ IAudioEndpointVolume* GetEndpointVolume(bool is_output) {
   IMMDeviceEnumerator* deviceEnumerator = NULL;
   CoCreateInstance(__uuidof(MMDeviceEnumerator), NULL, CLSCTX_INPROC_SERVER,
                    __uuidof(IMMDeviceEnumerator),
-                   reinterpret_cast<LPVOID*> & deviceEnumerator);
+                   reinterpret_cast<LPVOID*>(&deviceEnumerator));
   IMMDevice* defaultDevice = NULL;
 
   deviceEnumerator->GetDefaultAudioEndpoint(is_output ? eRender : eCapture,
@@ -1539,7 +1539,7 @@ IAudioEndpointVolume* GetEndpointVolume(bool is_output) {
 
   IAudioEndpointVolume* endpointVolume = NULL;
   defaultDevice->Activate(__uuidof(IAudioEndpointVolume), CLSCTX_INPROC_SERVER,
-                          NULL, reinterpret_cast<LPVOID*> & endpointVolume);
+                          NULL, reinterpret_cast<LPVOID*>(&endpointVolume));
   defaultDevice->Release();
   defaultDevice = NULL;
 
