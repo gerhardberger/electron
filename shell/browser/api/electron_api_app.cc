@@ -650,7 +650,7 @@ App::App() {
       base::ProcessMetrics::CreateCurrentProcessMetrics());
   app_metrics_[pid] = std::move(process_metric);
 
-#if defined(OS_MAC)
+#if defined(OS_WIN) || defined(OS_MAC)
   SetupAudioEventPassing();
 #endif
 }
@@ -661,6 +661,10 @@ App::~App() {
   Browser::Get()->RemoveObserver(this);
   content::GpuDataManager::GetInstance()->RemoveObserver(this);
   content::BrowserChildProcessObserver::Remove(this);
+
+#if defined(OS_WIN) || defined(OS_MAC)
+  TeardownAudioEventPassing();
+#endif
 }
 
 void App::OnBeforeQuit(bool* prevent_default) {
@@ -1525,6 +1529,63 @@ std::string App::GetUserAgentFallback() {
 }
 
 #if defined(OS_WIN)
+class CAudioEndpointVolumeCallback : public IAudioEndpointVolumeCallback {
+  App* app_;
+  LONG ref_;
+  bool is_output_;
+
+ public:
+  CAudioEndpointVolumeCallback(App* app, bool is_output)
+      : app_(app), ref_(1), is_output_(is_output) {}
+  ~CAudioEndpointVolumeCallback() {}
+
+  ULONG STDMETHODCALLTYPE AddRef() override {
+    return InterlockedIncrement(&ref_);
+  }
+
+  ULONG STDMETHODCALLTYPE Release() override {
+    ULONG ulRef = InterlockedDecrement(&ref_);
+    return ulRef;
+  }
+
+  HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid,
+                                           VOID** ppvInterface) override {
+    if (IID_IUnknown == riid) {
+      AddRef();
+      *ppvInterface = (IUnknown*)this;
+    } else if (__uuidof(IAudioEndpointVolumeCallback) == riid) {
+      AddRef();
+      *ppvInterface = (IAudioEndpointVolumeCallback*)this;
+    } else {
+      *ppvInterface = NULL;
+      return E_NOINTERFACE;
+    }
+    return S_OK;
+  }
+
+  HRESULT STDMETHODCALLTYPE
+  OnNotify(PAUDIO_VOLUME_NOTIFICATION_DATA pNotify) override {
+    if (pNotify == NULL) {
+      return E_INVALIDARG;
+    }
+
+    base::PostTask(
+        FROM_HERE, {content::BrowserThread::UI},
+        base::BindOnce(
+            [](App* app, bool muted, double masterVolume, bool is_output) {
+              if (is_output) {
+                app->Emit("system-output-volume-changed", muted, masterVolume);
+              } else {
+                app->Emit("system-input-volume-changed", muted, masterVolume);
+              }
+            },
+            std::move(app_), pNotify->bMuted, pNotify->fMasterVolume,
+            is_output_));
+
+    return S_OK;
+  }
+};
+
 IAudioEndpointVolume* GetEndpointVolume(bool is_output) {
   IMMDeviceEnumerator* deviceEnumerator = NULL;
   CoCreateInstance(__uuidof(MMDeviceEnumerator), NULL, CLSCTX_INPROC_SERVER,
@@ -1588,6 +1649,10 @@ void App::SetSystemInputVolume(float volume) {
 
 void App::SetupAudioEventPassing() {
   CoInitialize(NULL);
+  GetOutputEndpointVolume()->RegisterControlChangeNotify(
+      new CAudioEndpointVolumeCallback(this, true));
+  GetInputEndpointVolume()->RegisterControlChangeNotify(
+      new CAudioEndpointVolumeCallback(this, false));
 }
 
 void App::TeardownAudioEventPassing() {
