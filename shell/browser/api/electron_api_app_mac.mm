@@ -5,7 +5,9 @@
 #include <string>
 
 #include "base/path_service.h"
+#include "base/time/time.h"
 #include "shell/browser/api/electron_api_app.h"
+#include "shell/common/api/electron_api_native_image.h"
 #include "shell/common/electron_paths.h"
 #include "shell/common/node_includes.h"
 #include "shell/common/process_util.h"
@@ -344,6 +346,42 @@ bool App::IsRunningUnderARM64Translation() const {
     return false;
   }
   return proc_translated == 1;
+}
+
+void App::SetupCursorChangeListener() {
+  cursor_change_timer_.Start(FROM_HERE, base::TimeDelta::FromMilliseconds(200),
+                             this, &App::EmitCursorChange);
+}
+
+void App::EmitCursorChange() {
+  NSCursor* cursor = [NSCursor currentSystemCursor];
+  if (cursor) {
+    gfx::Point new_hot_spot = gfx::Point([cursor hotSpot]);
+    if (new_hot_spot != hot_spot_) {
+      hot_spot_ = new_hot_spot;
+      Emit("system-cursor-changed");
+    }
+  }
+}
+
+gin_helper::Dictionary App::GetSystemCursor(v8::Isolate* isolate) {
+  gin_helper::Dictionary result = gin::Dictionary::CreateEmpty(isolate);
+
+  NSCursor* cursor = [NSCursor currentSystemCursor];
+  if (cursor) {
+    gfx::Point hot_spot = gfx::Point([cursor hotSpot]);
+    gin_helper::Dictionary hot_spot_dict =
+        gin::Dictionary::CreateEmpty(isolate);
+    hot_spot_dict.SetHidden("simple", true);
+    hot_spot_dict.Set("x", hot_spot.x());
+    hot_spot_dict.Set("y", hot_spot.y());
+    result.Set("hotSpot", hot_spot_dict.GetHandle());
+
+    gfx::Image image = gfx::Image([cursor image]);
+    result.Set("image", NativeImage::Create(isolate, image));
+  }
+
+  return result;
 }
 
 }  // namespace api

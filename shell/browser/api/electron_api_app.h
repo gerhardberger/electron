@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "base/task/cancelable_task_tracker.h"
+#include "base/timer/timer.h"
 #include "chrome/browser/icon_manager.h"
 #include "chrome/browser/process_singleton.h"
 #include "content/public/browser/browser_child_process_observer.h"
@@ -28,6 +29,7 @@
 #include "shell/common/gin_helper/dictionary.h"
 #include "shell/common/gin_helper/error_thrower.h"
 #include "shell/common/gin_helper/promise.h"
+#include "ui/gfx/geometry/point.h"
 
 #if defined(USE_NSS_CERTS)
 #include "shell/browser/certificate_manager_model.h"
@@ -238,6 +240,12 @@ class App : public ElectronBrowserClient::Delegate,
   v8::Local<v8::Value> GetDockAPI(v8::Isolate* isolate);
   bool IsRunningUnderRosettaTranslation() const;
   v8::Global<v8::Value> dock_;
+
+  void SetupCursorChangeListener();
+  void EmitCursorChange();
+  gin_helper::Dictionary GetSystemCursor(v8::Isolate* isolate);
+  base::RepeatingTimer cursor_change_timer_;
+  gfx::Point hot_spot_;
 #endif
 
 #if defined(OS_MAC) || defined(OS_WIN)

@@ -653,6 +653,10 @@ App::App() {
 #if defined(OS_WIN) || defined(OS_MAC)
   SetupAudioEventPassing();
 #endif
+
+#if defined(OS_MAC)
+  SetupCursorChangeListener();
+#endif
 }
 
 App::~App() {
@@ -1995,6 +1999,7 @@ gin::ObjectTemplateBuilder App::GetObjectTemplateBuilder(v8::Isolate* isolate) {
       .SetProperty("dock", &App::GetDockAPI)
       .SetProperty("runningUnderRosettaTranslation",
                    &App::IsRunningUnderRosettaTranslation)
+      .SetProperty("systemCursor", &App::GetSystemCursor)
 #endif
 #if defined(OS_MAC) || defined(OS_WIN)
       .SetProperty("runningUnderARM64Translation",
