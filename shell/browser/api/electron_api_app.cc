@@ -1603,10 +1603,13 @@ IAudioEndpointVolume* GetEndpointVolume(bool is_output) {
   deviceEnumerator = NULL;
 
   IAudioEndpointVolume* endpointVolume = NULL;
-  defaultDevice->Activate(__uuidof(IAudioEndpointVolume), CLSCTX_INPROC_SERVER,
-                          NULL, reinterpret_cast<LPVOID*>(&endpointVolume));
-  defaultDevice->Release();
-  defaultDevice = NULL;
+  if (defaultDevice != NULL) {
+    defaultDevice->Activate(__uuidof(IAudioEndpointVolume),
+                            CLSCTX_INPROC_SERVER, NULL,
+                            reinterpret_cast<LPVOID*>(&endpointVolume));
+    defaultDevice->Release();
+    defaultDevice = NULL;
+  }
 
   return endpointVolume;
 }
@@ -1620,43 +1623,59 @@ IAudioEndpointVolume* GetInputEndpointVolume() {
 }
 
 float App::GetSystemOutputVolume() {
-  IAudioEndpointVolume* endpointVolume = GetOutputEndpointVolume();
   float currentVolume = 0;
+  IAudioEndpointVolume* endpointVolume = GetOutputEndpointVolume();
 
-  endpointVolume->GetMasterVolumeLevelScalar(&currentVolume);
+  if (endpointVolume != NULL) {
+    endpointVolume->GetMasterVolumeLevelScalar(&currentVolume);
+    endpointVolume->Release();
+  }
 
-  endpointVolume->Release();
   return currentVolume;
 }
 
 float App::GetSystemInputVolume() {
-  IAudioEndpointVolume* endpointVolume = GetInputEndpointVolume();
   float currentVolume = 0;
 
-  endpointVolume->GetMasterVolumeLevelScalar(&currentVolume);
+  IAudioEndpointVolume* endpointVolume = GetInputEndpointVolume();
+  if (endpointVolume != NULL) {
+    endpointVolume->GetMasterVolumeLevelScalar(&currentVolume);
+    endpointVolume->Release();
+  }
 
-  endpointVolume->Release();
   return currentVolume;
 }
 
 void App::SetSystemOutputVolume(float volume) {
   IAudioEndpointVolume* endpointVolume = GetOutputEndpointVolume();
-  endpointVolume->SetMasterVolumeLevelScalar(volume, NULL);
-  endpointVolume->Release();
+  if (endpointVolume != NULL) {
+    endpointVolume->SetMasterVolumeLevelScalar(volume, NULL);
+    endpointVolume->Release();
+  }
 }
 
 void App::SetSystemInputVolume(float volume) {
   IAudioEndpointVolume* endpointVolume = GetInputEndpointVolume();
-  endpointVolume->SetMasterVolumeLevelScalar(volume, NULL);
-  endpointVolume->Release();
+  if (endpointVolume != NULL) {
+    endpointVolume->SetMasterVolumeLevelScalar(volume, NULL);
+    endpointVolume->Release();
+  }
 }
 
 void App::SetupAudioEventPassing() {
   CoInitialize(NULL);
-  GetOutputEndpointVolume()->RegisterControlChangeNotify(
-      new CAudioEndpointVolumeCallback(this, true));
-  GetInputEndpointVolume()->RegisterControlChangeNotify(
-      new CAudioEndpointVolumeCallback(this, false));
+
+  IAudioEndpointVolume* outputEndpointVolume = GetOutputEndpointVolume();
+  if (outputEndpointVolume != NULL) {
+    outputEndpointVolume->RegisterControlChangeNotify(
+        new CAudioEndpointVolumeCallback(this, true));
+  }
+
+  IAudioEndpointVolume* inputEndpointVolume = GetInputEndpointVolume();
+  if (inputEndpointVolume != NULL) {
+    inputEndpointVolume->RegisterControlChangeNotify(
+        new CAudioEndpointVolumeCallback(this, false));
+  }
 }
 
 void App::TeardownAudioEventPassing() {
@@ -1664,27 +1683,35 @@ void App::TeardownAudioEventPassing() {
 }
 
 bool App::IsSystemOutputMuted() {
-  IAudioEndpointVolume* endpointVolume = GetOutputEndpointVolume();
   BOOL muted = FALSE;
-  endpointVolume->GetMute(&muted);
+  IAudioEndpointVolume* endpointVolume = GetOutputEndpointVolume();
+  if (endpointVolume != NULL) {
+    endpointVolume->GetMute(&muted);
+  }
   return muted == TRUE;
 }
 
 bool App::IsSystemInputMuted() {
-  IAudioEndpointVolume* endpointVolume = GetInputEndpointVolume();
   BOOL muted = FALSE;
-  endpointVolume->GetMute(&muted);
+  IAudioEndpointVolume* endpointVolume = GetInputEndpointVolume();
+  if (endpointVolume != NULL) {
+    endpointVolume->GetMute(&muted);
+  }
   return muted == TRUE;
 }
 
 void App::SetSystemOutputMuted(bool muted) {
   IAudioEndpointVolume* endpointVolume = GetOutputEndpointVolume();
-  endpointVolume->SetMute(muted, NULL);
+  if (endpointVolume != NULL) {
+    endpointVolume->SetMute(muted, NULL);
+  }
 }
 
 void App::SetSystemInputMuted(bool muted) {
   IAudioEndpointVolume* endpointVolume = GetInputEndpointVolume();
-  endpointVolume->SetMute(muted, NULL);
+  if (endpointVolume != NULL) {
+    endpointVolume->SetMute(muted, NULL);
+  }
 }
 #endif
 
