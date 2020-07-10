@@ -230,6 +230,12 @@ class App : public ElectronBrowserClient::Delegate,
   bool IsSystemInputMuted();
   void SetSystemOutputMuted(bool muted);
   void SetSystemInputMuted(bool muted);
+
+  void SetupCursorChangeListener();
+  void EmitCursorChange();
+  gin_helper::Dictionary GetSystemCursor(v8::Isolate* isolate);
+  base::RepeatingTimer cursor_change_timer_;
+  gfx::Point hot_spot_;
 #endif
 
 #if defined(OS_MAC)
@@ -240,12 +246,6 @@ class App : public ElectronBrowserClient::Delegate,
   v8::Local<v8::Value> GetDockAPI(v8::Isolate* isolate);
   bool IsRunningUnderRosettaTranslation() const;
   v8::Global<v8::Value> dock_;
-
-  void SetupCursorChangeListener();
-  void EmitCursorChange();
-  gin_helper::Dictionary GetSystemCursor(v8::Isolate* isolate);
-  base::RepeatingTimer cursor_change_timer_;
-  gfx::Point hot_spot_;
 #endif
 
 #if defined(OS_MAC) || defined(OS_WIN)

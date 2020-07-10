@@ -74,6 +74,7 @@
 #include <mmdeviceapi.h>
 #include "base/strings/utf_string_conversions.h"
 #include "shell/browser/ui/win/jump_list.h"
+#include "ui/gfx/icon_util.h"
 #endif
 
 #if defined(OS_MAC)
@@ -652,9 +653,6 @@ App::App() {
 
 #if defined(OS_WIN) || defined(OS_MAC)
   SetupAudioEventPassing();
-#endif
-
-#if defined(OS_MAC)
   SetupCursorChangeListener();
 #endif
 }
@@ -1713,6 +1711,55 @@ void App::SetSystemInputMuted(bool muted) {
     endpointVolume->SetMute(muted, NULL);
   }
 }
+
+void App::EmitCursorChange() {
+  CURSORINFO ci;
+  ci.cbSize = sizeof(ci);
+  GetCursorInfo(&ci);
+
+  ICONINFO ii;
+  GetIconInfo(ci.hCursor, &ii);
+
+  gfx::Point new_hot_spot = gfx::Point((int)ii.xHotspot, (int)ii.yHotspot);
+  if (new_hot_spot != hot_spot_) {
+    hot_spot_ = new_hot_spot;
+    Emit("system-cursor-changed");
+  }
+}
+
+gin_helper::Dictionary App::GetSystemCursor(v8::Isolate* isolate) {
+  gin_helper::Dictionary result = gin::Dictionary::CreateEmpty(isolate);
+
+  CURSORINFO ci;
+  ci.cbSize = sizeof(ci);
+  GetCursorInfo(&ci);
+
+  ICONINFO ii;
+  GetIconInfo(ci.hCursor, &ii);
+
+  gfx::Point hot_spot = gfx::Point((int)ii.xHotspot, (int)ii.yHotspot);
+  gin_helper::Dictionary hot_spot_dict = gin::Dictionary::CreateEmpty(isolate);
+  hot_spot_dict.SetHidden("simple", true);
+  hot_spot_dict.Set("x", hot_spot.x());
+  hot_spot_dict.Set("y", hot_spot.y());
+  result.Set("hotSpot", hot_spot_dict.GetHandle());
+
+  gfx::Image image = gfx::Image::CreateFrom1xBitmap(
+      IconUtil::CreateSkBitmapFromHICON(ci.hCursor));
+
+  result.Set("image", NativeImage::Create(isolate, image));
+
+  return result;
+}
+#endif
+
+#if defined(OS_MAC) || defined(OS_WIN)
+
+void App::SetupCursorChangeListener() {
+  cursor_change_timer_.Start(FROM_HERE, base::TimeDelta::FromMilliseconds(200),
+                             this, &App::EmitCursorChange);
+}
+
 #endif
 
 #if defined(OS_MAC)

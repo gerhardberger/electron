@@ -348,11 +348,6 @@ bool App::IsRunningUnderARM64Translation() const {
   return proc_translated == 1;
 }
 
-void App::SetupCursorChangeListener() {
-  cursor_change_timer_.Start(FROM_HERE, base::TimeDelta::FromMilliseconds(200),
-                             this, &App::EmitCursorChange);
-}
-
 void App::EmitCursorChange() {
   NSCursor* cursor = [NSCursor currentSystemCursor];
   if (cursor) {
