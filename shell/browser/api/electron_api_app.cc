@@ -1725,6 +1725,9 @@ void App::EmitCursorChange() {
     hot_spot_ = new_hot_spot;
     Emit("system-cursor-changed");
   }
+
+  DeleteObject(ii.hbmColor);
+  DeleteObject(ii.hbmMask);
 }
 
 gin_helper::Dictionary App::GetSystemCursor(v8::Isolate* isolate) {
@@ -1748,6 +1751,9 @@ gin_helper::Dictionary App::GetSystemCursor(v8::Isolate* isolate) {
       IconUtil::CreateSkBitmapFromHICON(ci.hCursor));
 
   result.Set("image", NativeImage::Create(isolate, image));
+
+  DeleteObject(ii.hbmColor);
+  DeleteObject(ii.hbmMask);
 
   return result;
 }
