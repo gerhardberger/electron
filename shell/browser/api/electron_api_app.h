@@ -235,7 +235,7 @@ class App : public ElectronBrowserClient::Delegate,
   void EmitCursorChange();
   gin_helper::Dictionary GetSystemCursor(v8::Isolate* isolate);
   base::RepeatingTimer cursor_change_timer_;
-  gfx::Point hot_spot_;
+  gfx::Image cursor_image_;
 #endif
 
 #if defined(OS_MAC)

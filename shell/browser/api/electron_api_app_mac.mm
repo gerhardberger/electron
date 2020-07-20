@@ -351,9 +351,10 @@ bool App::IsRunningUnderARM64Translation() const {
 void App::EmitCursorChange() {
   NSCursor* cursor = [NSCursor currentSystemCursor];
   if (cursor) {
-    gfx::Point new_hot_spot = gfx::Point([cursor hotSpot]);
-    if (new_hot_spot != hot_spot_) {
-      hot_spot_ = new_hot_spot;
+    NSImage* new_cursor_image = [cursor image];
+    if (![[new_cursor_image TIFFRepresentation]
+            isEqual:[cursor_image_.AsNSImage() TIFFRepresentation]]) {
+      cursor_image_ = gfx::Image(new_cursor_image);
       Emit("system-cursor-changed");
     }
   }
