@@ -2030,6 +2030,7 @@ gin::ObjectTemplateBuilder App::GetObjectTemplateBuilder(v8::Isolate* isolate) {
           base::BindRepeating(&Browser::SetSecureKeyboardEntryEnabled, browser))
 #endif
 #if defined(OS_MAC) || defined(OS_WIN)
+      .SetProperty("systemCursor", &App::GetSystemCursor)
       .SetMethod("showEmojiPanel",
                  base::BindRepeating(&Browser::ShowEmojiPanel, browser))
 #endif
@@ -2079,7 +2080,6 @@ gin::ObjectTemplateBuilder App::GetObjectTemplateBuilder(v8::Isolate* isolate) {
       .SetProperty("dock", &App::GetDockAPI)
       .SetProperty("runningUnderRosettaTranslation",
                    &App::IsRunningUnderRosettaTranslation)
-      .SetProperty("systemCursor", &App::GetSystemCursor)
 #endif
 #if defined(OS_MAC) || defined(OS_WIN)
       .SetProperty("runningUnderARM64Translation",
