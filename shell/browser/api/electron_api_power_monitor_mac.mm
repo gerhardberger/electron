@@ -8,6 +8,8 @@
 
 #import <ApplicationServices/ApplicationServices.h>
 #import <Cocoa/Cocoa.h>
+#import <IOKit/pwr_mgt/IOPM.h>
+#import <IOKit/pwr_mgt/IOPMLib.h>
 
 @interface MacLockMonitor : NSObject {
  @private
@@ -118,6 +120,19 @@ void PowerMonitor::InitPlatformSpecificMonitors() {
   if (!g_lock_monitor)
     g_lock_monitor = [[MacLockMonitor alloc] init];
   [g_lock_monitor addEmitter:this];
+}
+
+int PowerMonitor::GetCPUPowerSpeedLimit() {
+  CFDictionaryRef cfCPUPowerStatus;
+  IOPMCopyCPUPowerStatus(&cfCPUPowerStatus);
+
+  NSDictionary* cpuPowerStatus = (__bridge NSDictionary*)cfCPUPowerStatus;
+  NSString* key = @kIOPMCPUPowerLimitProcessorSpeedKey;
+  int cpuSpeedLimit = [cpuPowerStatus[key] intValue];
+  [key release];
+  CFRelease(cfCPUPowerStatus);
+
+  return cpuSpeedLimit;
 }
 
 }  // namespace api

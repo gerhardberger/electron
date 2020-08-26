@@ -27,6 +27,10 @@ class PowerMonitor : public gin::Wrappable<PowerMonitor>,
  public:
   static v8::Local<v8::Value> Create(v8::Isolate* isolate);
 
+#if defined(OS_MACOSX)
+  static int GetCPUPowerSpeedLimit();
+#endif
+
   // gin::Wrappable
   static gin::WrapperInfo kWrapperInfo;
   gin::ObjectTemplateBuilder GetObjectTemplateBuilder(

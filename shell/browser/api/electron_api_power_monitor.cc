@@ -154,6 +154,11 @@ void Initialize(v8::Local<v8::Object> exports,
                  base::BindRepeating(&GetSystemIdleState));
   dict.SetMethod("getSystemIdleTime", base::BindRepeating(&GetSystemIdleTime));
   dict.SetMethod("isOnBatteryPower", base::BindRepeating(&IsOnBatteryPower));
+
+#if defined(OS_MACOSX)
+  dict.SetMethod("getCPUPowerSpeedLimit",
+                 base::BindRepeating(&PowerMonitor::GetCPUPowerSpeedLimit));
+#endif
 }
 
 }  // namespace
