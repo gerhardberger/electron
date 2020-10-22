@@ -1378,6 +1378,7 @@ void NativeWindowMac::UpdateVibrancyRadii(bool fullscreen) {
       [maskImage setCapInsets:NSEdgeInsetsMake(radius, radius, radius, radius)];
       [maskImage setResizingMode:NSImageResizingModeStretch];
       [vibrantView setMaskImage:maskImage];
+      [window_ setCornerMask:maskImage];
     }
   }
 }
