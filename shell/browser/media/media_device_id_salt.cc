@@ -17,6 +17,12 @@ namespace {
 
 const char kMediaDeviceIdSalt[] = "electron.media.device_id_salt";
 
+// The media device ID salt is used to prevent browser fingerprinting for the
+// case of loading remote content. Around is a desktop application only loading
+// on our own domain. We want device IDs to remain the same in the case that
+// the user loses their Preferences file.
+const char kAroundMediaDeviceIdSalt[] = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+
 }  // namespace
 
 MediaDeviceIDSalt::MediaDeviceIDSalt(PrefService* pref_service) {
@@ -24,8 +30,7 @@ MediaDeviceIDSalt::MediaDeviceIDSalt(PrefService* pref_service) {
 
   media_device_id_salt_.Init(kMediaDeviceIdSalt, pref_service);
   if (media_device_id_salt_.GetValue().empty()) {
-    media_device_id_salt_.SetValue(
-        content::BrowserContext::CreateRandomMediaDeviceIDSalt());
+    media_device_id_salt_.SetValue(kAroundMediaDeviceIdSalt);
   }
 }
 
