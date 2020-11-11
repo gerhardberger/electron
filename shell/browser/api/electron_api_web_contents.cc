@@ -1659,6 +1659,11 @@ void WebContents::DidStopLoading() {
     web_contents()->GetRenderViewHost()->EnablePreferredSizeMode();
 
   Emit("did-stop-loading");
+
+  auto* web_preferences = WebContentsPreferences::From(web_contents());
+  if (web_preferences &&
+      web_preferences->IsEnabled(options::kEnablePreferredSizeMode))
+    web_contents()->GetRenderViewHost()->EnablePreferredSizeMode();
 }
 
 bool WebContents::EmitNavigationEvent(
