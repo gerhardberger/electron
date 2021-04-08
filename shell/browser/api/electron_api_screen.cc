@@ -24,6 +24,10 @@
 #include "ui/display/win/screen_win.h"
 #endif
 
+#if defined(OS_MAC)
+#include "third_party/webrtc/modules/desktop_capture/mac/window_list_utils.h"
+#endif
+
 namespace electron {
 
 namespace api {
@@ -106,6 +110,35 @@ static gfx::Rect DIPToScreenRect(electron::NativeWindow* window,
 
 #endif
 
+#if defined(OS_MAC)
+
+static bool IsFullScreenWindow() {
+  webrtc::MacDesktopConfiguration desktop_config =
+      webrtc::MacDesktopConfiguration::GetCurrent(
+          webrtc::MacDesktopConfiguration::TopLeftOrigin);
+
+  // Ignore dock and menu layers. Otherwise having the dock open will report
+  // as a window being in full screen.
+  bool only_zero_layer = true;
+  bool ignore_minimized = true;
+
+  bool has_full_screen_win = false;
+
+  webrtc::GetWindowList(
+      [&desktop_config, &has_full_screen_win](CFDictionaryRef window) {
+        if (webrtc::IsWindowFullScreen(desktop_config, window)) {
+          has_full_screen_win = true;
+          return false;  // stop searching
+        }
+        return true;
+      },
+      ignore_minimized, only_zero_layer);
+
+  return has_full_screen_win;
+}
+
+#endif
+
 void Screen::OnDisplayAdded(const display::Display& new_display) {
   base::ThreadTaskRunnerHandle::Get()->PostNonNestableTask(
       FROM_HERE, base::BindOnce(&DelayEmit, base::Unretained(this),
@@ -158,6 +191,9 @@ gin::ObjectTemplateBuilder Screen::GetObjectTemplateBuilder(
       .SetMethod("dipToScreenPoint", &display::win::ScreenWin::DIPToScreenPoint)
       .SetMethod("screenToDipRect", &ScreenToDIPRect)
       .SetMethod("dipToScreenRect", &DIPToScreenRect)
+#endif
+#if defined(OS_MAC)
+      .SetMethod("isFullScreenWindow", &IsFullScreenWindow)
 #endif
       .SetMethod("getDisplayMatching", &Screen::GetDisplayMatching);
 }
