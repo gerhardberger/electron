@@ -60,17 +60,20 @@ export function openGuestWindow ({ event, embedder, guest, referrer, disposition
   });
   if (didCancelEvent) return;
 
-  // To spec, subsequent window.open calls with the same frame name (`target` in
-  // spec parlance) will reuse the previous window.
-  // https://html.spec.whatwg.org/multipage/window-object.html#apis-for-creating-and-navigating-browsing-contexts-by-name
-  const existingWindow = getGuestWindowByFrameName(frameName);
-  if (existingWindow) {
-    if (existingWindow.isDestroyed() || existingWindow.webContents.isDestroyed()) {
-      // FIXME(t57ser): The webContents is destroyed for some reason, unregister the frame name
-      unregisterFrameName(frameName);
-    } else {
-      existingWindow.loadURL(url);
-      return existingWindow;
+  // Re-using windows is handled by native Blink code.
+  if (!guest) {
+    // To spec, subsequent window.open calls with the same frame name (`target` in
+    // spec parlance) will reuse the previous window.
+    // https://html.spec.whatwg.org/multipage/window-object.html#apis-for-creating-and-navigating-browsing-contexts-by-name
+    const existingWindow = getGuestWindowByFrameName(frameName);
+    if (existingWindow) {
+      if (existingWindow.isDestroyed() || existingWindow.webContents.isDestroyed()) {
+        // FIXME(t57ser): The webContents is destroyed for some reason, unregister the frame name
+        unregisterFrameName(frameName);
+      } else {
+        existingWindow.loadURL(url);
+        return existingWindow;
+      }
     }
   }
 
