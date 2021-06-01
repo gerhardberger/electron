@@ -293,6 +293,9 @@ NativeWindowMac::NativeWindowMac(const gin_helper::Dictionary& options,
   if (title_bar_style_ != TitleBarStyle::kNormal)
     set_has_frame(false);
 
+  bool overlay = false;
+  options.Get(options::kOverlay, &overlay);
+
   NSUInteger styleMask = NSWindowStyleMaskTitled;
 
   // The NSWindowStyleMaskFullSizeContentView style removes rounded corners
@@ -439,6 +442,17 @@ NativeWindowMac::NativeWindowMac(const gin_helper::Dictionary& options,
                                      }
                                      return event;
                                    }];
+
+  // @AROUND: Overlay option is needed, because these NSWindow options below
+  // cannot be set via the JS APIs, because with the APIs present they could
+  // only be partially (setting level via setAlwaysOnTop has other side effects)
+  // and setting styleMask is not supported.
+  if (overlay) {
+    [window_ setLevel:NSScreenSaverWindowLevel];
+    [window_ setStyleMask:NSWindowStyleMaskClosable |
+                          NSWindowStyleMaskFullSizeContentView |
+                          NSWindowStyleMaskBorderless];
+  }
 
   // Set maximizable state last to ensure zoom button does not get reset
   // by calls to other APIs.

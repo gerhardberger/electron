@@ -30,6 +30,7 @@ const char kClosable[] = "closable";
 const char kFullscreen[] = "fullscreen";
 const char kTrafficLightPosition[] = "trafficLightPosition";
 const char kRoundedCorners[] = "roundedCorners";
+const char kOverlay[] = "overlay";
 
 // The color to use as the theme and symbol colors respectively for Window
 // Controls Overlay if enabled on Windows.
