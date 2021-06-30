@@ -49,6 +49,7 @@
 #include "shell/browser/linux/unity_service.h"
 #include "shell/browser/ui/views/frameless_view.h"
 #include "shell/browser/ui/views/native_frame_view.h"
+#include "ui/gfx/geometry/resize_utils.h"
 #include "ui/views/widget/desktop_aura/desktop_window_tree_host_linux.h"
 #include "ui/views/window/native_frame_view.h"
 
