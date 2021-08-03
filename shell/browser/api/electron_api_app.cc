@@ -2006,6 +2006,8 @@ gin::ObjectTemplateBuilder App::GetObjectTemplateBuilder(v8::Isolate* isolate) {
       .SetMethod("moveToApplicationsFolder", &App::MoveToApplicationsFolder)
       .SetMethod("isInApplicationsFolder", &App::IsInApplicationsFolder)
       .SetMethod("setActivationPolicy", &App::SetActivationPolicy)
+      .SetMethod("setSystemOutputDevice", &App::SetSystemOutputDevice)
+      .SetMethod("getSystemOutputDevice", &App::GetSystemOutputDevice)
 #endif
 #if defined(OS_MAC) || defined(OS_WIN)
       .SetMethod("getSystemOutputVolume", &App::GetSystemOutputVolume)

@@ -245,8 +245,11 @@ class App : public ElectronBrowserClient::Delegate,
   bool MoveToApplicationsFolder(gin_helper::ErrorThrower, gin::Arguments* args);
   bool IsInApplicationsFolder();
   v8::Local<v8::Value> GetDockAPI(v8::Isolate* isolate);
+  void SetSystemOutputDevice(const std::string& device_name);
+  std::string GetSystemOutputDevice();
   bool IsRunningUnderRosettaTranslation() const;
   v8::Global<v8::Value> dock_;
+
 #endif
 
 #if defined(OS_MAC) || defined(OS_WIN)

@@ -3,8 +3,10 @@
 // found in the LICENSE file.
 
 #include <string>
+#include <vector>
 
 #include "base/path_service.h"
+#include "base/strings/sys_string_conversions.h"
 #include "base/time/time.h"
 #include "shell/browser/api/electron_api_app.h"
 #include "shell/common/api/electron_api_native_image.h"
@@ -40,6 +42,160 @@ AudioDeviceID obtainDefaultAudioDevice(AudioObjectPropertySelector selector) {
   }
 
   return deviceID;
+}
+
+/**
+ * Sets the OS default device, either input or output depending on the provided
+ * scope.
+ * error: if error is encountered this string contains the error message
+ * requestedDeviceName: Device name to try to set.
+ * scope: kAudioDevicePropertyScopeInput | kAudioDevicePropertyScopeOutput
+ * returns: false if error
+ */
+bool setSystemDefaultAudioDeviceByName(std::string& error,
+                                       const std::string& requestedDeviceName,
+                                       const AudioObjectPropertyScope& scope) {
+  OSStatus status = kAudioHardwareNoError;
+  CFStringRef deviceNameCfString = nullptr;
+  UInt32 propertySize = 0;
+  AudioObjectPropertyAddress globalScopeAddress = {
+      0, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMaster};
+  AudioObjectPropertyAddress specificScopeAddress = {
+      scope, kAudioDevicePropertyScopeOutput,
+      kAudioObjectPropertyElementMaster};
+
+  // Get the size of the array of aduio devices.
+  globalScopeAddress.mSelector = kAudioHardwarePropertyDevices;
+  status = AudioObjectGetPropertyDataSize(
+      kAudioObjectSystemObject, &globalScopeAddress, 0, nullptr, &propertySize);
+  if (status != kAudioHardwareNoError) {
+    error =
+        (std::string("Error getting size of audio device list | OSStatus:") +
+         std::to_string(status));
+    return false;
+  }
+
+  if (propertySize == 0U) {
+    error = "No audio devices found";
+    return false;
+  }
+
+  size_t numberOfDevices = propertySize / sizeof(AudioObjectID);
+
+  // Get the array of device ids for all the devices, which includes both
+  // input devices and output devices.
+  std::vector<AudioObjectID> devices(numberOfDevices);
+  globalScopeAddress.mSelector = kAudioHardwarePropertyDevices;
+  status =
+      AudioObjectGetPropertyData(kAudioObjectSystemObject, &globalScopeAddress,
+                                 0, nullptr, &propertySize, devices.data());
+
+  for (size_t i = 0U; i < numberOfDevices; i++) {
+    // Get the device name.
+    globalScopeAddress.mSelector = kAudioObjectPropertyName;
+    propertySize = sizeof(deviceNameCfString);
+    status =
+        AudioObjectGetPropertyData(devices[i], &globalScopeAddress, 0, NULL,
+                                   &propertySize, &deviceNameCfString);
+    if (status != kAudioHardwareNoError) {
+      error = (std::string("Error getting device name | OSStatus:") +
+               std::to_string(status));
+      return false;
+    }
+
+    std::string deviceName = base::SysCFStringRefToUTF8(deviceNameCfString);
+    CFRelease(deviceNameCfString);
+
+    // Determine device type.
+    AudioBufferList bufferList;
+    propertySize = sizeof(bufferList);
+    specificScopeAddress.mSelector = kAudioDevicePropertyStreamConfiguration;
+    status = AudioObjectGetPropertyData(devices[i], &specificScopeAddress, 0,
+                                        NULL, &propertySize, &bufferList);
+    if (status != kAudioHardwareNoError) {
+      error = (std::string("Error determing device type | OSStatus:") +
+               std::to_string(status) + std::string(" name:") + deviceName);
+      return false;
+    }
+
+    // Not the correct type of device if true.
+    if (bufferList.mNumberBuffers == 0) {
+      continue;
+    }
+
+    if (deviceName == requestedDeviceName) {
+      specificScopeAddress.mSelector =
+          scope == kAudioDevicePropertyScopeInput
+              ? kAudioHardwarePropertyDefaultInputDevice
+              : kAudioHardwarePropertyDefaultOutputDevice;
+      status = AudioObjectSetPropertyData(kAudioObjectSystemObject,
+                                          &specificScopeAddress, 0, NULL,
+                                          sizeof(AudioObjectID), &devices[i]);
+      if (status != kAudioHardwareNoError) {
+        error = (std::string("Error setting device as default | OSStatus:") +
+                 std::to_string(status) + std::string(" name:") + deviceName);
+        return false;
+      }
+
+      return true;
+    }
+  }
+
+  error = (std::string("No matching device found for: ") + requestedDeviceName);
+  return false;
+}
+
+/**
+ * Gets the OS default device, either input or output depending on the provided
+ * scope.
+ * error: if error is encountered this string contains the error message
+ * deviceName: return value
+ * scope: kAudioDevicePropertyScopeInput | kAudioDevicePropertyScopeOutput
+ * returns: false if error
+ */
+bool getSystemDefaultAudioDeviceName(std::string& error,
+                                     std::string& deviceName,
+                                     const AudioObjectPropertyScope& scope) {
+  OSStatus status = kAudioHardwareNoError;
+  AudioObjectID deviceId = kAudioObjectUnknown;
+  CFStringRef deviceNameCfString = nullptr;
+  UInt32 propertySize = 0;
+  AudioObjectPropertyAddress globalScopeAddress = {
+      0, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMaster};
+  AudioObjectPropertyAddress specificScopeAddress = {
+      scope, kAudioDevicePropertyScopeOutput,
+      kAudioObjectPropertyElementMaster};
+
+  // Get the ID of the default device.
+  specificScopeAddress.mSelector =
+      scope == kAudioDevicePropertyScopeInput
+          ? kAudioHardwarePropertyDefaultInputDevice
+          : kAudioHardwarePropertyDefaultOutputDevice;
+  propertySize = sizeof(deviceId);
+  status = AudioObjectGetPropertyData(kAudioObjectSystemObject,
+                                      &specificScopeAddress, 0, NULL,
+                                      &propertySize, &deviceId);
+  if (status != kAudioHardwareNoError) {
+    error = (std::string("Error getting default device ID | OSStatus:") +
+             std::to_string(status));
+    return false;
+  }
+
+  // Get the device name.
+  globalScopeAddress.mSelector = kAudioObjectPropertyName;
+  propertySize = sizeof(deviceNameCfString);
+  status = AudioObjectGetPropertyData(deviceId, &globalScopeAddress, 0, NULL,
+                                      &propertySize, &deviceNameCfString);
+  if (status != kAudioHardwareNoError) {
+    error = (std::string("Error getting default device name | OSStatus:") +
+             std::to_string(status));
+    return false;
+  }
+
+  deviceName = base::SysCFStringRefToUTF8(deviceNameCfString);
+  CFRelease(deviceNameCfString);
+
+  return true;
 }
 
 void setSystemMuted(bool muted,
@@ -282,6 +438,38 @@ void App::SetSystemInputMuted(bool muted) {
       muted, obtainDefaultAudioDevice(kAudioHardwarePropertyDefaultInputDevice),
       kAudioDevicePropertyScopeInput);
 }
+
+void App::SetSystemOutputDevice(const std::string& device_name) {
+  std::string error;
+
+  if (!setSystemDefaultAudioDeviceByName(error, device_name,
+                                         kAudioDevicePropertyScopeOutput)) {
+    v8::Isolate* isolate = JavascriptEnvironment::GetIsolate();
+    v8::Locker locker(isolate);
+    v8::HandleScope scope(isolate);
+    gin_helper::ErrorThrower(isolate).ThrowError(error);
+  }
+
+  return;
+}
+
+std::string App::GetSystemOutputDevice() {
+  std::string error;
+  std::string device_name;
+
+  if (!getSystemDefaultAudioDeviceName(error, device_name,
+                                       kAudioDevicePropertyScopeOutput)) {
+    v8::Isolate* isolate = JavascriptEnvironment::GetIsolate();
+    v8::Locker locker(isolate);
+    v8::HandleScope scope(isolate);
+    gin_helper::ErrorThrower(isolate).ThrowError(error);
+  }
+
+  return device_name;
+}
+
+void SetSystemOutputDevice(const std::string& device_name);
+std::string GetSystemOutputDevice();
 
 void App::SetAppLogsPath(gin_helper::ErrorThrower thrower,
                          absl::optional<base::FilePath> custom_path) {
