@@ -1,0 +1,316 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: samuelmaddock <samuel.maddock@gmail.com>
+Date: Thu, 13 Aug 2020 15:00:26 -0400
+Subject: win: exclude windows with black rects
+
+Adds a DesktopCapturer wrapper for Windows to exclude the chat head window by
+painting a black rectangle above it. This is interoperable with any underlying
+desktop capture API.
+
+Signed-off-by: gellert <gellert.hegyi@around.co>
+
+diff --git a/modules/desktop_capture/BUILD.gn b/modules/desktop_capture/BUILD.gn
+index 25b92bed45ec52838394ebf61e25d5aea9cf3340..d2a0a9a71230f81b133f11a36e4146eb558a59f2 100644
+--- a/modules/desktop_capture/BUILD.gn
++++ b/modules/desktop_capture/BUILD.gn
+@@ -480,6 +480,8 @@ rtc_library("desktop_capture_generic") {
+       "desktop_frame_win.h",
+       "mouse_cursor_monitor_win.cc",
+       "screen_capturer_win.cc",
++      "win/around_desktop_capturer_wrapper.cc",
++      "win/around_desktop_capturer_wrapper.h",
+       "win/cursor.cc",
+       "win/cursor.h",
+       "win/d3d_device.cc",
+diff --git a/modules/desktop_capture/desktop_capture_options.h b/modules/desktop_capture/desktop_capture_options.h
+index a693803aa02227cbe8f58583de9009fbcac9b444..3881ff18cb246023e0917e567a1fd602efbdaead 100644
+--- a/modules/desktop_capture/desktop_capture_options.h
++++ b/modules/desktop_capture/desktop_capture_options.h
+@@ -129,6 +129,12 @@ class RTC_EXPORT DesktopCaptureOptions {
+     allow_directx_capturer_ = enabled;
+   }
+ 
++  // AROUND EDIT: Allow using the Around capturer.
++  bool allow_around_capturer() const { return allow_around_capturer_; }
++  void set_allow_around_capturer(bool enabled) {
++    allow_around_capturer_ = enabled;
++  }
++
+   // Flag that may be set to allow use of the cropping window capturer (which
+   // captures the screen & crops that to the window region in some cases). An
+   // advantage of using this is significantly higher capture frame rates than
+@@ -183,6 +189,7 @@ class RTC_EXPORT DesktopCaptureOptions {
+ #if defined(RTC_ENABLE_WIN_WGC)
+   bool allow_wgc_capturer_ = false;
+ #endif
++  bool allow_around_capturer_ = false;
+ #endif
+ #if defined(WEBRTC_USE_X11)
+   bool use_update_notifications_ = false;
+diff --git a/modules/desktop_capture/screen_capturer_win.cc b/modules/desktop_capture/screen_capturer_win.cc
+index be6d8a5275c9a1960f8026909921d4c4283c45f9..e8c65b069359034829107a5b9600a4631642c0fd 100644
+--- a/modules/desktop_capture/screen_capturer_win.cc
++++ b/modules/desktop_capture/screen_capturer_win.cc
+@@ -16,6 +16,7 @@
+ #include "modules/desktop_capture/desktop_capturer.h"
+ #include "modules/desktop_capture/fallback_desktop_capturer_wrapper.h"
+ #include "modules/desktop_capture/rgba_color.h"
++#include "modules/desktop_capture/win/around_desktop_capturer_wrapper.h"
+ #include "modules/desktop_capture/win/screen_capturer_win_directx.h"
+ #include "modules/desktop_capture/win/screen_capturer_win_gdi.h"
+ #include "modules/desktop_capture/win/screen_capturer_win_magnifier.h"
+@@ -56,6 +57,10 @@ std::unique_ptr<DesktopCapturer> DesktopCapturer::CreateRawScreenCapturer(
+         std::move(capturer)));
+   }
+ 
++  if (options.allow_around_capturer()) {
++    capturer.reset(new AroundDesktopCapturerWrapper(std::move(capturer)));
++  }
++
+   return capturer;
+ }
+ 
+diff --git a/modules/desktop_capture/win/around_desktop_capturer_wrapper.cc b/modules/desktop_capture/win/around_desktop_capturer_wrapper.cc
+new file mode 100644
+index 0000000000000000000000000000000000000000..63d4b50fe09149f836128b3734bd5b600e946d7f
+--- /dev/null
++++ b/modules/desktop_capture/win/around_desktop_capturer_wrapper.cc
+@@ -0,0 +1,179 @@
++#include "modules/desktop_capture/win/around_desktop_capturer_wrapper.h"
++
++#include <stdint.h>
++
++#include <utility>
++
++#include "modules/desktop_capture/desktop_geometry.h"
++#include "modules/desktop_capture/desktop_region.h"
++#include "modules/desktop_capture/win/screen_capture_utils.h"
++#include "modules/desktop_capture/win/window_capture_utils.h"
++#include "rtc_base/checks.h"
++#include "base/strings/string_util.h"
++#include "rtc_base/time_utils.h"
++#include "system_wrappers/include/metrics.h"
++
++namespace webrtc {
++
++namespace {
++
++// Paints pixels in |rect| of |frame| to |color|.
++void PaintRect(DesktopFrame* frame, DesktopRect rect, RgbaColor rgba_color) {
++  static_assert(DesktopFrame::kBytesPerPixel == sizeof(uint32_t),
++                "kBytesPerPixel should be 4.");
++  DesktopVector origin = rect.top_left();
++  int width = frame->rect().width();
++  int height = frame->rect().height();
++
++  uint32_t color = rgba_color.ToUInt32();
++  uint8_t* row = frame->GetFrameDataAtPos(origin);
++
++  for (int i = 0; i < rect.height(); i++) {
++    uint32_t* column = reinterpret_cast<uint32_t*>(row);
++    for (int j = 0; j < rect.width(); j++) {
++      // Ignore painting rectangle outside of frame boundaries.
++      int x = origin.x() + j;
++      int y = origin.y() + i;
++      if (x >= 0 && y >= 0 && x < width && y < height) {
++        column[j] = color;
++      }
++    }
++    row += frame->stride();
++  }
++}
++
++base::string16 GetWindowTitle(HWND hwnd) {
++  const size_t kTitleLength = 32;
++  WCHAR window_title[kTitleLength];
++  GetWindowTextW(hwnd, window_title, kTitleLength);
++  int title_len = wcsnlen_s(window_title, kTitleLength);
++  if (title_len == 0) {
++    return base::string16();
++  }
++  return base::string16(&window_title[0], title_len);
++}
++
++// Unicode zero-width space
++wchar_t FLOATING_WINDOW_PREFIX[] = { 0x200B, 0x0 };
++
++bool IsAroundFloatingWindow(HWND hwnd) {
++  DWORD ownpid = ::GetCurrentProcessId();
++
++  DWORD dwProcessID = 0;
++  GetWindowThreadProcessId(hwnd, &dwProcessID);
++
++  bool owns_window = dwProcessID == ownpid;
++
++  if (!owns_window || !IsWindowVisible(hwnd))
++    return false;
++
++  // Filter for Around chat heads window which is always on top and transparent.
++  const LONG exstyle = GetWindowLong(hwnd, GWL_EXSTYLE);
++  bool is_chatheads_style = (exstyle & WS_EX_TOPMOST) && (exstyle & WS_EX_LAYERED) && ((exstyle & WS_CHILD) == 0);
++
++  if (!is_chatheads_style)
++    return false;
++
++  base::string16 win_title = GetWindowTitle(hwnd);
++  auto prefix = base::string16(&FLOATING_WINDOW_PREFIX[0], 1);
++
++  // Floating window title is prefixed with a zero-width space to non-visibly identify it.
++  bool is_floating_window_title = base::StartsWith(win_title, prefix, base::CompareCase::SENSITIVE);
++
++  return is_floating_window_title;
++}
++
++HWND GetAroundFloatingWindow() {
++  HWND hCurWnd = NULL;
++  do {
++    hCurWnd = FindWindowEx(NULL, hCurWnd, NULL, NULL);
++    if (IsAroundFloatingWindow(hCurWnd)) {
++      break;
++    }
++  }
++  while (hCurWnd != NULL);
++  return hCurWnd;
++}
++
++}  // namespace
++
++AroundDesktopCapturerWrapper::AroundDesktopCapturerWrapper(
++    std::unique_ptr<DesktopCapturer> capturer)
++    : capturer_(std::move(capturer)) {
++  RTC_DCHECK(capturer_);
++}
++
++AroundDesktopCapturerWrapper::~AroundDesktopCapturerWrapper() =
++    default;
++
++void AroundDesktopCapturerWrapper::Start(
++    DesktopCapturer::Callback* callback) {
++  callback_ = callback;
++  capturer_->Start(this);
++}
++
++void AroundDesktopCapturerWrapper::SetSharedMemoryFactory(
++    std::unique_ptr<SharedMemoryFactory> shared_memory_factory) {
++  capturer_->SetSharedMemoryFactory(std::move(shared_memory_factory));
++}
++
++void AroundDesktopCapturerWrapper::CaptureFrame() {
++  RTC_DCHECK(callback_);
++  capturer_->CaptureFrame();
++}
++
++void AroundDesktopCapturerWrapper::SetExcludedWindow(WindowId window) {
++  capturer_->SetExcludedWindow(window);
++}
++
++bool AroundDesktopCapturerWrapper::GetSourceList(SourceList* sources) {
++  return capturer_->GetSourceList(sources);
++}
++
++bool AroundDesktopCapturerWrapper::SelectSource(SourceId id) {
++  return capturer_->SelectSource(id);
++}
++
++bool AroundDesktopCapturerWrapper::FocusOnSelectedSource() {
++  return capturer_->FocusOnSelectedSource();
++}
++
++bool AroundDesktopCapturerWrapper::IsOccluded(const DesktopVector& pos) {
++  return capturer_->IsOccluded(pos);
++}
++
++void AroundDesktopCapturerWrapper::OnCaptureResult(
++    Result result,
++    std::unique_ptr<DesktopFrame> frame) {
++  RTC_DCHECK(callback_);
++  if (result != Result::SUCCESS) {
++    callback_->OnCaptureResult(result, std::move(frame));
++    return;
++  }
++
++  if (result == Result::SUCCESS && frame) {
++    // Validate Around window handle or search for it if not valid.
++    if (around_hwnd_ == NULL || !IsAroundFloatingWindow(around_hwnd_)) {
++      around_hwnd_ = GetAroundFloatingWindow();
++    }
++
++    // Paint over Around window to exclude it.
++    if (around_hwnd_) {
++      DesktopRect window_rect;
++      if (GetWindowRect(around_hwnd_, &window_rect)) {
++        // Translate absolute window position to that relative of the
++        // virtual screen (the bounding rectangle of all display monitors).
++        window_rect.Translate(-GetFullscreenRect().top_left());
++
++        // Translate from system coordinates to screen coordinates.
++        window_rect.Translate(-frame->top_left());
++
++        PaintRect(frame.get(), window_rect, RgbaColor(0xFF000000));
++      }
++    }
++  }
++
++  callback_->OnCaptureResult(result, std::move(frame));
++}
++
++}  // namespace webrtc
+diff --git a/modules/desktop_capture/win/around_desktop_capturer_wrapper.h b/modules/desktop_capture/win/around_desktop_capturer_wrapper.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..d89c3c0ec192b2eb875eb1c69a92aea7629a3769
+--- /dev/null
++++ b/modules/desktop_capture/win/around_desktop_capturer_wrapper.h
+@@ -0,0 +1,53 @@
++#ifndef MODULES_DESKTOP_CAPTURE_WIN_AROUND_DESKTOP_CAPTURER_WRAPPER_H_
++#define MODULES_DESKTOP_CAPTURE_WIN_AROUND_DESKTOP_CAPTURER_WRAPPER_H_
++
++#include <memory>
++
++#include <windows.h>
++
++#include "modules/desktop_capture/desktop_capture_types.h"
++#include "modules/desktop_capture/desktop_capturer.h"
++#include "modules/desktop_capture/desktop_frame.h"
++#include "modules/desktop_capture/rgba_color.h"
++#include "modules/desktop_capture/shared_memory.h"
++
++namespace webrtc {
++
++// A DesktopCapturer wrapper for Around which implements custom
++// window exclusion.
++class AroundDesktopCapturerWrapper final
++    : public DesktopCapturer,
++      public DesktopCapturer::Callback {
++ public:
++  // Creates AroundDesktopCapturerWrapper. AroundDesktopCapturerWrapper
++  // takes ownership of |capturer|.
++  AroundDesktopCapturerWrapper(std::unique_ptr<DesktopCapturer> capturer);
++  ~AroundDesktopCapturerWrapper() override;
++
++  // DesktopCapturer interface.
++  void Start(DesktopCapturer::Callback* callback) override;
++  void SetSharedMemoryFactory(
++      std::unique_ptr<SharedMemoryFactory> shared_memory_factory) override;
++  void CaptureFrame() override;
++  void SetExcludedWindow(WindowId window) override;
++  bool GetSourceList(SourceList* sources) override;
++  bool SelectSource(SourceId id) override;
++  bool FocusOnSelectedSource() override;
++  bool IsOccluded(const DesktopVector& pos) override;
++
++ private:
++  // DesktopCapturer::Callback interface.
++  void OnCaptureResult(Result result,
++                       std::unique_ptr<DesktopFrame> frame) override;
++
++  const std::unique_ptr<DesktopCapturer> capturer_;
++
++  DesktopCapturer::Callback* callback_ = nullptr;
++
++  // Handle to Around floating heads window.
++  HWND around_hwnd_;
++};
++
++}  // namespace webrtc
++
++#endif  // MODULES_DESKTOP_CAPTURE_WIN_AROUND_DESKTOP_CAPTURER_WRAPPER_H_

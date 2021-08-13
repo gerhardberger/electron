@@ -1,0 +1,60 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: gellert <gellert.hegyi@around.co>
+Date: Fri, 15 May 2020 18:31:48 +0200
+Subject: force integrated gpu
+
+This patch forces Chromium to always try and use the low-powered integrated GPU.
+
+Signed-off-by: gellert <gellert.hegyi@around.co>
+
+diff --git a/gpu/config/gpu_switching.cc b/gpu/config/gpu_switching.cc
+index 403c30a11d022cc5eec53b664ce74d420c970d14..a5b9ffb837466644d49e0e9b77ec3512e3ba1b69 100644
+--- a/gpu/config/gpu_switching.cc
++++ b/gpu/config/gpu_switching.cc
+@@ -28,30 +28,11 @@ namespace {
+ 
+ #if defined(OS_MAC)
+ typedef CGLPixelFormatObj PlatformPixelFormatObj;
++PlatformPixelFormatObj g_discrete_pixel_format_obj = nullptr;
+ #else
+ typedef void* PlatformPixelFormatObj;
+ #endif  // OS_MAC
+ 
+-PlatformPixelFormatObj g_discrete_pixel_format_obj = nullptr;
+-
+-bool ContainsWorkaround(const std::vector<int32_t>& workarounds,
+-                        int32_t workaround) {
+-  return (std::find(workarounds.begin(), workarounds.end(), workaround) !=
+-          workarounds.end());
+-}
+-
+-void ForceDiscreteGPU() {
+-  if (g_discrete_pixel_format_obj)
+-    return;
+-#if defined(OS_MAC)
+-  CGLPixelFormatAttribute attribs[1];
+-  attribs[0] = static_cast<CGLPixelFormatAttribute>(0);
+-  GLint num_pixel_formats = 0;
+-  CGLChoosePixelFormat(attribs, &g_discrete_pixel_format_obj,
+-                       &num_pixel_formats);
+-#endif  // OS_MAC
+-}
+-
+ }  // namespace anonymous
+ 
+ bool SwitchableGPUsSupported(const GPUInfo& gpu_info,
+@@ -95,12 +76,8 @@ bool SwitchableGPUsSupported(const GPUInfo& gpu_info,
+ void InitializeSwitchableGPUs(
+     const std::vector<int32_t>& driver_bug_workarounds) {
+   gl::GLContext::SetSwitchableGPUsSupported();
+-  if (ContainsWorkaround(driver_bug_workarounds, FORCE_HIGH_PERFORMANCE_GPU)) {
+-    gl::GLContext::SetForcedGpuPreference(gl::GpuPreference::kHighPerformance);
+-    ForceDiscreteGPU();
+-  } else if (ContainsWorkaround(driver_bug_workarounds, FORCE_LOW_POWER_GPU)) {
+-    gl::GLContext::SetForcedGpuPreference(gl::GpuPreference::kLowPower);
+-  }
++
++  gl::GLContext::SetForcedGpuPreference(gl::GpuPreference::kLowPower);
+ }
+ 
+ void StopForceDiscreteGPU() {

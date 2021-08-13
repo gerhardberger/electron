@@ -1,0 +1,174 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: gellert <gellert.hegyi@around.co>
+Date: Sun, 8 Nov 2020 21:02:28 +0100
+Subject: around: adds neteq buffer events
+
+This patch adds onbufferdrained and onbufferrestored events to the fifo neteq implementation to notify to the js side.
+
+Signed-off-by: gellert <gellert.hegyi@around.co>
+
+diff --git a/third_party/blink/public/mojom/web_feature/web_feature.mojom b/third_party/blink/public/mojom/web_feature/web_feature.mojom
+index f7c78ac198c51fd8d8980c5471ea7fd678111256..a49ed51f237e0da79a459f0fe345724cf826359d 100644
+--- a/third_party/blink/public/mojom/web_feature/web_feature.mojom
++++ b/third_party/blink/public/mojom/web_feature/web_feature.mojom
+@@ -3276,6 +3276,8 @@ enum WebFeature {
+   kV8URLPattern_Exec_Method = 3961,
+   kSameSiteCookieInclusionChangedByCrossSiteRedirect = 3962,
+   kMediaStreamConstraintsAroundAudioProcessing = 3963,
++  kV8RTCRtpReceiver_BufferDrained_Method = 3964,
++  kV8RTCRtpReceiver_BufferRestored_Method = 3965,
+ 
+   // Add new features immediately above this line. Don't change assigned
+   // numbers of any item, and don't reuse removed slots.
+diff --git a/third_party/blink/renderer/core/events/event_type_names.json5 b/third_party/blink/renderer/core/events/event_type_names.json5
+index fcb366c160ed427c478512d27707453d81b56f23..d00aa999b8e70a7654b00380ad18249db04f6c9e 100644
+--- a/third_party/blink/renderer/core/events/event_type_names.json5
++++ b/third_party/blink/renderer/core/events/event_type_names.json5
+@@ -60,6 +60,8 @@
+     "blur",
+     "boundary",
+     "bufferedamountlow",
++    "bufferdrained",
++    "bufferrestored",
+     "cached",
+     "cancel",
+     "canmakepayment",
+diff --git a/third_party/blink/renderer/modules/peerconnection/rtc_peer_connection.cc b/third_party/blink/renderer/modules/peerconnection/rtc_peer_connection.cc
+index 5a1e99ea7a77ef8802650d0f43643610f4e47652..813d9252ec75bdfba9d5715da718ad3e1794e4ad 100644
+--- a/third_party/blink/renderer/modules/peerconnection/rtc_peer_connection.cc
++++ b/third_party/blink/renderer/modules/peerconnection/rtc_peer_connection.cc
+@@ -3442,6 +3442,16 @@ void RTCPeerConnection::ClosePeerConnection() {
+   CloseInternal();
+ }
+ 
++void RTCPeerConnection::DidBufferDrained() {
++  Event* event = Event::Create(event_type_names::kBufferdrained);
++  ScheduleDispatchEvent(event);
++}
++
++void RTCPeerConnection::DidBufferRestored() {
++  Event* event = Event::Create(event_type_names::kBufferrestored);
++  ScheduleDispatchEvent(event);
++}
++
+ const AtomicString& RTCPeerConnection::InterfaceName() const {
+   return event_target_names::kRTCPeerConnection;
+ }
+diff --git a/third_party/blink/renderer/modules/peerconnection/rtc_peer_connection.h b/third_party/blink/renderer/modules/peerconnection/rtc_peer_connection.h
+index 0d077326d5edafc42ec7fba9a93b94636b31cd83..67a9f9bcc38618bf82f36c818dcc2cf06eed2064 100644
+--- a/third_party/blink/renderer/modules/peerconnection/rtc_peer_connection.h
++++ b/third_party/blink/renderer/modules/peerconnection/rtc_peer_connection.h
+@@ -313,6 +313,9 @@ class MODULES_EXPORT RTCPeerConnection final
+   DEFINE_ATTRIBUTE_EVENT_LISTENER(datachannel, kDatachannel)
+   DEFINE_ATTRIBUTE_EVENT_LISTENER(icecandidateerror, kIcecandidateerror)
+ 
++  DEFINE_ATTRIBUTE_EVENT_LISTENER(bufferdrained, kBufferdrained)
++  DEFINE_ATTRIBUTE_EVENT_LISTENER(bufferrestored, kBufferrestored)
++
+   // Utility to note result of CreateOffer / CreateAnswer
+   void NoteSdpCreated(const RTCSessionDescription&);
+   // Utility to report SDP usage of setLocalDescription / setRemoteDescription.
+@@ -364,6 +367,9 @@ class MODULES_EXPORT RTCPeerConnection final
+   void UnregisterPeerConnectionHandler() override;
+   void ClosePeerConnection() override;
+ 
++  void DidBufferDrained() override;
++  void DidBufferRestored() override;
++
+   // EventTarget
+   const AtomicString& InterfaceName() const override;
+   ExecutionContext* GetExecutionContext() const override;
+diff --git a/third_party/blink/renderer/modules/peerconnection/rtc_peer_connection.idl b/third_party/blink/renderer/modules/peerconnection/rtc_peer_connection.idl
+index c0316c5ebf350bc34119e260cab866788da9e0f3..075c6bdd029552fc349e2883d174b10b19d2e9c0 100644
+--- a/third_party/blink/renderer/modules/peerconnection/rtc_peer_connection.idl
++++ b/third_party/blink/renderer/modules/peerconnection/rtc_peer_connection.idl
+@@ -176,6 +176,9 @@ enum RTCPeerConnectionState {
+     [Measure, RaisesException] RTCDTMFSender createDTMFSender(MediaStreamTrack track);
+     attribute EventHandler onaddstream;
+     attribute EventHandler onremovestream;
++
++    attribute EventHandler onbufferdrained;
++    attribute EventHandler onbufferrestored;
+ };
+ 
+ // https://w3c.github.io/webrtc-pc/#dom-rtcpeerconnectionerrorcallback
+diff --git a/third_party/blink/renderer/modules/peerconnection/rtc_peer_connection_handler.cc b/third_party/blink/renderer/modules/peerconnection/rtc_peer_connection_handler.cc
+index 9773ee6a92962f402b00a16279aa9b45cb80fa0e..2cf72850eee886b1c24cc0defb4a3a13b6124aac 100644
+--- a/third_party/blink/renderer/modules/peerconnection/rtc_peer_connection_handler.cc
++++ b/third_party/blink/renderer/modules/peerconnection/rtc_peer_connection_handler.cc
+@@ -1082,6 +1082,30 @@ class RTCPeerConnectionHandler::Observer
+     }
+   }
+ 
++  void OnBufferDrained() override {
++    if (!main_thread_->BelongsToCurrentThread()) {
++      PostCrossThreadTask(
++          *main_thread_.get(), FROM_HERE,
++          CrossThreadBindOnce(
++              &RTCPeerConnectionHandler::Observer::OnBufferDrained,
++              WrapCrossThreadPersistent(this)));
++    } else if (handler_) {
++      handler_->OnBufferDrained();
++    }
++  }
++
++  void OnBufferRestored() override {
++    if (!main_thread_->BelongsToCurrentThread()) {
++      PostCrossThreadTask(
++          *main_thread_.get(), FROM_HERE,
++          CrossThreadBindOnce(
++              &RTCPeerConnectionHandler::Observer::OnBufferRestored,
++              WrapCrossThreadPersistent(this)));
++    } else if (handler_) {
++      handler_->OnBufferRestored();
++    }
++  }
++
+  private:
+   const base::WeakPtr<RTCPeerConnectionHandler> handler_;
+   const scoped_refptr<base::SingleThreadTaskRunner> main_thread_;
+@@ -2625,6 +2649,16 @@ void RTCPeerConnectionHandler::OnInterestingUsage(int usage_pattern) {
+     client_->DidNoteInterestingUsage(usage_pattern);
+ }
+ 
++void RTCPeerConnectionHandler::OnBufferDrained() {
++  if (client_)
++    client_->DidBufferDrained();
++}
++
++void RTCPeerConnectionHandler::OnBufferRestored() {
++  if (client_)
++    client_->DidBufferRestored();
++}
++
+ RTCPeerConnectionHandler::FirstSessionDescription::FirstSessionDescription(
+     const webrtc::SessionDescriptionInterface* sdesc) {
+   DCHECK(sdesc);
+diff --git a/third_party/blink/renderer/modules/peerconnection/rtc_peer_connection_handler.h b/third_party/blink/renderer/modules/peerconnection/rtc_peer_connection_handler.h
+index 0279dff58449cffaeef0d611d8786692e60148e9..49f00781b7413ad4d118bf7129dc0cd66ac82156 100644
+--- a/third_party/blink/renderer/modules/peerconnection/rtc_peer_connection_handler.h
++++ b/third_party/blink/renderer/modules/peerconnection/rtc_peer_connection_handler.h
+@@ -287,6 +287,9 @@ class MODULES_EXPORT RTCPeerConnectionHandler {
+     return force_encoded_video_insertable_streams_;
+   }
+ 
++  void OnBufferDrained();
++  void OnBufferRestored();
++
+  protected:
+   // Constructor to be used for constructing mocks only.
+   explicit RTCPeerConnectionHandler(
+diff --git a/third_party/blink/renderer/platform/peerconnection/rtc_peer_connection_handler_client.h b/third_party/blink/renderer/platform/peerconnection/rtc_peer_connection_handler_client.h
+index ce8a088907d4230742bd04c37b3f7be6e1b4eecf..18ae9192579cb7045606c08f2163826a77249144 100644
+--- a/third_party/blink/renderer/platform/peerconnection/rtc_peer_connection_handler_client.h
++++ b/third_party/blink/renderer/platform/peerconnection/rtc_peer_connection_handler_client.h
+@@ -95,6 +95,9 @@ class PLATFORM_EXPORT RTCPeerConnectionHandlerClient {
+   virtual void DidNoteInterestingUsage(int usage_pattern) = 0;
+   virtual void UnregisterPeerConnectionHandler() = 0;
+   virtual void ClosePeerConnection();
++
++  virtual void DidBufferDrained() {}
++  virtual void DidBufferRestored() {}
+ };
+ 
+ }  // namespace blink

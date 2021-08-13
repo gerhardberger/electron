@@ -1,0 +1,79 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: gellert <gellert.hegyi@around.co>
+Date: Fri, 13 Aug 2021 01:16:21 +0200
+Subject: adds thread priority feature flags
+
+This patch adds two new base::Feature flags that allow setting the thread priority of Media and RealtimeAudioWorklet threads to NORMAL instead of REALTIME_AUDIO
+
+diff --git a/content/renderer/render_thread_impl.cc b/content/renderer/render_thread_impl.cc
+index c11f9f72a03e8bdbd03aca30c052722371dd506e..95e35548607d13d7a35047ee91cd2a244cb3e575 100644
+--- a/content/renderer/render_thread_impl.cc
++++ b/content/renderer/render_thread_impl.cc
+@@ -47,6 +47,7 @@
+ #include "base/trace_event/trace_event.h"
+ #include "base/trace_event/typed_macros.h"
+ #include "base/values.h"
++#include "base/feature_list.h"
+ #include "build/build_config.h"
+ #include "build/chromeos_buildflags.h"
+ #include "cc/base/histograms.h"
+@@ -194,6 +195,13 @@ namespace content {
+ 
+ namespace {
+ 
++// When enabled, forces the Media thread priority to NORMAL,
++// instead of REALTIME_AUDIO. This can help to keep CPU usage under control
++// but can also lead to glitches or other audio issues especially under high load.
++const base::Feature kForceMediaThreadPriorityNormal{
++    "ForceMediaThreadPriorityNormal",
++    base::FEATURE_DISABLED_BY_DEFAULT};
++
+ using ::base::PassKey;
+ using ::base::ThreadRestrictions;
+ using ::blink::WebDocument;
+@@ -1744,6 +1752,13 @@ RenderThreadImpl::GetMediaThreadTaskRunner() {
+ #else
+     base::Thread::Options options;
+ #endif
++    options.priority = base::ThreadPriority::REALTIME_AUDIO;
++
++    if (base::FeatureList::IsEnabled(kForceMediaThreadPriorityNormal)) {
++      TRACE_EVENT0("blink", "RenderThreadImpl kForceMediaThreadPriorityNormal = true");
++      options.priority = base::ThreadPriority::NORMAL;
++    }
++
+     media_thread_->StartWithOptions(std::move(options));
+   }
+   return media_thread_->task_runner();
+diff --git a/third_party/blink/renderer/modules/webaudio/realtime_audio_worklet_thread.cc b/third_party/blink/renderer/modules/webaudio/realtime_audio_worklet_thread.cc
+index 8b7afe0fe01b5db385cceac0531f3667b3d5a462..b5d28166d084bf27697b710141a3a394eaf9d6e4 100644
+--- a/third_party/blink/renderer/modules/webaudio/realtime_audio_worklet_thread.cc
++++ b/third_party/blink/renderer/modules/webaudio/realtime_audio_worklet_thread.cc
+@@ -11,6 +11,14 @@
+ 
+ namespace blink {
+ 
++// When enabled, forces the RealtimeAudioWorkletThread priority to NORMAL,
++// instead of REALTIME_AUDIO. This can help to keep CPU usage under control
++// when using AudioWorklet to do audio processing but can also lead to glitches
++// or other audio issues especially under high load.
++const base::Feature kForceAudioWorkletThreadPriorityNormal{
++    "ForceAudioWorkletThreadPriorityNormal",
++    base::FEATURE_DISABLED_BY_DEFAULT};
++
+ template class WorkletThreadHolder<RealtimeAudioWorkletThread>;
+ 
+ int RealtimeAudioWorkletThread::s_ref_count_ = 0;
+@@ -40,6 +48,12 @@ RealtimeAudioWorkletThread::RealtimeAudioWorkletThread(
+                  "RealtimeAudioWorkletThread() - NORMAL");
+   }
+ 
++  if (base::FeatureList::IsEnabled(kForceAudioWorkletThreadPriorityNormal)) {
++    TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("audio-worklet"),
++               "kForceAudioWorkletThreadPriorityNormal = true");
++    params.thread_priority = base::ThreadPriority::NORMAL;
++  }
++
+   if (++s_ref_count_ == 1)
+     EnsureSharedBackingThread(params);
+ }

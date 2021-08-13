@@ -1,0 +1,203 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Eldar Rello <eldar.rello@gmail.com>
+Date: Tue, 13 Apr 2021 23:24:11 +0300
+Subject: Make usage of audio encoder queue configurable with command line
+ switch
+
+Make usage of audio encoder queue configurable with command line
+ switch
+
+Signed-off-by: gellert <gellert.hegyi@around.co>
+
+diff --git a/audio/channel_send.cc b/audio/channel_send.cc
+index 06e9238ce81b805a5ec990e7965cb60a1f0811a0..725dff1f3d12f9f9b55e4823cfb5a06168e245ff 100644
+--- a/audio/channel_send.cc
++++ b/audio/channel_send.cc
+@@ -24,8 +24,11 @@
+ #include "api/sequence_checker.h"
+ #include "audio/channel_send_frame_transformer_delegate.h"
+ #include "audio/utility/audio_frame_operations.h"
++#include "base/command_line.h"
++#include "base/strings/string_number_conversions.h"
+ #include "call/rtp_transport_controller_send_interface.h"
+ #include "logging/rtc_event_log/events/rtc_event_audio_playout.h"
++#include "media/base/media_switches.h"
+ #include "modules/audio_coding/audio_network_adaptor/include/audio_network_adaptor_config.h"
+ #include "modules/audio_coding/include/audio_coding_module.h"
+ #include "modules/audio_processing/rms_level.h"
+@@ -47,6 +50,15 @@
+ #include "system_wrappers/include/field_trial.h"
+ #include "system_wrappers/include/metrics.h"
+ 
++#undef RTC_GUARDED_BY
++#define RTC_GUARDED_BY(a)
++
++#undef RTC_DCHECK_RUN_ON
++#define RTC_DCHECK_RUN_ON(a)
++
++#undef RTC_RUN_ON
++#define RTC_RUN_ON(a)
++
+ namespace webrtc {
+ namespace voe {
+ 
+@@ -245,6 +257,8 @@ class ChannelSend : public ChannelSendInterface,
+   // members are destroyed.
+   rtc::TaskQueue encoder_queue_;
+ 
++  bool use_encoder_queue_ = true;
++
+   const bool fixing_timestamp_stall_;
+ 
+   mutable Mutex rtcp_counter_mutex_;
+@@ -516,6 +530,10 @@ ChannelSend::ChannelSend(
+   RTC_DCHECK_EQ(0, error);
+   if (frame_transformer)
+     InitFrameTransformerDelegate(std::move(frame_transformer));
++  if (base::CommandLine::ForCurrentProcess()->
++      HasSwitch(switches::kDisableEncoderQueue)) {
++    use_encoder_queue_ = false;
++  }
+ }
+ 
+ ChannelSend::~ChannelSend() {
+@@ -814,57 +832,91 @@ void ChannelSend::ProcessAndEncodeAudio(
+   RTC_DCHECK_GT(audio_frame->samples_per_channel_, 0);
+   RTC_DCHECK_LE(audio_frame->num_channels_, 8);
+ 
++  if (!use_encoder_queue_) {
++    bool is_muted = InputMute();
++    AudioFrameOperations::Mute(audio_frame.get(), previous_frame_muted_,
++                               is_muted);
++
++    if (_includeAudioLevelIndication) {
++      size_t length =
++          audio_frame->samples_per_channel_ * audio_frame->num_channels_;
++      RTC_CHECK_LE(length, AudioFrame::kMaxDataSizeBytes);
++      if (is_muted && previous_frame_muted_) {
++        rms_level_.AnalyzeMuted(length);
++      } else {
++        rms_level_.Analyze(
++            rtc::ArrayView<const int16_t>(audio_frame->data(), length));
++      }
++    }
++    previous_frame_muted_ = is_muted;
++
++    // Add 10ms of raw (PCM) audio data to the encoder @ 32kHz.
++
++    // The ACM resamples internally.
++    audio_frame->timestamp_ = _timeStamp;
++    // This call will trigger AudioPacketizationCallback::SendData if
++    // encoding is done and payload is ready for packetization and
++    // transmission. Otherwise, it will return without invoking the
++    // callback.
++    if (audio_coding_->Add10MsData(*audio_frame) < 0) {
++      RTC_DLOG(LS_ERROR) << "ACM::Add10MsData() failed.";
++      return;
++    }
++
++    _timeStamp += static_cast<uint32_t>(audio_frame->samples_per_channel_);
++    return;
++  }
+   // Profile time between when the audio frame is added to the task queue and
+   // when the task is actually executed.
+   audio_frame->UpdateProfileTimeStamp();
+-  encoder_queue_.PostTask(
+-      [this, audio_frame = std::move(audio_frame)]() mutable {
+-        RTC_DCHECK_RUN_ON(&encoder_queue_);
+-        if (!encoder_queue_is_active_) {
+-          if (fixing_timestamp_stall_) {
+-            _timeStamp +=
+-                static_cast<uint32_t>(audio_frame->samples_per_channel_);
+-          }
+-          return;
+-        }
+-        // Measure time between when the audio frame is added to the task queue
+-        // and when the task is actually executed. Goal is to keep track of
+-        // unwanted extra latency added by the task queue.
+-        RTC_HISTOGRAM_COUNTS_10000("WebRTC.Audio.EncodingTaskQueueLatencyMs",
+-                                   audio_frame->ElapsedProfileTimeMs());
+-
+-        bool is_muted = InputMute();
+-        AudioFrameOperations::Mute(audio_frame.get(), previous_frame_muted_,
+-                                   is_muted);
+-
+-        if (_includeAudioLevelIndication) {
+-          size_t length =
+-              audio_frame->samples_per_channel_ * audio_frame->num_channels_;
+-          RTC_CHECK_LE(length, AudioFrame::kMaxDataSizeBytes);
+-          if (is_muted && previous_frame_muted_) {
+-            rms_level_.AnalyzeMuted(length);
+-          } else {
+-            rms_level_.Analyze(
+-                rtc::ArrayView<const int16_t>(audio_frame->data(), length));
+-          }
+-        }
+-        previous_frame_muted_ = is_muted;
+-
+-        // Add 10ms of raw (PCM) audio data to the encoder @ 32kHz.
+-
+-        // The ACM resamples internally.
+-        audio_frame->timestamp_ = _timeStamp;
+-        // This call will trigger AudioPacketizationCallback::SendData if
+-        // encoding is done and payload is ready for packetization and
+-        // transmission. Otherwise, it will return without invoking the
+-        // callback.
+-        if (audio_coding_->Add10MsData(*audio_frame) < 0) {
+-          RTC_DLOG(LS_ERROR) << "ACM::Add10MsData() failed.";
+-          return;
+-        }
+-
+-        _timeStamp += static_cast<uint32_t>(audio_frame->samples_per_channel_);
+-      });
++
++  encoder_queue_.PostTask([this, audio_frame = std::move(audio_frame)]() mutable {
++    RTC_DCHECK_RUN_ON(&encoder_queue_);
++    if (!encoder_queue_is_active_) {
++      if (fixing_timestamp_stall_) {
++        _timeStamp +=
++            static_cast<uint32_t>(audio_frame->samples_per_channel_);
++      }
++      return;
++    }
++    // Measure time between when the audio frame is added to the task queue
++    // and when the task is actually executed. Goal is to keep track of
++    // unwanted extra latency added by the task queue.
++    RTC_HISTOGRAM_COUNTS_10000("WebRTC.Audio.EncodingTaskQueueLatencyMs",
++                               audio_frame->ElapsedProfileTimeMs());
++
++    bool is_muted = InputMute();
++    AudioFrameOperations::Mute(audio_frame.get(), previous_frame_muted_,
++                               is_muted);
++
++    if (_includeAudioLevelIndication) {
++      size_t length =
++          audio_frame->samples_per_channel_ * audio_frame->num_channels_;
++      RTC_CHECK_LE(length, AudioFrame::kMaxDataSizeBytes);
++      if (is_muted && previous_frame_muted_) {
++        rms_level_.AnalyzeMuted(length);
++      } else {
++        rms_level_.Analyze(
++            rtc::ArrayView<const int16_t>(audio_frame->data(), length));
++      }
++    }
++    previous_frame_muted_ = is_muted;
++
++    // Add 10ms of raw (PCM) audio data to the encoder @ 32kHz.
++
++    // The ACM resamples internally.
++    audio_frame->timestamp_ = _timeStamp;
++    // This call will trigger AudioPacketizationCallback::SendData if
++    // encoding is done and payload is ready for packetization and
++    // transmission. Otherwise, it will return without invoking the
++    // callback.
++    if (audio_coding_->Add10MsData(*audio_frame) < 0) {
++      RTC_DLOG(LS_ERROR) << "ACM::Add10MsData() failed.";
++      return;
++    }
++
++    _timeStamp += static_cast<uint32_t>(audio_frame->samples_per_channel_);
++  });
+ }
+ 
+ ANAStats ChannelSend::GetANAStatistics() const {

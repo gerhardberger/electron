@@ -1,0 +1,22 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: gellert <gellert.hegyi@around.co>
+Date: Sat, 16 May 2020 01:50:55 +0200
+Subject: decreases fifo size
+
+This patch decreases number of fifo buffers in media stream audio sink.
+
+Signed-off-by: gellert <gellert.hegyi@around.co>
+
+diff --git a/third_party/blink/renderer/modules/mediastream/webaudio_media_stream_audio_sink.cc b/third_party/blink/renderer/modules/mediastream/webaudio_media_stream_audio_sink.cc
+index 99d93b4820f99cbd98350b256c5be631c0d8951d..fabc91e728c3979afca599063dffd85f49d29799 100644
+--- a/third_party/blink/renderer/modules/mediastream/webaudio_media_stream_audio_sink.cc
++++ b/third_party/blink/renderer/modules/mediastream/webaudio_media_stream_audio_sink.cc
+@@ -15,7 +15,7 @@
+ #include "third_party/blink/renderer/platform/media/web_audio_source_provider_client.h"
+ 
+ namespace {
+-static const size_t kMaxNumberOfAudioFifoBuffers = 10;
++static const size_t kMaxNumberOfAudioFifoBuffers = 2;
+ }
+ 
+ namespace blink {

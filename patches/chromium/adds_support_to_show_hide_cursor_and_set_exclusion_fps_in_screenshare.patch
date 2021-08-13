@@ -1,0 +1,535 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: gellert <gellert.hegyi@around.co>
+Date: Thu, 12 Aug 2021 19:23:53 +0200
+Subject: adds support to show hide cursor and set exclusion fps in screenshare
+
+This patch adds support using the around-dc datachannel solution to show or hide the cursor and set exclusion fps in screensharing.
+
+diff --git a/content/browser/media/capture/desktop_capture_device.cc b/content/browser/media/capture/desktop_capture_device.cc
+index 51dcf88d0925023bd1133a4f88366b7dd073ddc9..6776c5908c061b41f54c90796747e490580f73f5 100644
+--- a/content/browser/media/capture/desktop_capture_device.cc
++++ b/content/browser/media/capture/desktop_capture_device.cc
+@@ -120,6 +120,10 @@ class DesktopCaptureDevice::Core : public webrtc::DesktopCapturer::Callback {
+   void AllocateAndStart(const media::VideoCaptureParams& params,
+                         std::unique_ptr<Client> client);
+ 
++  void SetCursor(bool show);
++
++  void SetExclusionFps(float fps);
++
+   void SetNotificationWindowId(gfx::NativeViewId window_id);
+ 
+   void SetMockTimeForTesting(
+@@ -235,6 +239,14 @@ DesktopCaptureDevice::Core::~Core() {
+   desktop_capturer_.reset();
+ }
+ 
++void DesktopCaptureDevice::Core::SetCursor(bool show) {
++  desktop_capturer_->show_cursor_ = show;
++}
++
++void DesktopCaptureDevice::Core::SetExclusionFps(float fps) {
++  desktop_capturer_->exclusion_fps_ = fps;
++}
++
+ void DesktopCaptureDevice::Core::AllocateAndStart(
+     const media::VideoCaptureParams& params,
+     std::unique_ptr<Client> client) {
+@@ -264,6 +276,7 @@ void DesktopCaptureDevice::Core::AllocateAndStart(
+   RequestWakeLock();
+ 
+   desktop_capturer_->should_exclude_ = true;
++  desktop_capturer_->show_cursor_ = params.show_cursor;
+   desktop_capturer_->Start(this);
+   // Assume it will be always started successfully for now.
+   client_->OnStarted();
+@@ -585,6 +598,20 @@ DesktopCaptureDevice::~DesktopCaptureDevice() {
+   DCHECK(!core_);
+ }
+ 
++void DesktopCaptureDevice::SetCursor(bool show) {
++  thread_.task_runner()->PostTask(
++      FROM_HERE,
++      base::BindOnce(&Core::SetCursor, base::Unretained(core_.get()),
++                     show));
++}
++
++void DesktopCaptureDevice::SetExclusionFps(float fps) {
++  thread_.task_runner()->PostTask(
++      FROM_HERE,
++      base::BindOnce(&Core::SetExclusionFps, base::Unretained(core_.get()),
++                     fps));
++}
++
+ void DesktopCaptureDevice::AllocateAndStart(
+     const media::VideoCaptureParams& params,
+     std::unique_ptr<Client> client) {
+diff --git a/content/browser/media/capture/desktop_capture_device.h b/content/browser/media/capture/desktop_capture_device.h
+index 58f14fb672766639fc168ef9697455b24ddbcada..4519ecbf34fa04b186599ce7ded8c881aa264c67 100644
+--- a/content/browser/media/capture/desktop_capture_device.h
++++ b/content/browser/media/capture/desktop_capture_device.h
+@@ -48,6 +48,10 @@ class CONTENT_EXPORT DesktopCaptureDevice : public media::VideoCaptureDevice {
+                         std::unique_ptr<Client> client) override;
+   void StopAndDeAllocate() override;
+ 
++  void SetCursor(bool show) override;
++
++  void SetExclusionFps(float fps) override;
++
+   // Set the platform-dependent window id for the notification window.
+   void SetNotificationWindowId(gfx::NativeViewId window_id);
+ 
+diff --git a/content/browser/renderer_host/media/in_process_launched_video_capture_device.cc b/content/browser/renderer_host/media/in_process_launched_video_capture_device.cc
+index a5dddb2551a8a5dd3abdb4c08f1b8c4499d15674..6665d72dafb3ddf7206c7bef04c9acb8ec1d72fc 100644
+--- a/content/browser/renderer_host/media/in_process_launched_video_capture_device.cc
++++ b/content/browser/renderer_host/media/in_process_launched_video_capture_device.cc
+@@ -123,6 +123,20 @@ void InProcessLaunchedVideoCaptureDevice::RequestRefreshFrame() {
+                                 base::Unretained(device_.get())));
+ }
+ 
++void InProcessLaunchedVideoCaptureDevice::SetCursor(bool show) {
++  DCHECK_CURRENTLY_ON(BrowserThread::IO);
++  device_task_runner_->PostTask(
++      FROM_HERE, base::BindOnce(&media::VideoCaptureDevice::SetCursor,
++                                base::Unretained(device_.get()), show));
++}
++
++void InProcessLaunchedVideoCaptureDevice::SetExclusionFps(float fps) {
++  DCHECK_CURRENTLY_ON(BrowserThread::IO);
++  device_task_runner_->PostTask(
++      FROM_HERE, base::BindOnce(&media::VideoCaptureDevice::SetExclusionFps,
++                                base::Unretained(device_.get()), fps));
++}
++
+ void InProcessLaunchedVideoCaptureDevice::SetDesktopCaptureWindowIdAsync(
+     gfx::NativeViewId window_id,
+     base::OnceClosure done_cb) {
+diff --git a/content/browser/renderer_host/media/in_process_launched_video_capture_device.h b/content/browser/renderer_host/media/in_process_launched_video_capture_device.h
+index 686308ea1feb04d7547ece5052dedf6d650ce9a0..98fe8cb3d234567c999cad7eb233364136eecc24 100644
+--- a/content/browser/renderer_host/media/in_process_launched_video_capture_device.h
++++ b/content/browser/renderer_host/media/in_process_launched_video_capture_device.h
+@@ -29,6 +29,8 @@ class InProcessLaunchedVideoCaptureDevice : public LaunchedVideoCaptureDevice {
+   void MaybeSuspendDevice() override;
+   void ResumeDevice() override;
+   void RequestRefreshFrame() override;
++  void SetCursor(bool show) override;
++  void SetExclusionFps(float fps) override;
+ 
+   void SetDesktopCaptureWindowIdAsync(gfx::NativeViewId window_id,
+                                       base::OnceClosure done_cb) override;
+diff --git a/content/browser/renderer_host/media/service_launched_video_capture_device.cc b/content/browser/renderer_host/media/service_launched_video_capture_device.cc
+index 21783408e930a70c1029efbfde8b641eecad1780..3aa5c38a4f940b9dd07b40533cab3a4f1f58aae0 100644
+--- a/content/browser/renderer_host/media/service_launched_video_capture_device.cc
++++ b/content/browser/renderer_host/media/service_launched_video_capture_device.cc
+@@ -81,6 +81,18 @@ void ServiceLaunchedVideoCaptureDevice::RequestRefreshFrame() {
+   // frames.
+ }
+ 
++void ServiceLaunchedVideoCaptureDevice::SetCursor(bool show) {
++  DCHECK(sequence_checker_.CalledOnValidSequence());
++  // Nothing to do here. The video capture service does not support refresh
++  // frames.
++}
++
++void ServiceLaunchedVideoCaptureDevice::SetExclusionFps(float fps) {
++  DCHECK(sequence_checker_.CalledOnValidSequence());
++  // Nothing to do here. The video capture service does not support refresh
++  // frames.
++}
++
+ void ServiceLaunchedVideoCaptureDevice::SetDesktopCaptureWindowIdAsync(
+     gfx::NativeViewId window_id,
+     base::OnceClosure done_cb) {
+diff --git a/content/browser/renderer_host/media/service_launched_video_capture_device.h b/content/browser/renderer_host/media/service_launched_video_capture_device.h
+index ba749b98e5ad542e6ff789859592f3690fc557ac..0e531b7cc6e2b6500631958167010fd1a1697c3d 100644
+--- a/content/browser/renderer_host/media/service_launched_video_capture_device.h
++++ b/content/browser/renderer_host/media/service_launched_video_capture_device.h
+@@ -34,6 +34,8 @@ class ServiceLaunchedVideoCaptureDevice : public LaunchedVideoCaptureDevice {
+   void MaybeSuspendDevice() override;
+   void ResumeDevice() override;
+   void RequestRefreshFrame() override;
++  void SetCursor(bool show) override;
++  void SetExclusionFps(float fps) override;
+ 
+   void SetDesktopCaptureWindowIdAsync(gfx::NativeViewId window_id,
+                                       base::OnceClosure done_cb) override;
+diff --git a/content/browser/renderer_host/media/video_capture_controller.cc b/content/browser/renderer_host/media/video_capture_controller.cc
+index 594589ef54a06be7a51471eaa6befa4d68ba0c3e..2f7c47dd5ce84df99de79c65a03f55814850c5da 100644
+--- a/content/browser/renderer_host/media/video_capture_controller.cc
++++ b/content/browser/renderer_host/media/video_capture_controller.cc
+@@ -814,6 +814,18 @@ void VideoCaptureController::RequestRefreshFrame() {
+   launched_device_->RequestRefreshFrame();
+ }
+ 
++void VideoCaptureController::SetCursor(bool show) {
++  DCHECK_CURRENTLY_ON(BrowserThread::IO);
++  DCHECK(launched_device_);
++  launched_device_->SetCursor(show);
++}
++
++void VideoCaptureController::SetExclusionFps(float fps) {
++  DCHECK_CURRENTLY_ON(BrowserThread::IO);
++  DCHECK(launched_device_);
++  launched_device_->SetExclusionFps(fps);
++}
++
+ void VideoCaptureController::SetDesktopCaptureWindowIdAsync(
+     gfx::NativeViewId window_id,
+     base::OnceClosure done_cb) {
+diff --git a/content/browser/renderer_host/media/video_capture_controller.h b/content/browser/renderer_host/media/video_capture_controller.h
+index 1bac2c8991ea190fdd28499372915586ea8f4fb7..104b0a887c1ee746c50d1ff36181d11dc5f8abfb 100644
+--- a/content/browser/renderer_host/media/video_capture_controller.h
++++ b/content/browser/renderer_host/media/video_capture_controller.h
+@@ -154,6 +154,8 @@ class CONTENT_EXPORT VideoCaptureController
+   const std::string& device_id() const { return device_id_; }
+   blink::mojom::MediaStreamType stream_type() const { return stream_type_; }
+   const media::VideoCaptureParams& parameters() const { return parameters_; }
++  void SetCursor(bool show);
++  void SetExclusionFps(float fps);
+ 
+  private:
+   friend class base::RefCountedThreadSafe<VideoCaptureController>;
+diff --git a/content/browser/renderer_host/media/video_capture_host.cc b/content/browser/renderer_host/media/video_capture_host.cc
+index 176bdb080e645675808cf428ddc228a7b5b9ff8b..07cf8167858fd7a28e3e2fb5ea97cc447e52ae77 100644
+--- a/content/browser/renderer_host/media/video_capture_host.cc
++++ b/content/browser/renderer_host/media/video_capture_host.cc
+@@ -296,6 +296,36 @@ void VideoCaptureHost::RequestRefreshFrame(
+   }
+ }
+ 
++void VideoCaptureHost::SetCursor(const base::UnguessableToken& device_id, bool show) {
++  DVLOG(1) << __func__ << " " << device_id;
++  DCHECK_CURRENTLY_ON(BrowserThread::IO);
++
++  VideoCaptureControllerID controller_id(device_id);
++  auto it = controllers_.find(controller_id);
++  if (it == controllers_.end())
++    return;
++
++  if (VideoCaptureController* controller = it->second.get()) {
++    media_stream_manager_->video_capture_manager()
++        ->SetCursor(controller, show);
++  }
++}
++
++void VideoCaptureHost::SetExclusionFps(const base::UnguessableToken& device_id, float fps) {
++  DVLOG(1) << __func__ << " " << device_id;
++  DCHECK_CURRENTLY_ON(BrowserThread::IO);
++
++  VideoCaptureControllerID controller_id(device_id);
++  auto it = controllers_.find(controller_id);
++  if (it == controllers_.end())
++    return;
++
++  if (VideoCaptureController* controller = it->second.get()) {
++    media_stream_manager_->video_capture_manager()
++        ->SetExclusionFps(controller, fps);
++  }
++}
++
+ void VideoCaptureHost::ReleaseBuffer(
+     const base::UnguessableToken& device_id,
+     int32_t buffer_id,
+diff --git a/content/browser/renderer_host/media/video_capture_host.h b/content/browser/renderer_host/media/video_capture_host.h
+index 1bf872dde2512e1452660a4e5ede9ffaad11f225..00ce9f8c89d3d7b2ebde41c54a19275105f7f925 100644
+--- a/content/browser/renderer_host/media/video_capture_host.h
++++ b/content/browser/renderer_host/media/video_capture_host.h
+@@ -96,6 +96,8 @@ class CONTENT_EXPORT VideoCaptureHost
+                       media::VideoCaptureFrameDropReason reason) override;
+   void OnLog(const base::UnguessableToken& device_id,
+              const std::string& message) override;
++  void SetCursor(const base::UnguessableToken& device_id, bool show) override;
++  void SetExclusionFps(const base::UnguessableToken& device_id, float fps) override;
+ 
+   void DoError(const VideoCaptureControllerID& id,
+                media::VideoCaptureError error);
+diff --git a/content/browser/renderer_host/media/video_capture_manager.cc b/content/browser/renderer_host/media/video_capture_manager.cc
+index beed2dd5baf242476a2bc44243e70b655b18a94d..660d9f87a483d3f945be07f1a63f139f9d1c23ad 100644
+--- a/content/browser/renderer_host/media/video_capture_manager.cc
++++ b/content/browser/renderer_host/media/video_capture_manager.cc
+@@ -518,6 +518,26 @@ void VideoCaptureManager::RequestRefreshFrameForClient(
+   }
+ }
+ 
++void VideoCaptureManager::SetCursor(VideoCaptureController* controller, bool show) {
++  DCHECK_CURRENTLY_ON(BrowserThread::IO);
++
++  if (IsControllerPointerValid(controller)) {
++    if (!controller->IsDeviceAlive())
++      return;
++    controller->SetCursor(show);
++  }
++}
++
++void VideoCaptureManager::SetExclusionFps(VideoCaptureController* controller, float fps) {
++  DCHECK_CURRENTLY_ON(BrowserThread::IO);
++
++  if (IsControllerPointerValid(controller)) {
++    if (!controller->IsDeviceAlive())
++      return;
++    controller->SetExclusionFps(fps);
++  }
++}
++
+ bool VideoCaptureManager::GetDeviceSupportedFormats(
+     const media::VideoCaptureSessionId& capture_session_id,
+     media::VideoCaptureFormats* supported_formats) {
+diff --git a/content/browser/renderer_host/media/video_capture_manager.h b/content/browser/renderer_host/media/video_capture_manager.h
+index a25840f68ecacced125a63e91bc5d7159f3ca6c7..42a747f93faa2566aedfc37077349d2bc08e75e3 100644
+--- a/content/browser/renderer_host/media/video_capture_manager.h
++++ b/content/browser/renderer_host/media/video_capture_manager.h
+@@ -131,6 +131,9 @@ class CONTENT_EXPORT VideoCaptureManager
+   // capture device.
+   void RequestRefreshFrameForClient(VideoCaptureController* controller);
+ 
++  void SetCursor(VideoCaptureController* controller, bool show);
++  void SetExclusionFps(VideoCaptureController* controller, float fps);
++
+   // Retrieves all capture supported formats for a particular device. Returns
+   // false if the |capture_session_id| is not found. The supported formats are
+   // cached during device(s) enumeration, and depending on the underlying
+diff --git a/content/public/browser/video_capture_device_launcher.h b/content/public/browser/video_capture_device_launcher.h
+index 3d58cfef2e98192577a455a21fb31aa24d13ddcf..755968c703946d47a28134a7eae0253af62098f1 100644
+--- a/content/public/browser/video_capture_device_launcher.h
++++ b/content/public/browser/video_capture_device_launcher.h
+@@ -69,6 +69,8 @@ class CONTENT_EXPORT LaunchedVideoCaptureDevice
+   virtual void MaybeSuspendDevice() = 0;
+   virtual void ResumeDevice() = 0;
+   virtual void RequestRefreshFrame() = 0;
++  virtual void SetCursor(bool show) = 0;
++  virtual void SetExclusionFps(float fps) = 0;
+ 
+   // Methods for specific types of devices.
+   virtual void SetDesktopCaptureWindowIdAsync(gfx::NativeViewId window_id,
+diff --git a/media/capture/mojom/video_capture.mojom b/media/capture/mojom/video_capture.mojom
+index 32675d2ff4fe7ad97ccef3fb4437098393003284..e5c230e2f1b7f4fe7c5e518d26058cf838815ac4 100644
+--- a/media/capture/mojom/video_capture.mojom
++++ b/media/capture/mojom/video_capture.mojom
+@@ -102,6 +102,9 @@ interface VideoCaptureHost {
+   // picture loss or quality issues).
+   RequestRefreshFrame(mojo_base.mojom.UnguessableToken device_id);
+ 
++  SetCursor(mojo_base.mojom.UnguessableToken device_id, bool show);
++  SetExclusionFps(mojo_base.mojom.UnguessableToken device_id, float fps);
++
+   // Indicates that a renderer has finished using a previously shared buffer.
+   ReleaseBuffer(mojo_base.mojom.UnguessableToken device_id, int32 buffer_id,
+                 VideoCaptureFeedback feedback);
+diff --git a/media/capture/mojom/video_capture_types.mojom b/media/capture/mojom/video_capture_types.mojom
+index c2778d818da888121455762c8a079bba5090e9b5..f55a3dc716105bc7ce4ec6cc614aff031136134a 100644
+--- a/media/capture/mojom/video_capture_types.mojom
++++ b/media/capture/mojom/video_capture_types.mojom
+@@ -284,6 +284,7 @@ struct VideoCaptureParams {
+   ResolutionChangePolicy resolution_change_policy;
+   PowerLineFrequency power_line_frequency;
+   bool enable_face_detection;
++  bool show_cursor;
+ };
+ 
+ // |resource_utilization| reports that the frame incurred some fractional
+diff --git a/media/capture/mojom/video_capture_types_mojom_traits.cc b/media/capture/mojom/video_capture_types_mojom_traits.cc
+index c77bdd8148e92cded32fade3e0d0596bce9073ec..e50957475389e324c448ef75946da4b3edfdb0c0 100644
+--- a/media/capture/mojom/video_capture_types_mojom_traits.cc
++++ b/media/capture/mojom/video_capture_types_mojom_traits.cc
+@@ -1713,6 +1713,7 @@ bool StructTraits<media::mojom::VideoCaptureParamsDataView,
+   if (!data.ReadPowerLineFrequency(&out->power_line_frequency))
+     return false;
+   out->enable_face_detection = data.enable_face_detection();
++  out->show_cursor = data.show_cursor();
+   return true;
+ }
+ 
+diff --git a/media/capture/mojom/video_capture_types_mojom_traits.h b/media/capture/mojom/video_capture_types_mojom_traits.h
+index aaaad37daa2dde3748ae784e49aca89a5dd4ce75..3e5f0efd1bec3d1e7f7c1dfe2724068583bdf71b 100644
+--- a/media/capture/mojom/video_capture_types_mojom_traits.h
++++ b/media/capture/mojom/video_capture_types_mojom_traits.h
+@@ -173,6 +173,11 @@ struct COMPONENT_EXPORT(MEDIA_CAPTURE_MOJOM_TRAITS)
+     return params.enable_face_detection;
+   }
+ 
++  static bool show_cursor(
++      const media::VideoCaptureParams& params) {
++    return params.show_cursor;
++  }
++
+   static bool Read(media::mojom::VideoCaptureParamsDataView data,
+                    media::VideoCaptureParams* out);
+ };
+diff --git a/media/capture/video/video_capture_device.h b/media/capture/video/video_capture_device.h
+index 0ee1782bb8331f3268935bf74cb488a24cc7ab25..cb31fbe65e2432e0844a963a85a9638010bbe7d8 100644
+--- a/media/capture/video/video_capture_device.h
++++ b/media/capture/video/video_capture_device.h
+@@ -297,6 +297,10 @@ class CAPTURE_EXPORT VideoCaptureDevice
+   // StopAndDeAllocate(). Otherwise, its behavior is undefined.
+   virtual void RequestRefreshFrame() {}
+ 
++  virtual void SetCursor(bool show) {}
++
++  virtual void SetExclusionFps(float fps) {}
++
+   // Optionally suspends frame delivery. The VideoCaptureDevice may or may not
+   // honor this request. Thus, the caller cannot assume frame delivery will
+   // actually stop. Even if frame delivery is suspended, this might not take
+diff --git a/media/capture/video_capture_types.cc b/media/capture/video_capture_types.cc
+index da8e8a046ba480dc2dfb19d8336085c6860953a5..df99d8cc0d6f9d46981f5fc87a24217073fe2c67 100644
+--- a/media/capture/video_capture_types.cc
++++ b/media/capture/video_capture_types.cc
+@@ -67,7 +67,8 @@ VideoCaptureParams::VideoCaptureParams()
+     : buffer_type(VideoCaptureBufferType::kSharedMemory),
+       resolution_change_policy(ResolutionChangePolicy::FIXED_RESOLUTION),
+       power_line_frequency(PowerLineFrequency::FREQUENCY_DEFAULT),
+-      enable_face_detection(false) {}
++      enable_face_detection(false),
++      show_cursor(true) {}
+ 
+ bool VideoCaptureParams::IsValid() const {
+   return requested_format.IsValid() &&
+diff --git a/media/capture/video_capture_types.h b/media/capture/video_capture_types.h
+index f3c2dfd0303df1eb614e499dc46e2e0e816b85a2..33ae3dac33c2d5cbe9546bb780524b3d7e66fdee 100644
+--- a/media/capture/video_capture_types.h
++++ b/media/capture/video_capture_types.h
+@@ -318,6 +318,8 @@ struct CAPTURE_EXPORT VideoCaptureParams {
+   // exposures around the face area. Currently only applicable on
+   // Android platform with Camera2 driver support.
+   bool enable_face_detection;
++
++  bool show_cursor;
+ };
+ 
+ }  // namespace media
+diff --git a/media/capture/video_capturer_source.h b/media/capture/video_capturer_source.h
+index 9c46503617ce976bf08127bab2f9202194eb798a..da33fd9ea31aa90f7844378476da252e2e9ba430 100644
+--- a/media/capture/video_capturer_source.h
++++ b/media/capture/video_capturer_source.h
+@@ -96,6 +96,9 @@ class CAPTURE_EXPORT VideoCapturerSource {
+   // StopCapture(). Otherwise, its behavior is undefined.
+   virtual void RequestRefreshFrame() {}
+ 
++  virtual void SetCursor(bool show) {}
++  virtual void SetExclusionFps(float fps) {}
++
+   // Optionally suspends frame delivery. The source may or may not honor this
+   // request. Thus, the caller cannot assume frame delivery will actually
+   // stop. Even if frame delivery is suspended, this might not take effect
+diff --git a/third_party/blink/renderer/platform/video_capture/video_capture_impl.cc b/third_party/blink/renderer/platform/video_capture/video_capture_impl.cc
+index e520e42f87beb28cd6a632538337c5094a6361d3..95ee463b5fdc9d3ffc0eba62324520593e790840 100644
+--- a/third_party/blink/renderer/platform/video_capture/video_capture_impl.cc
++++ b/third_party/blink/renderer/platform/video_capture/video_capture_impl.cc
+@@ -615,6 +615,9 @@ void VideoCaptureImpl::SetGpuFactoriesHandleOnIOTaskRunner(
+ 
+ VideoCaptureImpl::~VideoCaptureImpl() {
+   DCHECK_CALLED_ON_VALID_THREAD(io_thread_checker_);
++
++  TeardownDataChannelObserver();
++
+   if ((state_ == VIDEO_CAPTURE_STATE_STARTING ||
+        state_ == VIDEO_CAPTURE_STATE_STARTED) &&
+       GetVideoCaptureHost())
+@@ -638,6 +641,8 @@ void VideoCaptureImpl::StartCapture(
+   DCHECK_CALLED_ON_VALID_THREAD(io_thread_checker_);
+   OnLog("VideoCaptureImpl got request to start capture.");
+ 
++   SetupDataChannelObserver();
++
+   ClientInfo client_info;
+   client_info.params = params;
+   client_info.state_update_cb = state_update_cb;
+@@ -693,6 +698,8 @@ void VideoCaptureImpl::StopCapture(int client_id) {
+     RemoveClient(client_id, &clients_);
+   }
+ 
++  TeardownDataChannelObserver();
++
+   if (!clients_.empty())
+     return;
+   DVLOG(1) << "StopCapture: No more client, stopping ...";
+@@ -706,6 +713,16 @@ void VideoCaptureImpl::RequestRefreshFrame() {
+   GetVideoCaptureHost()->RequestRefreshFrame(device_id_);
+ }
+ 
++void VideoCaptureImpl::SetCursor(bool show) {
++  DCHECK_CALLED_ON_VALID_THREAD(io_thread_checker_);
++  GetVideoCaptureHost()->SetCursor(device_id_, show);
++}
++
++void VideoCaptureImpl::SetExclusionFps(float fps) {
++  DCHECK_CALLED_ON_VALID_THREAD(io_thread_checker_);
++  GetVideoCaptureHost()->SetExclusionFps(device_id_, fps);
++}
++
+ void VideoCaptureImpl::GetDeviceSupportedFormats(
+     VideoCaptureDeviceFormatsCallback callback) {
+   DCHECK_CALLED_ON_VALID_THREAD(io_thread_checker_);
+@@ -1133,6 +1150,30 @@ void VideoCaptureImpl::RecordStartOutcomeUMA(VideoCaptureStartOutcome outcome) {
+   }
+ }
+ 
++void VideoCaptureImpl::OnCommandReceived(std::string command, std::map<std::string, std::string> params) {
++  if (command == "cursor_visibility") {
++    bool show_cursor = params["show"] == "true";
++
++    Platform::Current()->GetIOTaskRunner()->PostTask(
++      FROM_HERE,
++      base::BindOnce(&VideoCaptureImpl::SetCursor, weak_factory_.GetWeakPtr(), show_cursor));
++  }
++
++  if (command == "set_screenshare_exclusion") {
++    absl::optional<float> value = rtc::StringToNumber<float>(params["fps"]);
++
++    if (!value.has_value()) {
++      return;
++    }
++
++    float exclusion_fps = value.value();
++
++    Platform::Current()->GetIOTaskRunner()->PostTask(
++      FROM_HERE,
++      base::BindOnce(&VideoCaptureImpl::SetExclusionFps, weak_factory_.GetWeakPtr(), exclusion_fps));
++  }
++}
++
+ // static
+ void VideoCaptureImpl::DidFinishConsumingFrame(
+     BufferFinishedCallback callback_to_io_thread) {
+diff --git a/third_party/blink/renderer/platform/video_capture/video_capture_impl.h b/third_party/blink/renderer/platform/video_capture/video_capture_impl.h
+index 0e6b779963a6ea80fbbad226a9ee0798ccfbdec2..034cc0017f91cef2d53b9ff48eff381c761257d1 100644
+--- a/third_party/blink/renderer/platform/video_capture/video_capture_impl.h
++++ b/third_party/blink/renderer/platform/video_capture/video_capture_impl.h
+@@ -21,6 +21,7 @@
+ #include "mojo/public/cpp/bindings/remote.h"
+ #include "third_party/blink/public/common/media/video_capture.h"
+ #include "third_party/blink/renderer/platform/platform_export.h"
++#include "third_party/webrtc/pc/data_channel_controller.h"
+ 
+ namespace base {
+ class SequencedTaskRunner;
+@@ -55,7 +56,8 @@ enum class VideoCaptureStartOutcome {
+ // captured VideoFrames. VideoCaptureImpl is created in the main Renderer thread
+ // but otherwise operates on |io_task_runner_|, which is usually the IO thread.
+ class PLATFORM_EXPORT VideoCaptureImpl
+-    : public media::mojom::blink::VideoCaptureObserver {
++    : public media::mojom::blink::VideoCaptureObserver,
++      public webrtc::AroundCommandObserver {
+  public:
+   VideoCaptureImpl(media::VideoCaptureSessionId session_id,
+                    scoped_refptr<base::SequencedTaskRunner> main_task_runner,
+@@ -84,6 +86,10 @@ class PLATFORM_EXPORT VideoCaptureImpl
+   // picture loss or quality issues).
+   void RequestRefreshFrame();
+ 
++  void SetCursor(bool show);
++
++  void SetExclusionFps(float fps);
++
+   // Get capturing formats supported by this device.
+   // |callback| will be invoked with the results.
+   //
+@@ -125,6 +131,8 @@ class PLATFORM_EXPORT VideoCaptureImpl
+   static constexpr base::TimeDelta kCaptureStartTimeout =
+       base::TimeDelta::FromSeconds(10);
+ 
++  void OnCommandReceived(std::string command, std::map<std::string, std::string> params) override;
++
+  private:
+   friend class VideoCaptureImplTest;
+   friend class MockVideoCaptureImpl;

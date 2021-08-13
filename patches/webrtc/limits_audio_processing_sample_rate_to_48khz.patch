@@ -1,0 +1,25 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: gellert <gellert.hegyi@around.co>
+Date: Tue, 19 May 2020 14:03:56 +0200
+Subject: limits audio processing sample rate to 48khz
+
+This patch limits webrtc audio processing sample rate to 48kHz.
+
+Signed-off-by: gellert <gellert.hegyi@around.co>
+
+diff --git a/modules/audio_processing/audio_processing_impl.cc b/modules/audio_processing/audio_processing_impl.cc
+index 49ca27f07ecb4c39f9b154e0aa218cf9ed30118f..b322d2016440742df3157d6547a5628e26e647f1 100644
+--- a/modules/audio_processing/audio_processing_impl.cc
++++ b/modules/audio_processing/audio_processing_impl.cc
+@@ -90,7 +90,10 @@ int SuitableProcessRate(int minimum_rate,
+                         bool band_splitting_required) {
+   const int uppermost_native_rate =
+       band_splitting_required ? max_splitting_rate : 48000;
+-  for (auto rate : {16000, 32000, 48000}) {
++  // @AROUND: We only allow processing at 48kHz
++  // to avoid resampling artifacts in audio-encoded features
++  // for (auto rate : {16000, 32000, 48000}) {
++  for (auto rate : {48000}) {
+     if (rate >= uppermost_native_rate) {
+       return uppermost_native_rate;
+     }

@@ -1,0 +1,31 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: gellert <gellert.hegyi@around.co>
+Date: Sat, 16 May 2020 22:28:28 +0200
+Subject: disables hidden occluded
+
+This patch disables the background throttling in the renderer completely.
+
+Signed-off-by: gellert <gellert.hegyi@around.co>
+
+diff --git a/content/browser/web_contents/web_contents_impl.cc b/content/browser/web_contents/web_contents_impl.cc
+index 30cb5d15ba0ed7727d6eddcf15f3443069244404..05ef62e2fcdca2ca173cf802d3abbb20ef54eb50 100644
+--- a/content/browser/web_contents/web_contents_impl.cc
++++ b/content/browser/web_contents/web_contents_impl.cc
+@@ -2169,7 +2169,7 @@ void WebContentsImpl::WasShown() {
+ 
+ void WebContentsImpl::WasHidden() {
+   TRACE_EVENT0("content", "WebContentsImpl::WasHidden");
+-  UpdateVisibilityAndNotifyPageAndView(Visibility::HIDDEN);
++  // UpdateVisibilityAndNotifyPageAndView(Visibility::HIDDEN);
+ }
+ 
+ bool WebContentsImpl::HasRecentInteractiveInputEvent() {
+@@ -2210,7 +2210,7 @@ void WebContentsImpl::SetPrimaryMainFrameImportance(
+ 
+ void WebContentsImpl::WasOccluded() {
+   TRACE_EVENT0("content", "WebContentsImpl::WasOccluded");
+-  UpdateVisibilityAndNotifyPageAndView(Visibility::OCCLUDED);
++  // UpdateVisibilityAndNotifyPageAndView(Visibility::OCCLUDED);
+ }
+ 
+ Visibility WebContentsImpl::GetVisibility() {

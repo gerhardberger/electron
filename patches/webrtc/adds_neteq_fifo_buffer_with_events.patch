@@ -1,0 +1,1691 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: gellert <gellert.hegyi@around.co>
+Date: Thu, 8 Oct 2020 12:48:08 +0200
+Subject: adds neteq fifo buffer with events
+
+This patch adds a new NetEq implemetation using a FIFO buffer that will be used in copresent mode on the secondary devices in a group so that the audio will be consistently in sync with other members of the group. It also adds support for two events onbufferdrained and onbufferrestored to notify to the js side.
+
+Signed-off-by: gellert <gellert.hegyi@around.co>
+
+diff --git a/api/audio/audio_mixer.h b/api/audio/audio_mixer.h
+index b290cfacf08d7890cce009708e0615891ee52267..47408bc72c7e6f5f1b38ca36b0b8ff9a658bc347 100644
+--- a/api/audio/audio_mixer.h
++++ b/api/audio/audio_mixer.h
+@@ -18,6 +18,10 @@
+ 
+ namespace webrtc {
+ 
++namespace voe {
++class ChannelReceiveInterface;
++}  // namespace voe
++
+ // WORK IN PROGRESS
+ // This class is under development and is not yet intended for for use outside
+ // of WebRtc/Libjingle.
+@@ -48,9 +52,17 @@ class AudioMixer : public rtc::RefCountInterface {
+     // with this sample rate or higher will not cause quality loss.
+     virtual int PreferredSampleRate() const = 0;
+ 
++    virtual voe::ChannelReceiveInterface* channel_receive() {
++      return nullptr;
++    }
++
+     virtual ~Source() {}
+   };
+ 
++  virtual std::vector<Source*> audio_sources() {
++    return std::vector<Source*>();
++  }
++
+   // Returns true if adding was successful. A source is never added
+   // twice. Addition and removal can happen on different threads.
+   virtual bool AddSource(Source* audio_source) = 0;
+diff --git a/api/neteq/neteq.h b/api/neteq/neteq.h
+index ea7079e369589a1b23dac0c500cd7c8b318a1387..4600605e0d5a1c434281ebc929e82d7db9ab3953 100644
+--- a/api/neteq/neteq.h
++++ b/api/neteq/neteq.h
+@@ -30,6 +30,7 @@ namespace webrtc {
+ class AudioFrame;
+ class AudioDecoderFactory;
+ class Clock;
++class PeerConnectionObserver;
+ 
+ struct NetEqNetworkStatistics {
+   uint16_t current_buffer_size_ms;    // Current jitter buffer size in ms.
+@@ -332,6 +333,13 @@ class NetEq {
+   // Returns the length of the audio yet to play in the sync buffer.
+   // Mainly intended for testing.
+   virtual int SyncBufferSizeMs() const = 0;
++
++  virtual PeerConnectionObserver* peer_connection_observer() {
++    return nullptr;
++  }
++
++  virtual void set_peer_connection_observer(PeerConnectionObserver* observer) {
++  }
+ };
+ 
+ }  // namespace webrtc
+diff --git a/api/peer_connection_interface.h b/api/peer_connection_interface.h
+index 5499b7d87c08cf6d626db4164af96deef2a3336c..2b09b4eb5213af47410e419d1416dea95bbb76ae 100644
+--- a/api/peer_connection_interface.h
++++ b/api/peer_connection_interface.h
+@@ -1322,6 +1322,9 @@ class PeerConnectionObserver {
+   // The heuristics for defining what constitutes "interesting" are
+   // implementation-defined.
+   virtual void OnInterestingUsage(int usage_pattern) {}
++
++  virtual void OnBufferDrained() {}
++  virtual void OnBufferRestored() {}
+ };
+ 
+ // PeerConnectionDependencies holds all of PeerConnections dependencies.
+diff --git a/api/rtp_packet_info.h b/api/rtp_packet_info.h
+index 605620d6381f5f93bb823d7a1ab27cca36878b74..05b3fc51e5477bf9400a98ae1386503f4103acf7 100644
+--- a/api/rtp_packet_info.h
++++ b/api/rtp_packet_info.h
+@@ -19,6 +19,7 @@
+ #include "api/rtp_headers.h"
+ #include "api/units/timestamp.h"
+ #include "rtc_base/system/rtc_export.h"
++#include "system_wrappers/include/ntp_time.h"
+ 
+ namespace webrtc {
+ 
+@@ -74,6 +75,10 @@ class RTC_EXPORT RtpPacketInfo {
+       const absl::optional<AbsoluteCaptureTime>& value) {
+     absolute_capture_time_ = value;
+   }
++  int64_t get_absolute_capture_time_ms() const {
++    return absolute_capture_time_.has_value() ? 
++      UQ32x32ToInt64Ms(absolute_capture_time_->absolute_capture_timestamp) : 0;
++  }
+ 
+   const absl::optional<int64_t>& local_capture_clock_offset() const {
+     return local_capture_clock_offset_;
+diff --git a/audio/audio_receive_stream.h b/audio/audio_receive_stream.h
+index 61ebc2719f589200de43213527a437c70b8b12db..fdd1e3b36816783b8facc644b829abf967cb1218 100644
+--- a/audio/audio_receive_stream.h
++++ b/audio/audio_receive_stream.h
+@@ -140,6 +140,10 @@ class AudioReceiveStream final : public webrtc::AudioReceiveStream,
+   // TODO(tommi): Remove this method.
+   void ReconfigureForTesting(const webrtc::AudioReceiveStream::Config& config);
+ 
++  webrtc::voe::ChannelReceiveInterface* channel_receive() override {
++    return channel_receive_.get();
++  }
++
+  private:
+   AudioState* audio_state() const;
+ 
+diff --git a/audio/channel_receive.cc b/audio/channel_receive.cc
+index 57269cd19363ccc49ee24f8c794abc274444c079..bd07046aa0328f2f8605784e978cf202e925ea45 100644
+--- a/audio/channel_receive.cc
++++ b/audio/channel_receive.cc
+@@ -27,7 +27,6 @@
+ #include "audio/channel_send.h"
+ #include "audio/utility/audio_frame_operations.h"
+ #include "logging/rtc_event_log/events/rtc_event_audio_playout.h"
+-#include "modules/audio_coding/acm2/acm_receiver.h"
+ #include "modules/audio_coding/audio_network_adaptor/include/audio_network_adaptor_config.h"
+ #include "modules/audio_device/include/audio_device.h"
+ #include "modules/pacing/packet_router.h"
+@@ -187,6 +186,10 @@ class ChannelReceive : public ChannelReceiveInterface,
+       uint32_t ssrc,
+       const RtcpPacketTypeCounter& packet_counter) override;
+ 
++  acm2::AcmReceiver* acm_receiver() override {
++    return &acm_receiver_;
++  }
++
+  private:
+   void ReceivePacket(const uint8_t* packet,
+                      size_t packet_length,
+diff --git a/audio/channel_receive.h b/audio/channel_receive.h
+index deec49feaffbb33c4361418215598e43620443ec..e2895a015d7840adb3064540389f1efa4b0c0ef3 100644
+--- a/audio/channel_receive.h
++++ b/audio/channel_receive.h
+@@ -27,6 +27,7 @@
+ #include "api/transport/rtp/rtp_source.h"
+ #include "call/rtp_packet_sink_interface.h"
+ #include "call/syncable.h"
++#include "modules/audio_coding/acm2/acm_receiver.h"
+ #include "modules/audio_coding/include/audio_coding_module_typedefs.h"
+ #include "modules/rtp_rtcp/source/source_tracker.h"
+ #include "system_wrappers/include/clock.h"
+@@ -165,6 +166,10 @@ class ChannelReceiveInterface : public RtpPacketSinkInterface {
+ 
+   virtual void OnLocalSsrcChange(uint32_t local_ssrc) = 0;
+   virtual uint32_t GetLocalSsrc() const = 0;
++
++  virtual acm2::AcmReceiver* acm_receiver() {
++    return nullptr;
++  }
+ };
+ 
+ std::unique_ptr<ChannelReceiveInterface> CreateChannelReceive(
+diff --git a/media/base/media_engine.h b/media/base/media_engine.h
+index 6f47127f309b27389511bda82ed6c448096b6c3e..f1f2245374d5b887bef017f62ddd75e752f5c910 100644
+--- a/media/base/media_engine.h
++++ b/media/base/media_engine.h
+@@ -91,6 +91,8 @@ class VoiceEngineInterface : public RtpHeaderExtensionQueryInterface {
+ 
+   // Stops recording AEC dump.
+   virtual void StopAecDump() = 0;
++
++  virtual rtc::scoped_refptr<webrtc::AudioMixer> audio_mixer() = 0;
+ };
+ 
+ class VideoEngineInterface : public RtpHeaderExtensionQueryInterface {
+diff --git a/media/engine/webrtc_voice_engine.cc b/media/engine/webrtc_voice_engine.cc
+index c25c0483b5bf6329390af2013f8ae218873a2ecc..e829734682501f9401cabfc883a46236f5842eb3 100644
+--- a/media/engine/webrtc_voice_engine.cc
++++ b/media/engine/webrtc_voice_engine.cc
+@@ -661,7 +661,8 @@ WebRtcVoiceEngine::GetRtpHeaderExtensions() const {
+         webrtc::RtpExtension::kAbsSendTimeUri,
+         webrtc::RtpExtension::kTransportSequenceNumberUri,
+         webrtc::RtpExtension::kMidUri, webrtc::RtpExtension::kRidUri,
+-        webrtc::RtpExtension::kRepairedRidUri}) {
++        webrtc::RtpExtension::kRepairedRidUri,
++        webrtc::RtpExtension::kAbsoluteCaptureTimeUri}) {
+     result.emplace_back(uri, id++, webrtc::RtpTransceiverDirection::kSendRecv);
+   }
+   return result;
+diff --git a/media/engine/webrtc_voice_engine.h b/media/engine/webrtc_voice_engine.h
+index 147688b0e0da9107231cdbe608e6746a8d95f674..534c911c259e248cfa7d8f66f5023921134e504e 100644
+--- a/media/engine/webrtc_voice_engine.h
++++ b/media/engine/webrtc_voice_engine.h
+@@ -87,6 +87,10 @@ class WebRtcVoiceEngine final : public VoiceEngineInterface {
+   // Stops AEC dump.
+   void StopAecDump() override;
+ 
++  rtc::scoped_refptr<webrtc::AudioMixer> audio_mixer() override {
++    return audio_mixer_;
++  }
++
+  private:
+   // Every option that is "set" will be applied. Every option not "set" will be
+   // ignored. This allows us to selectively turn on and off different options
+diff --git a/modules/audio_coding/BUILD.gn b/modules/audio_coding/BUILD.gn
+index d1d17267e565e3284d112f48fbf5b7698589853d..b6ed45ab7892c764288786388a56e3526d641c69 100644
+--- a/modules/audio_coding/BUILD.gn
++++ b/modules/audio_coding/BUILD.gn
+@@ -958,6 +958,8 @@ rtc_library("neteq") {
+     "neteq/merge.h",
+     "neteq/nack_tracker.cc",
+     "neteq/nack_tracker.h",
++    "neteq/neteq_fifo.cc",
++    "neteq/neteq_fifo.h",
+     "neteq/neteq_impl.cc",
+     "neteq/neteq_impl.h",
+     "neteq/normal.cc",
+diff --git a/modules/audio_coding/acm2/acm_receiver.h b/modules/audio_coding/acm2/acm_receiver.h
+index 19dc57758ee46e78e7d0c83b1234f45d91a250cb..806325f6b9aa4130f8e75bf4e4d66dbcf414217b 100644
+--- a/modules/audio_coding/acm2/acm_receiver.h
++++ b/modules/audio_coding/acm2/acm_receiver.h
+@@ -203,6 +203,10 @@ class AcmReceiver {
+   // Get statistics of calls to GetAudio().
+   void GetDecodingCallStatistics(AudioDecodingCallStats* stats) const;
+ 
++  NetEq* neteq() {
++    return neteq_.get();
++  }
++
+  private:
+   struct DecoderInfo {
+     int payload_type;
+diff --git a/modules/audio_coding/acm2/call_statistics.cc b/modules/audio_coding/acm2/call_statistics.cc
+index e97e52968851a4a17c3964706b041501626716d9..8280ca201f89b67fe53e561c18587d8c4052bf60 100644
+--- a/modules/audio_coding/acm2/call_statistics.cc
++++ b/modules/audio_coding/acm2/call_statistics.cc
+@@ -45,7 +45,7 @@ void CallStatistics::DecodedByNetEq(AudioFrame::SpeechType speech_type,
+     }
+     case AudioFrame::kUndefined: {
+       // If the audio is decoded by NetEq, |kUndefined| is not an option.
+-      RTC_NOTREACHED();
++      // RTC_NOTREACHED();
+     }
+   }
+ }
+diff --git a/modules/audio_coding/codecs/opus/audio_encoder_opus.cc b/modules/audio_coding/codecs/opus/audio_encoder_opus.cc
+index 7c62e98c5b725221c4ca748137d157aed2dbfe30..ffea8bc7551dc487dee3294c6635d859083cb9b4 100644
+--- a/modules/audio_coding/codecs/opus/audio_encoder_opus.cc
++++ b/modules/audio_coding/codecs/opus/audio_encoder_opus.cc
+@@ -56,10 +56,10 @@ constexpr int kDefaultMaxPlaybackRate = 48000;
+ 
+ // These two lists must be sorted from low to high
+ #if WEBRTC_OPUS_SUPPORT_120MS_PTIME
+-constexpr int kANASupportedFrameLengths[] = {20, 40, 60, 120};
++constexpr int kANASupportedFrameLengths[] = {10, 20, 40, 60, 120};
+ constexpr int kOpusSupportedFrameLengths[] = {10, 20, 40, 60, 120};
+ #else
+-constexpr int kANASupportedFrameLengths[] = {20, 40, 60};
++constexpr int kANASupportedFrameLengths[] = {10, 20, 40, 60};
+ constexpr int kOpusSupportedFrameLengths[] = {10, 20, 40, 60};
+ #endif
+ 
+diff --git a/modules/audio_coding/neteq/default_neteq_factory.cc b/modules/audio_coding/neteq/default_neteq_factory.cc
+index 487450fe0fb0f5995837b4f106cbc292a0fc9eba..d1e0b8bfdc299f4764f4241f3f202a5cc95dba77 100644
+--- a/modules/audio_coding/neteq/default_neteq_factory.cc
++++ b/modules/audio_coding/neteq/default_neteq_factory.cc
+@@ -13,6 +13,7 @@
+ #include <utility>
+ 
+ #include "modules/audio_coding/neteq/neteq_impl.h"
++#include "modules/audio_coding/neteq/neteq_fifo.h"
+ 
+ namespace webrtc {
+ 
+@@ -23,6 +24,13 @@ std::unique_ptr<NetEq> DefaultNetEqFactory::CreateNetEq(
+     const NetEq::Config& config,
+     const rtc::scoped_refptr<AudioDecoderFactory>& decoder_factory,
+     Clock* clock) const {
++  // AROUND: we use max_packets_in_buffer to signal to use the NetEqFifo
++  // implementation, that's why '79' as a random identifier is used.
++  if (config.max_packets_in_buffer == 79) {
++    return std::make_unique<NetEqFifo>(
++      config, NetEqFifo::Dependencies(config, clock, decoder_factory));
++  }
++
+   return std::make_unique<NetEqImpl>(
+       config, NetEqImpl::Dependencies(config, clock, decoder_factory,
+                                       controller_factory_));
+diff --git a/modules/audio_coding/neteq/neteq_fifo.cc b/modules/audio_coding/neteq/neteq_fifo.cc
+new file mode 100644
+index 0000000000000000000000000000000000000000..22392b3877d98237545ac7646e1b96acd6585109
+--- /dev/null
++++ b/modules/audio_coding/neteq/neteq_fifo.cc
+@@ -0,0 +1,1013 @@
++/*
++ *  Copyright (c) 2012 The WebRTC project authors. All Rights Reserved.
++ *
++ *  Use of this source code is governed by a BSD-style license
++ *  that can be found in the LICENSE file in the root of the source
++ *  tree. An additional intellectual property rights grant can be found
++ *  in the file PATENTS.  All contributing project authors may
++ *  be found in the AUTHORS file in the root of the source tree.
++ */
++
++#include <assert.h>
++
++#include <algorithm>
++#include <cstdint>
++#include <cstring>
++#include <list>
++#include <map>
++#include <utility>
++#include <vector>
++
++#include "api/audio_codecs/audio_decoder.h"
++#include "api/neteq/tick_timer.h"
++#include "modules/audio_coding/neteq/neteq_fifo.h"
++#include "modules/audio_coding/neteq/packet.h"
++#include "modules/audio_coding/neteq/packet_buffer.h"
++#include "modules/audio_coding/neteq/red_payload_splitter.h"
++#include "modules/audio_coding/neteq/statistics_calculator.h"
++#include "modules/audio_coding/neteq/timestamp_scaler.h"
++#include "rtc_base/checks.h"
++#include "rtc_base/logging.h"
++#include "rtc_base/numerics/safe_conversions.h"
++#include "rtc_base/sanitizer.h"
++#include "rtc_base/strings/audio_format_to_string.h"
++#include "rtc_base/trace_event.h"
++#include "system_wrappers/include/clock.h"
++#include "system_wrappers/include/ntp_time.h"
++
++namespace webrtc {
++
++NetEqFifo::Dependencies::Dependencies(
++    const NetEq::Config& config,
++    Clock* clock,
++    const rtc::scoped_refptr<AudioDecoderFactory>& decoder_factory)
++    : clock(clock),
++      tick_timer(new TickTimer),
++      stats(new StatisticsCalculator),
++      decoder_database(
++          new DecoderDatabase(decoder_factory, config.codec_pair_id)),
++      packet_buffer(
++          new PacketBuffer(config.max_packets_in_buffer, tick_timer.get())),
++      red_payload_splitter(new RedPayloadSplitter),
++      timestamp_scaler(new TimestampScaler(*decoder_database)) {}
++
++NetEqFifo::Dependencies::~Dependencies() = default;
++
++NetEqFifo::NetEqFifo(const NetEq::Config& config,
++                     Dependencies&& deps)
++    : clock_(deps.clock),
++      tick_timer_(std::move(deps.tick_timer)),
++      decoder_database_(std::move(deps.decoder_database)),
++      packet_buffer_(std::move(deps.packet_buffer)),
++      red_payload_splitter_(std::move(deps.red_payload_splitter)),
++      timestamp_scaler_(std::move(deps.timestamp_scaler)),
++      stats_(std::move(deps.stats)),
++      decoded_buffer_length_(kMaxFrameSize),
++      decoded_buffer_(new int16_t[decoded_buffer_length_]),
++      playout_timestamp_(0),
++      new_codec_(false),
++      timestamp_(0),
++      reset_decoder_(false),
++      first_packet_(true),
++      last_capture_time_(0) {
++  RTC_LOG(LS_INFO) << "NetEq config: " << config.ToString();
++  int fs = config.sample_rate_hz;
++  if (fs != 8000 && fs != 16000 && fs != 32000 && fs != 48000) {
++    RTC_LOG(LS_ERROR) << "Sample rate " << fs
++                      << " Hz not supported. "
++                         "Changing to 8000 Hz.";
++    fs = 8000;
++  }
++  fs_hz_ = fs;
++  fs_mult_ = fs / 8000;
++  last_output_sample_rate_hz_ = fs;
++  output_size_samples_ = static_cast<size_t>(kOutputSizeMs * 8 * fs_mult_);
++  decoder_frame_length_ = 2 * output_size_samples_;  // 20 ms.
++  SetSampleRateAndChannels(fs, 1);
++}
++
++NetEqFifo::~NetEqFifo() = default;
++
++int NetEqFifo::InsertPacket(const RTPHeader& rtp_header,
++                            rtc::ArrayView<const uint8_t> payload) {
++  rtc::MsanCheckInitialized(payload);
++  TRACE_EVENT0("webrtc", "NetEqFifo::InsertPacket");
++  MutexLock lock(&mutex_);
++  if (InsertPacketInternal(rtp_header, payload) != 0) {
++    return kFail;
++  }
++  return kOK;
++}
++
++void NetEqFifo::InsertEmptyPacket(const RTPHeader& /*rtp_header*/) {
++  MutexLock lock(&mutex_);
++
++}
++
++int NetEqFifo::GetAudio(AudioFrame* audio_frame,
++                        bool* muted,
++                        int* current_sample_rate_hz,
++                        absl::optional<Operation> action_override) {
++  TRACE_EVENT0("webrtc", "NetEqFifo::GetAudio");
++  MutexLock lock(&mutex_);
++  if (GetAudioInternal(audio_frame, muted, action_override) != 0) {
++    return kFail;
++  }
++  RTC_DCHECK_EQ(
++      audio_frame->sample_rate_hz_,
++      rtc::dchecked_cast<int>(audio_frame->samples_per_channel_ * 100));
++  RTC_DCHECK_EQ(*muted, audio_frame->muted());
++  audio_frame->vad_activity_ = AudioFrame::kVadUnknown;
++  last_output_sample_rate_hz_ = audio_frame->sample_rate_hz_;
++  RTC_DCHECK(last_output_sample_rate_hz_ == 8000 ||
++             last_output_sample_rate_hz_ == 16000 ||
++             last_output_sample_rate_hz_ == 32000 ||
++             last_output_sample_rate_hz_ == 48000)
++      << "Unexpected sample rate " << last_output_sample_rate_hz_;
++  return kOK;
++}
++
++void NetEqFifo::SetCodecs(const std::map<int, SdpAudioFormat>& codecs) {
++  MutexLock lock(&mutex_);
++  const std::vector<int> changed_payload_types =
++      decoder_database_->SetCodecs(codecs);
++  for (const int pt : changed_payload_types) {
++    packet_buffer_->DiscardPacketsWithPayloadType(pt, stats_.get());
++  }
++}
++
++bool NetEqFifo::RegisterPayloadType(int rtp_payload_type,
++                                    const SdpAudioFormat& audio_format) {
++  RTC_LOG(LS_VERBOSE) << "NetEqFifo::RegisterPayloadType: payload type "
++                      << rtp_payload_type << ", codec "
++                      << rtc::ToString(audio_format);
++  MutexLock lock(&mutex_);
++  return decoder_database_->RegisterPayload(rtp_payload_type, audio_format) ==
++         DecoderDatabase::kOK;
++}
++
++int NetEqFifo::RemovePayloadType(uint8_t rtp_payload_type) {
++  MutexLock lock(&mutex_);
++  int ret = decoder_database_->Remove(rtp_payload_type);
++  if (ret == DecoderDatabase::kOK || ret == DecoderDatabase::kDecoderNotFound) {
++    packet_buffer_->DiscardPacketsWithPayloadType(rtp_payload_type,
++                                                  stats_.get());
++    return kOK;
++  }
++  return kFail;
++}
++
++void NetEqFifo::RemoveAllPayloadTypes() {
++  MutexLock lock(&mutex_);
++  decoder_database_->RemoveAll();
++}
++
++bool NetEqFifo::SetMinimumDelay(int delay_ms) {
++  MutexLock lock(&mutex_);
++  if (delay_ms >= 0 && delay_ms <= 10000) {
++    min_delay_ms_ = delay_ms;
++    return true;
++  }
++  return false;
++}
++
++bool NetEqFifo::SetMaximumDelay(int delay_ms) {
++  MutexLock lock(&mutex_);
++  if (delay_ms >= 0 && delay_ms <= 10000) {
++    max_delay_ms_ = delay_ms;
++    return true;
++  }
++  return false;
++}
++
++bool NetEqFifo::SetBaseMinimumDelayMs(int delay_ms) {
++  MutexLock lock(&mutex_);
++  if (delay_ms >= 0 && delay_ms <= 10000) {
++    if (delay_ms > base_min_delay_ms_) {
++      buffering_ = true;
++      buffer_underrun_count_ = 0;
++    }
++    base_min_delay_ms_ = delay_ms;
++    return true;
++  }
++  return false;
++}
++
++int NetEqFifo::GetBaseMinimumDelayMs() const {
++  MutexLock lock(&mutex_);
++  return base_min_delay_ms_;
++}
++
++int NetEqFifo::TargetDelayMs() const {
++  MutexLock lock(&mutex_);
++  return base_min_delay_ms_;
++}
++
++int NetEqFifo::FilteredCurrentDelayMs() const {
++  MutexLock lock(&mutex_);
++  auto next_packet = packet_buffer_->PeekNextPacket();
++  if (next_packet)
++    return next_packet->waiting_time->ElapsedMs();
++  return 0;
++}
++
++int NetEqFifo::NetworkStatistics(NetEqNetworkStatistics* stats) {
++  MutexLock lock(&mutex_);
++  assert(decoder_database_.get());
++  *stats = CurrentNetworkStatisticsInternal();
++  stats_->GetNetworkStatistics(decoder_frame_length_, stats);
++  return 0;
++}
++
++NetEqNetworkStatistics NetEqFifo::CurrentNetworkStatistics() const {
++  MutexLock lock(&mutex_);
++  return CurrentNetworkStatisticsInternal();
++}
++
++NetEqNetworkStatistics NetEqFifo::CurrentNetworkStatisticsInternal() const {
++  assert(decoder_database_.get());
++  NetEqNetworkStatistics stats;
++  const size_t total_samples_in_buffers =
++      packet_buffer_->NumSamplesInBuffer(decoder_frame_length_);
++
++  RTC_DCHECK_GT(fs_hz_, 0);
++  stats.current_buffer_size_ms =
++      static_cast<uint16_t>(total_samples_in_buffers * 1000 / fs_hz_);
++  return stats;
++}
++
++NetEqLifetimeStatistics NetEqFifo::GetLifetimeStatistics() const {
++  MutexLock lock(&mutex_);
++  return stats_->GetLifetimeStatistics();
++}
++
++NetEqOperationsAndState NetEqFifo::GetOperationsAndState() const {
++  MutexLock lock(&mutex_);
++  auto result = stats_->GetOperationsAndState();
++  result.current_buffer_size_ms =
++      packet_buffer_->NumSamplesInBuffer(decoder_frame_length_) *
++      1000 / fs_hz_;
++  result.current_frame_size_ms = decoder_frame_length_ * 1000 / fs_hz_;
++  result.next_packet_available = packet_buffer_->PeekNextPacket();
++  return result;
++}
++
++void NetEqFifo::EnableVad() {
++}
++
++void NetEqFifo::DisableVad() {
++}
++
++absl::optional<uint32_t> NetEqFifo::GetPlayoutTimestamp() const {
++  MutexLock lock(&mutex_);
++  return timestamp_scaler_->ToExternal(playout_timestamp_);
++}
++
++int NetEqFifo::last_output_sample_rate_hz() const {
++  MutexLock lock(&mutex_);
++  return last_output_sample_rate_hz_;
++}
++
++absl::optional<NetEq::DecoderFormat> NetEqFifo::GetDecoderFormat(
++    int payload_type) const {
++  MutexLock lock(&mutex_);
++  const DecoderDatabase::DecoderInfo* const di =
++      decoder_database_->GetDecoderInfo(payload_type);
++  if (di) {
++    const AudioDecoder* const decoder = di->GetDecoder();
++    // TODO(kwiberg): Why the special case for RED?
++    return DecoderFormat{
++        /*sample_rate_hz=*/di->IsRed() ? 8000 : di->SampleRateHz(),
++        /*num_channels=*/
++        decoder ? rtc::dchecked_cast<int>(decoder->Channels()) : 1,
++        /*sdp_format=*/di->GetFormat()};
++  } else {
++    // Payload type not registered.
++    return absl::nullopt;
++  }
++}
++
++void NetEqFifo::FlushBuffers() {
++  MutexLock lock(&mutex_);
++  RTC_LOG(LS_VERBOSE) << "FlushBuffers";
++  packet_buffer_->Flush(stats_.get());
++
++  // Set to wait for new codec.
++  first_packet_ = true;
++}
++
++void NetEqFifo::EnableNack(size_t max_nack_list_size) {
++  MutexLock lock(&mutex_);
++}
++
++void NetEqFifo::DisableNack() {
++  MutexLock lock(&mutex_);
++}
++
++std::vector<uint16_t> NetEqFifo::GetNackList(int64_t round_trip_time_ms) const {
++  MutexLock lock(&mutex_);
++  return std::vector<uint16_t>();
++}
++
++std::vector<uint32_t> NetEqFifo::LastDecodedTimestamps() const {
++  MutexLock lock(&mutex_);
++  return last_decoded_timestamps_;
++}
++
++int NetEqFifo::SyncBufferSizeMs() const {
++   return 0;
++}
++
++int NetEqFifo::GetBufferSizeMs() const {
++  if (!fs_hz_) {
++  return 0;
++  }
++
++  return !packet_buffer_->Empty()
++      ? packet_buffer_->GetAbsCaptureTimeDiff() +
++            (/*decoder_frame_length_ + */algorithm_buffer_->Size()) * 1000 / fs_hz_
++      : algorithm_buffer_->Size() * 1000 / fs_hz_;
++}
++
++// Methods below this line are private.
++
++int NetEqFifo::InsertPacketInternal(const RTPHeader& rtp_header,
++                                    rtc::ArrayView<const uint8_t> payload) {
++  if (payload.empty()) {
++    RTC_LOG_F(LS_ERROR) << "payload is empty";
++    return kInvalidPointer;
++  }
++
++  int64_t receive_time_ms = clock_->TimeInMilliseconds();
++  stats_->ReceivedPacket();
++
++  PacketList packet_list;
++  // Insert packet in a packet list.
++  packet_list.push_back([&rtp_header, &payload, &receive_time_ms] {
++    // Convert to Packet.
++    Packet packet;
++    packet.payload_type = rtp_header.payloadType;
++    packet.sequence_number = rtp_header.sequenceNumber;
++    packet.timestamp = rtp_header.timestamp;
++    packet.payload.SetData(payload.data(), payload.size());
++    packet.packet_info = RtpPacketInfo(rtp_header, receive_time_ms);
++    // Waiting time will be set upon inserting the packet in the buffer.
++    RTC_DCHECK(!packet.waiting_time);
++    return packet;
++  }());
++
++  bool update_sample_rate_and_channels = first_packet_;
++
++  if (update_sample_rate_and_channels) {
++    // Reset timestamp scaling.
++    timestamp_scaler_->Reset();
++  }
++
++  if (!decoder_database_->IsRed(rtp_header.payloadType)) {
++    // Scale timestamp to internal domain (only for some codecs).
++    timestamp_scaler_->ToInternal(&packet_list);
++  }
++
++  // Store these for later use, since the first packet may very well disappear
++  // before we need these values.
++  uint32_t main_timestamp = packet_list.front().timestamp;
++  uint8_t main_payload_type = packet_list.front().payload_type;
++  uint16_t main_sequence_number = packet_list.front().sequence_number;
++
++  // Reinitialize NetEq if it's needed (changed SSRC or first call).
++  if (update_sample_rate_and_channels) {
++    // Note: |first_packet_| will be cleared further down in this method, once
++    // the packet has been successfully inserted into the packet buffer.
++
++    // Flush the packet buffer and DTMF buffer.
++    packet_buffer_->Flush(stats_.get());
++
++    // Update codecs.
++    timestamp_ = main_timestamp;
++  }
++
++  // Check for RED payload type, and separate payloads into several packets.
++  if (decoder_database_->IsRed(rtp_header.payloadType)) {
++    if (!red_payload_splitter_->SplitRed(&packet_list)) {
++      return kRedundancySplitError;
++    }
++    // Only accept a few RED payloads of the same type as the main data,
++    // DTMF events and CNG.
++    red_payload_splitter_->CheckRedPayloads(&packet_list, *decoder_database_);
++    if (packet_list.empty()) {
++      return kRedundancySplitError;
++    }
++  }
++
++  // Check payload types.
++  if (decoder_database_->CheckPayloadTypes(packet_list) ==
++      DecoderDatabase::kDecoderNotFound) {
++    return kUnknownRtpPayloadType;
++  }
++
++  RTC_DCHECK(!packet_list.empty());
++
++  // Update main_timestamp, if new packets appear in the list
++  // after RED splitting.
++  if (decoder_database_->IsRed(rtp_header.payloadType)) {
++    timestamp_scaler_->ToInternal(&packet_list);
++    main_timestamp = packet_list.front().timestamp;
++    main_payload_type = packet_list.front().payload_type;
++    main_sequence_number = packet_list.front().sequence_number;
++  }
++
++  PacketList parsed_packet_list;
++  while (!packet_list.empty()) {
++    Packet& packet = packet_list.front();
++    const DecoderDatabase::DecoderInfo* info =
++        decoder_database_->GetDecoderInfo(packet.payload_type);
++    if (!info) {
++      RTC_LOG(LS_WARNING) << "SplitAudio unknown payload type";
++      return kUnknownRtpPayloadType;
++    }
++
++    if (info->IsComfortNoise()) {
++      // Carry comfort noise packets along.
++      parsed_packet_list.splice(parsed_packet_list.end(), packet_list,
++                                packet_list.begin());
++    } else {
++      const auto sequence_number = packet.sequence_number;
++      const auto payload_type = packet.payload_type;
++      const Packet::Priority original_priority = packet.priority;
++      const auto& packet_info = packet.packet_info;
++      auto packet_from_result = [&](AudioDecoder::ParseResult& result) {
++        Packet new_packet;
++        new_packet.sequence_number = sequence_number;
++        new_packet.payload_type = payload_type;
++        new_packet.timestamp = result.timestamp;
++        new_packet.priority.codec_level = result.priority;
++        new_packet.priority.red_level = original_priority.red_level;
++        new_packet.packet_info = packet_info;
++        new_packet.frame = std::move(result.frame);
++        return new_packet;
++      };
++
++      std::vector<AudioDecoder::ParseResult> results =
++          info->GetDecoder()->ParsePayload(std::move(packet.payload),
++                                           packet.timestamp);
++      if (results.empty()) {
++        packet_list.pop_front();
++      } else {
++        bool first = true;
++        for (auto& result : results) {
++          RTC_DCHECK(result.frame);
++          RTC_DCHECK_GE(result.priority, 0);
++          if (first) {
++            // Re-use the node and move it to parsed_packet_list.
++            packet_list.front() = packet_from_result(result);
++            parsed_packet_list.splice(parsed_packet_list.end(), packet_list,
++                                      packet_list.begin());
++            first = false;
++          } else {
++            parsed_packet_list.push_back(packet_from_result(result));
++          }
++        }
++      }
++    }
++  }
++
++  // Calculate the number of primary (non-FEC/RED) packets.
++  const size_t number_of_primary_packets = std::count_if(
++      parsed_packet_list.begin(), parsed_packet_list.end(),
++      [](const Packet& in) { return in.priority.codec_level == 0; });
++  if (number_of_primary_packets < parsed_packet_list.size()) {
++    stats_->SecondaryPacketsReceived(parsed_packet_list.size() -
++                                     number_of_primary_packets);
++  }
++
++  // Insert packets in buffer.
++  const int target_level_ms = base_min_delay_ms_;
++  absl::optional<uint8_t> current_cng_rtp_payload_type_;
++  const int ret = packet_buffer_->InsertPacketList(
++      &parsed_packet_list, *decoder_database_, &current_rtp_payload_type_,
++      &current_cng_rtp_payload_type_, stats_.get(), decoder_frame_length_,
++      last_output_sample_rate_hz_, target_level_ms);
++
++  if (ret == PacketBuffer::kFlushed) {
++    // Reset DSP timestamp etc. if packet buffer flushed.
++    new_codec_ = true;
++    update_sample_rate_and_channels = true;
++  } else if (ret != PacketBuffer::kOK) {
++    return kOtherError;
++  }
++
++  if (first_packet_) {
++    first_packet_ = false;
++    // Update the codec on the next GetAudio call.
++    new_codec_ = true;
++  }
++
++  if (current_rtp_payload_type_) {
++    RTC_DCHECK(decoder_database_->GetDecoderInfo(*current_rtp_payload_type_))
++        << "Payload type " << static_cast<int>(*current_rtp_payload_type_)
++        << " is unknown where it shouldn't be";
++  }
++
++  if (update_sample_rate_and_channels && !packet_buffer_->Empty()) {
++    // We do not use |current_rtp_payload_type_| to |set payload_type|, but
++    // get the next RTP header from |packet_buffer_| to obtain the payload type.
++    // The reason for it is the following corner case. If NetEq receives a
++    // CNG packet with a sample rate different than the current CNG then it
++    // flushes its buffer, assuming send codec must have been changed. However,
++    // payload type of the hypothetically new send codec is not known.
++    const Packet* next_packet = packet_buffer_->PeekNextPacket();
++    RTC_DCHECK(next_packet);
++    const int payload_type = next_packet->payload_type;
++    size_t channels = 1;
++    if (!decoder_database_->IsComfortNoise(payload_type)) {
++      AudioDecoder* decoder = decoder_database_->GetDecoder(payload_type);
++      assert(decoder);  // Payloads are already checked to be valid.
++      channels = decoder->Channels();
++    }
++    const DecoderDatabase::DecoderInfo* decoder_info =
++        decoder_database_->GetDecoderInfo(payload_type);
++    assert(decoder_info);
++    if (decoder_info->SampleRateHz() != fs_hz_ ||
++        channels != channels_) {
++      SetSampleRateAndChannels(decoder_info->SampleRateHz(), channels);
++    }
++  }
++
++  // TODO
++  auto relative_delay = 0;
++  if (relative_delay) {
++    stats_->RelativePacketArrivalDelay(relative_delay);
++  }
++  return 0;
++}
++
++int NetEqFifo::GetAudioInternal(AudioFrame* audio_frame,
++                                bool* muted,
++                                absl::optional<Operation> action_override) {
++  PacketList packet_list;
++  Operation operation;
++  *muted = false;
++  last_decoded_timestamps_.clear();
++  last_decoded_packet_infos_.clear();
++  tick_timer_->Increment();
++  stats_->IncreaseCounter(output_size_samples_, fs_hz_);
++  int return_value = 0;
++
++  max_delay_ms_ = base_min_delay_ms_ + 10;
++  min_delay_ms_ = 40;
++
++  if (max_delay_ms_> 0 && GetBufferSizeMs() >= max_delay_ms_) {
++    // Remove from algorithm
++    while (GetBufferSizeMs() > max_delay_ms_ && !packet_buffer_->Empty()) {
++      if (algorithm_buffer_->Size()) {
++        size_t sample_diff = (GetBufferSizeMs() - max_delay_ms_) * fs_hz_ / 1000;
++        algorithm_buffer_->PopFront(sample_diff);
++      } else {
++        // Get next capture timestamp in packet buffer.
++        last_capture_time_ = !packet_buffer_->Empty() ?
++          packet_buffer_->PeekNextPacket()->packet_info.get_absolute_capture_time_ms() : 0;
++
++        if (!packet_buffer_->Empty()) {
++          last_sequence_number_ = packet_buffer_->PeekNextPacket()->sequence_number;
++        }
++
++        if (packet_buffer_->DiscardNextPacket(stats_.get()) == PacketBuffer::kBufferEmpty) {
++          break;
++        }
++      }
++    }
++    buffering_ = false;
++    buffer_underrun_count_ = 0;
++  } else if (GetBufferSizeMs() >= base_min_delay_ms_) {
++    buffering_ = false;
++  } else if (GetBufferSizeMs() <= min_delay_ms_) {
++    buffering_ = true;
++  }
++
++  if (packet_buffer_->NumPacketsInBuffer() >= (size_t)(base_min_delay_ms_ / 10)) {
++    buffer_underrun_count_ = 0;
++  }
++
++  if (packet_buffer_->NumPacketsInBuffer() < (size_t)(base_min_delay_ms_ / 10)) {
++    buffer_underrun_count_++;
++  }
++
++  int buffer_underrun_limit = base_min_delay_ms_ / 10 + 2;
++  bool buffering_underrun = buffer_underrun_count_ > buffer_underrun_limit;
++  if (!buffering_underrun_ && buffering_underrun) {
++    if (observer_) {
++      observer_->OnBufferDrained();
++    }
++  }
++
++  if (buffering_underrun_ && !buffering_underrun) {
++    if (observer_) {
++      observer_->OnBufferRestored();
++    }
++  }
++
++  buffering_underrun_ = buffering_underrun;
++
++  bool is_packet_missing = false;
++  uint16_t current_sequence_number = packet_buffer_->Empty()
++    ? 0 : packet_buffer_->PeekNextPacket()->sequence_number;
++  uint32_t current_timestamp = packet_buffer_->Empty()
++    ? 0 : packet_buffer_->PeekNextPacket()->packet_info.rtp_timestamp();
++
++  if (!packet_buffer_->Empty()) {
++    is_packet_missing = (current_sequence_number - last_sequence_number_) > 1
++      && last_sequence_number_ > 0;
++
++    if (is_packet_missing && last_timestamp_ > 0) {
++      int packet_length_ms = 10;
++      int ts_diff = (current_timestamp - last_timestamp_) * 1000 / fs_hz_;
++
++      if (ts_diff == packet_length_ms) {
++        is_packet_missing = false;
++      }
++    }
++
++    if (is_packet_missing) {
++      if ((current_sequence_number - last_sequence_number_) > 2) {
++        last_sequence_number_++;
++      } else {
++        last_sequence_number_ = current_sequence_number;
++      }
++    }
++  }
++
++  // Check for muted state.
++  if (buffering_ || packet_buffer_->Empty() || buffering_underrun_ || is_packet_missing) {
++    audio_frame->Reset();
++    RTC_DCHECK(audio_frame->muted());  // Reset() should mute the frame.
++    playout_timestamp_ += static_cast<uint32_t>(output_size_samples_);
++    audio_frame->sample_rate_hz_ = fs_hz_;
++    audio_frame->samples_per_channel_ = output_size_samples_;
++    audio_frame->timestamp_ =
++        first_packet_
++            ? 0
++            : timestamp_scaler_->ToExternal(playout_timestamp_) -
++                  static_cast<uint32_t>(audio_frame->samples_per_channel_);
++    audio_frame->num_channels_ = channels_;
++    stats_->ExpandedNoiseSamples(output_size_samples_, false);
++    *muted = true;
++    return 0;
++  }
++
++  last_sequence_number_ = current_sequence_number;
++  last_timestamp_ = current_timestamp;
++
++  int decode_return_value = 0;
++  if (algorithm_buffer_->Size() < output_size_samples_) {
++    // Get packets from buffer.
++    int extracted_samples = ExtractPackets(output_size_samples_, &packet_list);
++    if (extracted_samples < 0) {
++      return kPacketBufferCorruption;
++    }
++    AudioDecoder::SpeechType speech_type;
++    int length = 0;
++    decode_return_value =
++        Decode(&packet_list, &operation, &length, &speech_type);
++
++    // The length does not match the number of channels.
++    if (length > 0) {
++      algorithm_buffer_->PushBackInterleaved(
++          rtc::ArrayView<const int16_t>(decoded_buffer_.get(), length));
++    }
++
++    if (length > 0) {
++      stats_->DecodedOutputPlayed();
++    }
++  }
++
++
++  // We treat it as if all packets referenced to by |last_decoded_packet_infos_|
++  // were mashed together when creating the samples in |algorithm_buffer_|.
++  RtpPacketInfos packet_infos(last_decoded_packet_infos_);
++
++  // Extract data from |sync_buffer_| to |output|.
++  size_t num_output_samples_per_channel = output_size_samples_;
++  size_t num_output_samples = output_size_samples_ * channels_;
++  if (num_output_samples > AudioFrame::kMaxDataSizeSamples) {
++    RTC_LOG(LS_WARNING) << "Output array is too short. "
++                        << AudioFrame::kMaxDataSizeSamples << " < "
++                        << output_size_samples_ << " * "
++                        << channels_;
++    num_output_samples = AudioFrame::kMaxDataSizeSamples;
++    num_output_samples_per_channel =
++        AudioFrame::kMaxDataSizeSamples / channels_;
++  }
++
++  // Use dead reckoning to estimate the |playout_timestamp_|.
++  playout_timestamp_ += static_cast<uint32_t>(output_size_samples_);
++
++  audio_frame->ResetWithoutMuting();
++  const size_t tot_samples_read = algorithm_buffer_->ReadInterleaved(
++      num_output_samples_per_channel, audio_frame->mutable_data());
++  const size_t samples_read_per_channel = tot_samples_read / channels_;
++  audio_frame->num_channels_ = channels_;
++  audio_frame->samples_per_channel_ = samples_read_per_channel;
++  audio_frame->sample_rate_hz_ = fs_hz_;
++  // TODO(bugs.webrtc.org/10757):
++  //   We don't have the ability to properly track individual packets once their
++  //   audio samples have entered |sync_buffer_|. So for now, treat it as if
++  //   |packet_infos| from packets decoded by the current |GetAudioInternal()|
++  //   call were all consumed assembling the current audio frame and the current
++  //   audio frame only.
++  audio_frame->packet_infos_ = std::move(packet_infos);
++
++  algorithm_buffer_->PopFront(samples_read_per_channel);
++
++  if (audio_frame->samples_per_channel_ != output_size_samples_) {
++    RTC_LOG(LS_ERROR) << "audio_frame->samples_per_channel_ ("
++                      << audio_frame->samples_per_channel_
++                      << ") != output_size_samples_ (" << output_size_samples_
++                      << ")";
++    // TODO(minyue): treatment of under-run, filling zeros
++    audio_frame->Mute();
++    return kSampleUnderrun;
++  }
++
++  // Set the timestamp in the audio frame to zero before the first packet has
++  // been inserted. Otherwise, subtract the frame size in samples to get the
++  // timestamp of the first sample in the frame (playout_timestamp_ is the
++  // last + 1).
++  audio_frame->timestamp_ =
++      first_packet_
++          ? 0
++          : timestamp_scaler_->ToExternal(playout_timestamp_) -
++                static_cast<uint32_t>(audio_frame->samples_per_channel_);
++
++  if (decode_return_value)
++    return decode_return_value;
++  return return_value;
++}
++
++int NetEqFifo::Decode(PacketList* packet_list,
++                      Operation* operation,
++                      int* decoded_length,
++                      AudioDecoder::SpeechType* speech_type) {
++  *speech_type = AudioDecoder::kSpeech;
++
++  // When packet_list is empty, we may be in kCodecInternalCng mode, and for
++  // that we use current active decoder.
++  AudioDecoder* decoder = decoder_database_->GetActiveDecoder();
++
++  if (!packet_list->empty()) {
++    const Packet& packet = packet_list->front();
++    uint8_t payload_type = packet.payload_type;
++    if (!decoder_database_->IsComfortNoise(payload_type)) {
++      decoder = decoder_database_->GetDecoder(payload_type);
++      assert(decoder);
++      if (!decoder) {
++        RTC_LOG(LS_WARNING)
++            << "Unknown payload type " << static_cast<int>(payload_type);
++        packet_list->clear();
++        return kDecoderNotFound;
++      }
++      bool decoder_changed;
++      decoder_database_->SetActiveDecoder(payload_type, &decoder_changed);
++      if (decoder_changed) {
++        // We have a new decoder. Re-init some values.
++        const DecoderDatabase::DecoderInfo* decoder_info =
++            decoder_database_->GetDecoderInfo(payload_type);
++        assert(decoder_info);
++        if (!decoder_info) {
++          RTC_LOG(LS_WARNING)
++              << "Unknown payload type " << static_cast<int>(payload_type);
++          packet_list->clear();
++          return kDecoderNotFound;
++        }
++        // If sampling rate or number of channels has changed, we need to make
++        // a reset.
++        if (decoder_info->SampleRateHz() != fs_hz_ ||
++            decoder->Channels() != channels_) {
++          // TODO(tlegrand): Add unittest to cover this event.
++          SetSampleRateAndChannels(decoder_info->SampleRateHz(),
++                                   decoder->Channels());
++        }
++        playout_timestamp_ = timestamp_;
++      }
++    }
++  }
++
++  if (reset_decoder_) {
++    // TODO(hlundin): Write test for this.
++    if (decoder)
++      decoder->Reset();
++
++    reset_decoder_ = false;
++  }
++
++  *decoded_length = 0;
++
++  int return_value = DecodeLoop(packet_list, *operation, decoder, decoded_length,
++                            speech_type);
++
++  if (*decoded_length < 0) {
++    // Error returned from the decoder.
++    *decoded_length = 0;
++    int error_code = 0;
++    if (decoder)
++      error_code = decoder->ErrorCode();
++    if (error_code != 0) {
++      // Got some error code from the decoder.
++      return_value = kDecoderErrorCode;
++      RTC_LOG(LS_WARNING) << "Decoder returned error code: " << error_code;
++    } else {
++      // Decoder does not implement error codes. Return generic error.
++      return_value = kOtherDecoderError;
++      RTC_LOG(LS_WARNING) << "Decoder error (no error code)";
++    }
++  }
++
++  return return_value;
++}
++
++int NetEqFifo::DecodeLoop(PacketList* packet_list,
++                          const Operation& operation,
++                          AudioDecoder* decoder,
++                          int* decoded_length,
++                          AudioDecoder::SpeechType* speech_type) {
++  RTC_DCHECK(last_decoded_timestamps_.empty());
++  RTC_DCHECK(last_decoded_packet_infos_.empty());
++
++  // Do decoding.
++  while (!packet_list->empty() && !decoder_database_->IsComfortNoise(
++                                      packet_list->front().payload_type)) {
++    assert(decoder);  // At this point, we must have a decoder object.
++    // The number of channels in the |sync_buffer_| should be the same as the
++    // number decoder channels.
++    assert(channels_ == decoder->Channels());
++    assert(decoded_buffer_length_ >= kMaxFrameSize * decoder->Channels());
++
++
++    auto opt_result = packet_list->front().frame->Decode(
++        rtc::ArrayView<int16_t>(&decoded_buffer_[*decoded_length],
++                                decoded_buffer_length_ - *decoded_length));
++    last_decoded_timestamps_.push_back(packet_list->front().timestamp);
++    last_decoded_packet_infos_.push_back(
++        std::move(packet_list->front().packet_info));
++    packet_list->pop_front();
++    if (opt_result) {
++      const auto& result = *opt_result;
++      *speech_type = result.speech_type;
++      if (result.num_decoded_samples > 0) {
++        *decoded_length += rtc::dchecked_cast<int>(result.num_decoded_samples);
++        // Update |decoder_frame_length_| with number of samples per channel.
++        decoder_frame_length_ =
++            result.num_decoded_samples / decoder->Channels();
++      }
++    } else {
++      // Error.
++      // TODO(ossu): What to put here?
++      RTC_LOG(LS_WARNING) << "Decode error";
++      *decoded_length = -1;
++      last_decoded_packet_infos_.clear();
++      packet_list->clear();
++      break;
++    }
++    if (*decoded_length > rtc::dchecked_cast<int>(decoded_buffer_length_)) {
++      // Guard against overflow.
++      RTC_LOG(LS_WARNING) << "Decoded too much.";
++      packet_list->clear();
++      return kDecodedTooMuch;
++    }
++  }  // End of decode loop.
++
++  // If the list is not empty at this point, either a decoding error terminated
++  // the while-loop, or list must hold exactly one CNG packet.
++  assert(packet_list->empty() || *decoded_length < 0 ||
++         (packet_list->size() == 1 && decoder_database_->IsComfortNoise(
++                                          packet_list->front().payload_type)));
++  return 0;
++}
++
++
++
++int NetEqFifo::ExtractPackets(size_t required_samples,
++                              PacketList* packet_list) {
++  bool first_packet = true;
++  uint8_t prev_payload_type = 0;
++  uint32_t prev_timestamp = 0;
++  uint16_t prev_sequence_number = 0;
++  bool next_packet_available = false;
++
++  const Packet* next_packet = packet_buffer_->PeekNextPacket();
++  RTC_DCHECK(next_packet);
++  if (!next_packet) {
++    RTC_LOG(LS_ERROR) << "Packet buffer unexpectedly empty.";
++    return -1;
++  }
++  uint32_t first_timestamp = next_packet->timestamp;
++  size_t extracted_samples = 0;
++
++  // Packet extraction loop.
++  do {
++    timestamp_ = next_packet->timestamp;
++    absl::optional<Packet> packet = packet_buffer_->GetNextPacket();
++    // |next_packet| may be invalid after the |packet_buffer_| operation.
++    next_packet = nullptr;
++    if (!packet) {
++      RTC_LOG(LS_ERROR) << "Should always be able to extract a packet here";
++      assert(false);  // Should always be able to extract a packet here.
++      return -1;
++    }
++    const uint64_t waiting_time_ms = packet->waiting_time->ElapsedMs();
++    stats_->StoreWaitingTime(waiting_time_ms);
++    RTC_DCHECK(!packet->empty());
++
++    if (first_packet) {
++      first_packet = false;
++      prev_sequence_number = packet->sequence_number;
++      prev_timestamp = packet->timestamp;
++      prev_payload_type = packet->payload_type;
++    }
++
++    // RTC_LOG(LS_ERROR) << ">>> packet waiting time: " << packet->waiting_time->ElapsedMs();
++
++    const bool has_cng_packet =
++        decoder_database_->IsComfortNoise(packet->payload_type);
++    // Store number of extracted samples.
++    size_t packet_duration = 0;
++    if (packet->frame) {
++      packet_duration = packet->frame->Duration();
++      // TODO(ossu): Is this the correct way to track Opus FEC packets?
++      if (packet->priority.codec_level > 0) {
++        stats_->SecondaryDecodedSamples(
++            rtc::dchecked_cast<int>(packet_duration));
++      }
++    } else if (!has_cng_packet) {
++      RTC_LOG(LS_WARNING) << "Unknown payload type "
++                          << static_cast<int>(packet->payload_type);
++      RTC_NOTREACHED();
++    }
++
++    if (packet_duration == 0) {
++      // Decoder did not return a packet duration. Assume that the packet
++      // contains the same number of samples as the previous one.
++      packet_duration = decoder_frame_length_;
++    }
++    extracted_samples = packet->timestamp - first_timestamp + packet_duration;
++
++    stats_->JitterBufferDelay(packet_duration, waiting_time_ms,
++                              base_min_delay_ms_);
++
++    packet_list->push_back(std::move(*packet));  // Store packet in list.
++    packet = absl::nullopt;  // Ensure it's never used after the move.
++
++    // Check what packet is available next.
++    next_packet = packet_buffer_->PeekNextPacket();
++    next_packet_available = false;
++    if (next_packet && prev_payload_type == next_packet->payload_type &&
++        !has_cng_packet) {
++      int16_t seq_no_diff = next_packet->sequence_number - prev_sequence_number;
++      size_t ts_diff = next_packet->timestamp - prev_timestamp;
++      if ((seq_no_diff == 1 || seq_no_diff == 0) &&
++          ts_diff <= packet_duration) {
++        // The next sequence number is available, or the next part of a packet
++        // that was split into pieces upon insertion.
++        next_packet_available = true;
++      }
++      prev_sequence_number = next_packet->sequence_number;
++      prev_timestamp = next_packet->timestamp;
++    }
++  } while (extracted_samples < required_samples && next_packet_available);
++
++  if (extracted_samples > 0) {
++    // Delete old packets only when we are going to decode something. Otherwise,
++    // we could end up in the situation where we never decode anything, since
++    // all incoming packets are considered too old but the buffer will also
++    // never be flooded and flushed.
++    packet_buffer_->DiscardAllOldPackets(timestamp_, stats_.get());
++  }
++
++  return rtc::dchecked_cast<int>(extracted_samples);
++}
++
++
++void NetEqFifo::SetSampleRateAndChannels(int fs_hz, size_t channels) {
++  RTC_LOG(LS_VERBOSE) << "SetSampleRateAndChannels " << fs_hz << " "
++                      << channels;
++  // TODO(hlundin): Change to an enumerator and skip assert.
++  assert(fs_hz == 8000 || fs_hz == 16000 || fs_hz == 32000 || fs_hz == 48000);
++  assert(channels > 0);
++
++  fs_hz_ = fs_hz;
++  fs_mult_ = fs_hz / 8000;
++  channels_ = channels;
++  output_size_samples_ = static_cast<size_t>(kOutputSizeMs * 8 * fs_mult_);
++  decoder_frame_length_ = 3 * output_size_samples_;  // Initialize to 30ms.
++
++  // Delete algorithm buffer and create a new one.
++  algorithm_buffer_.reset(new AudioMultiVector(channels));
++
++  // Verify that |decoded_buffer_| is long enough.
++  if (decoded_buffer_length_ < kMaxFrameSize * channels) {
++    // Reallocate to larger size.
++    decoded_buffer_length_ = kMaxFrameSize * channels;
++    decoded_buffer_.reset(new int16_t[decoded_buffer_length_]);
++  }
++}
++
++}  // namespace webrtc
+diff --git a/modules/audio_coding/neteq/neteq_fifo.h b/modules/audio_coding/neteq/neteq_fifo.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..8bf008675f870e8d0b0fca3522ae250d2e26e8c7
+--- /dev/null
++++ b/modules/audio_coding/neteq/neteq_fifo.h
+@@ -0,0 +1,272 @@
++
++#ifndef MODULES_AUDIO_CODING_NETEQ_NETEQ_FIFO_H_
++#define MODULES_AUDIO_CODING_NETEQ_NETEQ_FIFO_H_
++
++#include <map>
++#include <memory>
++#include <string>
++#include <utility>
++#include <vector>
++
++#include "absl/types/optional.h"
++#include "api/audio/audio_frame.h"
++#include "api/neteq/neteq.h"
++#include "api/neteq/neteq_controller.h"
++#include "api/neteq/neteq_controller_factory.h"
++#include "api/neteq/tick_timer.h"
++#include "api/peer_connection_interface.h"
++#include "api/rtp_packet_info.h"
++#include "modules/audio_coding/neteq/audio_multi_vector.h"
++#include "modules/audio_coding/neteq/expand_uma_logger.h"
++#include "modules/audio_coding/neteq/packet.h"
++#include "modules/audio_coding/neteq/random_vector.h"
++#include "modules/audio_coding/neteq/statistics_calculator.h"
++#include "rtc_base/constructor_magic.h"
++#include "rtc_base/synchronization/mutex.h"
++#include "rtc_base/thread_annotations.h"
++
++namespace webrtc {
++
++// Forward declarations.
++class Clock;
++class DecoderDatabase;
++class PacketBuffer;
++class RedPayloadSplitter;
++class TimestampScaler;
++
++class NetEqFifo : public webrtc::NetEq {
++ public:
++
++  enum ErrorCodes {
++    kNoError = 0,
++    kOtherError,
++    kUnknownRtpPayloadType,
++    kDecoderNotFound,
++    kInvalidPointer,
++    kAccelerateError,
++    kPreemptiveExpandError,
++    kComfortNoiseErrorCode,
++    kDecoderErrorCode,
++    kOtherDecoderError,
++    kInvalidOperation,
++    kDtmfParsingError,
++    kDtmfInsertError,
++    kSampleUnderrun,
++    kDecodedTooMuch,
++    kRedundancySplitError,
++    kPacketBufferCorruption
++  };
++
++  struct Dependencies {
++    // The constructor populates the Dependencies struct with the default
++    // implementations of the objects. They can all be replaced by the user
++    // before sending the struct to the NetEqImpl constructor. However, there
++    // are dependencies between some of the classes inside the struct, so
++    // swapping out one may make it necessary to re-create another one.
++    Dependencies(const NetEq::Config& config,
++                 Clock* clock,
++                 const rtc::scoped_refptr<AudioDecoderFactory>& decoder_factory);
++    ~Dependencies();
++
++    Clock* const clock;
++    std::unique_ptr<TickTimer> tick_timer;
++    std::unique_ptr<StatisticsCalculator> stats;
++    std::unique_ptr<DecoderDatabase> decoder_database;
++    std::unique_ptr<PacketBuffer> packet_buffer;
++    std::unique_ptr<RedPayloadSplitter> red_payload_splitter;
++    std::unique_ptr<TimestampScaler> timestamp_scaler;
++  };
++
++  // Creates a new NetEqImpl object.
++  NetEqFifo(const NetEq::Config& config, Dependencies&& deps);
++
++  ~NetEqFifo() override;
++
++  // Inserts a new packet into NetEq. Returns 0 on success, -1 on failure.
++  int InsertPacket(const RTPHeader& rtp_header,
++                   rtc::ArrayView<const uint8_t> payload) override;
++
++  void InsertEmptyPacket(const RTPHeader& rtp_header) override;
++
++  int GetAudio(
++      AudioFrame* audio_frame,
++      bool* muted,
++      int* current_sample_rate_hz = nullptr,
++      absl::optional<Operation> action_override = absl::nullopt) override;
++
++  void SetCodecs(const std::map<int, SdpAudioFormat>& codecs) override;
++
++  bool RegisterPayloadType(int rtp_payload_type,
++                           const SdpAudioFormat& audio_format) override;
++
++  // Removes |rtp_payload_type| from the codec database. Returns 0 on success,
++  // -1 on failure.
++  int RemovePayloadType(uint8_t rtp_payload_type) override;
++
++  void RemoveAllPayloadTypes() override;
++
++  bool SetMinimumDelay(int delay_ms) override;
++
++  bool SetMaximumDelay(int delay_ms) override;
++
++  bool SetBaseMinimumDelayMs(int delay_ms) override;
++
++  int GetBaseMinimumDelayMs() const override;
++
++  int TargetDelayMs() const override;
++
++  int FilteredCurrentDelayMs() const override;
++
++  // Writes the current network statistics to |stats|. The statistics are reset
++  // after the call.
++  int NetworkStatistics(NetEqNetworkStatistics* stats) override;
++
++  NetEqNetworkStatistics CurrentNetworkStatistics() const override;
++
++  NetEqNetworkStatistics CurrentNetworkStatisticsInternal() const
++      RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
++
++  NetEqLifetimeStatistics GetLifetimeStatistics() const override;
++
++  NetEqOperationsAndState GetOperationsAndState() const override;
++
++  // Enables post-decode VAD. When enabled, GetAudio() will return
++  // kOutputVADPassive when the signal contains no speech.
++  void EnableVad() override;
++
++  // Disables post-decode VAD.
++  void DisableVad() override;
++
++  absl::optional<uint32_t> GetPlayoutTimestamp() const override;
++
++  int last_output_sample_rate_hz() const override;
++
++  absl::optional<DecoderFormat> GetDecoderFormat(
++      int payload_type) const override;
++
++  // Flushes both the packet buffer and the sync buffer.
++  void FlushBuffers() override;
++
++  void EnableNack(size_t max_nack_list_size) override;
++
++  void DisableNack() override;
++
++  std::vector<uint16_t> GetNackList(int64_t round_trip_time_ms) const override;
++
++  std::vector<uint32_t> LastDecodedTimestamps() const override;
++
++  int SyncBufferSizeMs() const override;
++
++  PeerConnectionObserver* peer_connection_observer() override {
++    return observer_;
++  }
++
++  void set_peer_connection_observer(PeerConnectionObserver* observer) override {
++    observer_ = observer;
++  }
++
++ protected:
++  static const int kOutputSizeMs = 10;
++  static const size_t kMaxFrameSize = 5760;  // 120 ms @ 48 kHz.
++
++  int GetBufferSizeMs() const RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
++
++  // Inserts a new packet into NetEq. This is used by the InsertPacket method
++  // above. Returns 0 on success, otherwise an error code.
++  // TODO(hlundin): Merge this with InsertPacket above?
++  int InsertPacketInternal(const RTPHeader& rtp_header,
++                           rtc::ArrayView<const uint8_t> payload)
++      RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
++
++  // Delivers 10 ms of audio data. The data is written to |audio_frame|.
++  // Returns 0 on success, otherwise an error code.
++  int GetAudioInternal(AudioFrame* audio_frame,
++                       bool* muted,
++                       absl::optional<Operation> action_override)
++      RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
++
++  // Decodes the speech packets in |packet_list|, and writes the results to
++  // |decoded_buffer|, which is allocated to hold |decoded_buffer_length|
++  // elements. The length of the decoded data is written to |decoded_length|.
++  // The speech type -- speech or (codec-internal) comfort noise -- is written
++  // to |speech_type|. If |packet_list| contains any SID frames for RFC 3389
++  // comfort noise, those are not decoded.
++  int Decode(PacketList* packet_list,
++             Operation* operation,
++             int* decoded_length,
++             AudioDecoder::SpeechType* speech_type)
++      RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
++
++  // Sub-method to Decode(). Performs the actual decoding.
++  int DecodeLoop(PacketList* packet_list,
++                 const Operation& operation,
++                 AudioDecoder* decoder,
++                 int* decoded_length,
++                 AudioDecoder::SpeechType* speech_type)
++      RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
++
++  // Extracts packets from |packet_buffer_| to produce at least
++  // |required_samples| samples. The packets are inserted into |packet_list|.
++  // Returns the number of samples that the packets in the list will produce, or
++  // -1 in case of an error.
++  int ExtractPackets(size_t required_samples, PacketList* packet_list)
++      RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
++
++  // Resets various variables and objects to new values based on the sample rate
++  // |fs_hz| and |channels| number audio channels.
++  void SetSampleRateAndChannels(int fs_hz, size_t channels)
++      RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
++
++
++  Clock* const clock_;
++
++  mutable Mutex mutex_;
++  const std::unique_ptr<TickTimer> tick_timer_ RTC_GUARDED_BY(mutex_);
++  const std::unique_ptr<DecoderDatabase> decoder_database_
++      RTC_GUARDED_BY(mutex_);
++  const std::unique_ptr<PacketBuffer> packet_buffer_ RTC_GUARDED_BY(mutex_);
++  const std::unique_ptr<RedPayloadSplitter> red_payload_splitter_
++      RTC_GUARDED_BY(mutex_);
++  const std::unique_ptr<TimestampScaler> timestamp_scaler_
++      RTC_GUARDED_BY(mutex_);
++  const std::unique_ptr<StatisticsCalculator> stats_ RTC_GUARDED_BY(mutex_);
++  std::unique_ptr<AudioMultiVector> algorithm_buffer_
++      RTC_GUARDED_BY(mutex_);
++  int fs_hz_ RTC_GUARDED_BY(mutex_);
++  int fs_mult_ RTC_GUARDED_BY(mutex_);
++  size_t channels_ RTC_GUARDED_BY(mutex_);
++  int last_output_sample_rate_hz_ RTC_GUARDED_BY(mutex_);
++  size_t output_size_samples_ RTC_GUARDED_BY(mutex_);
++  size_t decoder_frame_length_ RTC_GUARDED_BY(mutex_);
++  Mode last_mode_ RTC_GUARDED_BY(mutex_);
++  Operation last_operation_ RTC_GUARDED_BY(mutex_);
++  size_t decoded_buffer_length_ RTC_GUARDED_BY(mutex_);
++  std::unique_ptr<int16_t[]> decoded_buffer_ RTC_GUARDED_BY(mutex_);
++  uint32_t playout_timestamp_ RTC_GUARDED_BY(mutex_);
++  bool new_codec_ RTC_GUARDED_BY(mutex_);
++  uint32_t timestamp_ RTC_GUARDED_BY(mutex_);
++  bool reset_decoder_ RTC_GUARDED_BY(mutex_);
++  absl::optional<uint8_t> current_rtp_payload_type_ RTC_GUARDED_BY(mutex_);
++  bool first_packet_ RTC_GUARDED_BY(mutex_);
++  std::vector<uint32_t> last_decoded_timestamps_ RTC_GUARDED_BY(mutex_);
++  std::vector<RtpPacketInfo> last_decoded_packet_infos_
++      RTC_GUARDED_BY(mutex_);
++  int64_t last_capture_time_ RTC_GUARDED_BY(mutex_);
++
++ private:
++  int max_delay_ms_ = 0;
++  int min_delay_ms_ = 0;
++  int base_min_delay_ms_ = 0;
++  bool buffering_ = true;
++  uint16_t last_sequence_number_ = 0;
++  int buffer_underrun_count_ = 0;
++  bool buffering_underrun_ = false;
++  uint32_t last_timestamp_ = 0;
++
++  PeerConnectionObserver* observer_ = nullptr;
++
++  RTC_DISALLOW_COPY_AND_ASSIGN(NetEqFifo);
++};
++
++}  // namespace webrtc
++#endif  // MODULES_AUDIO_CODING_NETEQ_NETEQ_IMPL_H_
+diff --git a/modules/audio_coding/neteq/packet_buffer.cc b/modules/audio_coding/neteq/packet_buffer.cc
+index 86ae8475ce796827785d01ac9d1bdd7355f4e74c..5a2d526aa8ad0f7359387f0438253d726c1f9348 100644
+--- a/modules/audio_coding/neteq/packet_buffer.cc
++++ b/modules/audio_coding/neteq/packet_buffer.cc
+@@ -390,6 +390,16 @@ size_t PacketBuffer::GetSpanSamples(size_t last_decoded_length,
+   return span;
+ }
+ 
++uint64_t PacketBuffer::GetAbsCaptureTimeDiff() const {
++  if (buffer_.size() == 0) {
++    return 0;
++  }
++  int64_t end = buffer_.back().packet_info.get_absolute_capture_time_ms();
++  int64_t start = buffer_.front().packet_info.get_absolute_capture_time_ms();
++  return end > start ? end - start : 0;
++
++}
++
+ bool PacketBuffer::ContainsDtxOrCngPacket(
+     const DecoderDatabase* decoder_database) const {
+   RTC_DCHECK(decoder_database);
+diff --git a/modules/audio_coding/neteq/packet_buffer.h b/modules/audio_coding/neteq/packet_buffer.h
+index cd2adf711144a518615ed165c9298ab316c5ff91..4f327e84e203e8ef47768cb6506f0b360dea2180 100644
+--- a/modules/audio_coding/neteq/packet_buffer.h
++++ b/modules/audio_coding/neteq/packet_buffer.h
+@@ -150,6 +150,8 @@ class PacketBuffer {
+                                 size_t sample_rate,
+                                 bool count_dtx_waiting_time) const;
+ 
++  virtual uint64_t GetAbsCaptureTimeDiff() const;
++
+   // Returns true if the packet buffer contains any DTX or CNG packets.
+   virtual bool ContainsDtxOrCngPacket(
+       const DecoderDatabase* decoder_database) const;
+diff --git a/modules/audio_mixer/audio_mixer_impl.cc b/modules/audio_mixer/audio_mixer_impl.cc
+index 8cebc387793b9f132e7d05e2586493a729e239a8..9157c346b2c15ed7ed1d698b9bd8fb4e25f3a3ba 100644
+--- a/modules/audio_mixer/audio_mixer_impl.cc
++++ b/modules/audio_mixer/audio_mixer_impl.cc
+@@ -262,4 +262,14 @@ bool AudioMixerImpl::GetAudioSourceMixabilityStatusForTest(
+   RTC_LOG(LS_ERROR) << "Audio source unknown";
+   return false;
+ }
++
++std::vector<AudioMixerImpl::Source*> AudioMixerImpl::audio_sources() {
++  MutexLock lock(&mutex_);
++  std::vector<AudioMixerImpl::Source*> sources;
++  for (auto& source_and_status : audio_source_list_) {
++    sources.push_back(source_and_status->audio_source);
++  }
++  return sources;
++}
++
+ }  // namespace webrtc
+diff --git a/modules/audio_mixer/audio_mixer_impl.h b/modules/audio_mixer/audio_mixer_impl.h
+index f66202efee649eab26599b4de6193b9ceae1791c..31684b0b1325db8b8069f51ceed353e87eefb224 100644
+--- a/modules/audio_mixer/audio_mixer_impl.h
++++ b/modules/audio_mixer/audio_mixer_impl.h
+@@ -61,6 +61,8 @@ class AudioMixerImpl : public AudioMixer {
+   // mixer.
+   bool GetAudioSourceMixabilityStatusForTest(Source* audio_source) const;
+ 
++  std::vector<Source*> audio_sources() override;
++
+  protected:
+   AudioMixerImpl(std::unique_ptr<OutputRateCalculator> output_rate_calculator,
+                  bool use_limiter,
+diff --git a/pc/sdp_offer_answer.cc b/pc/sdp_offer_answer.cc
+index 533bd84dbec98ea8f3d3ab16cf6958d4cc516253..6f40b95c4b5ab6d95d4d5f2df2f1cb7df778193c 100644
+--- a/pc/sdp_offer_answer.cc
++++ b/pc/sdp_offer_answer.cc
+@@ -27,6 +27,7 @@
+ #include "api/rtp_receiver_interface.h"
+ #include "api/rtp_sender_interface.h"
+ #include "api/video/builtin_video_bitrate_allocator_factory.h"
++#include "audio/channel_receive.h"
+ #include "media/base/codec.h"
+ #include "media/base/media_engine.h"
+ #include "media/base/rid_description.h"
+@@ -1874,6 +1875,23 @@ RTCError SdpOfferAnswerHandler::ApplyRemoteDescription(
+     local_ice_credentials_to_replace_->ClearIceCredentials();
+   }
+ 
++  auto mixer = pc_->channel_manager()->media_engine()->voice().audio_mixer();
++  if (mixer) {
++    std::vector<webrtc::AudioMixer::Source*> audio_sources = mixer->audio_sources();
++    for (auto audio_source : audio_sources) {
++      voe::ChannelReceiveInterface* channel_receive = audio_source->channel_receive();
++      if (channel_receive) {
++        auto acm_receiver = channel_receive->acm_receiver();
++        if (acm_receiver) {
++          auto neteq = acm_receiver->neteq();
++          if (!neteq->peer_connection_observer()) {
++            neteq->set_peer_connection_observer(pc_->Observer());
++          }
++        }
++      }
++    }
++  }
++
+   return RTCError::OK();
+ }
+ 

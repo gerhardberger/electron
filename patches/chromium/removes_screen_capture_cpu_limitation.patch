@@ -1,0 +1,24 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: gellert <gellert.hegyi@around.co>
+Date: Thu, 18 Jun 2020 15:50:11 +0200
+Subject: removes screen capture cpu limitation
+
+This patch disables the frame late limitation exposed to screen capture.
+
+Signed-off-by: gellert <gellert.hegyi@around.co>
+
+diff --git a/content/browser/media/capture/desktop_capture_device.cc b/content/browser/media/capture/desktop_capture_device.cc
+index d5bff8cc67400ea60f9f781518b031515dadefed..a81a2d14b782d2ca43a11dd40ff12e1dcd989df4 100644
+--- a/content/browser/media/capture/desktop_capture_device.cc
++++ b/content/browser/media/capture/desktop_capture_device.cc
+@@ -481,9 +481,7 @@ void DesktopCaptureDevice::Core::ScheduleNextCaptureFrame() {
+   base::TimeDelta last_capture_duration = NowTicks() - capture_start_time_;
+ 
+   // Limit frame-rate to reduce CPU consumption.
+-  base::TimeDelta capture_period =
+-      std::max((last_capture_duration * 100) / max_cpu_consumption_percentage_,
+-               requested_frame_duration_);
++  base::TimeDelta capture_period = requested_frame_duration_;
+ 
+   // Schedule a task for the next frame.
+   capture_timer_->Start(FROM_HERE, capture_period - last_capture_duration, this,

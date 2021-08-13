@@ -1,0 +1,810 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: gellert <gellert.hegyi@around.co>
+Date: Fri, 13 Aug 2021 10:59:16 +0200
+Subject: Add switch to disable audio ipc
+
+Motivation of this change is to reduce overhead of IPC used for transporting audio data back and forth between renderer and helper processes. Removal of IPC should theoretically also help to reduce audio glitches and latency. For now the switch is meant to be enabled only for MacOS and the patch was written in a way to have minimal side effects while the switch is not enabled. Main idea of the change is to move accessing of OS audio APIs to rendering process. As a side effect also two real time threads get eliminated.
+Some hacks done as part of this patch:
+
+Enabled access to native audio APIs in renderer process.
+Removed encryption of device ids and verification of device ids. This was needed mainly to simplify handling of native device ids. Alternative would have been to write HMAC to device id conversion, which needs to know salt and URL being used, which looked messy enough to try to avoid doing that.
+
+diff --git a/content/browser/renderer_host/media/media_stream_manager.cc b/content/browser/renderer_host/media/media_stream_manager.cc
+index 0c018c0e390932035c56b1f6166642148b55fa9c..7b95e9ed1009f1ec12bc0d166107559cc32b3352 100644
+--- a/content/browser/renderer_host/media/media_stream_manager.cc
++++ b/content/browser/renderer_host/media/media_stream_manager.cc
+@@ -2569,6 +2569,9 @@ std::string MediaStreamManager::GetHMACForMediaDeviceID(
+ #if !defined(OS_CHROMEOS)
+   DCHECK(!raw_unique_id.empty());
+ #endif
++  if (base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kNoAudioIPC)) {
++    return raw_unique_id;
++  }
+   if (raw_unique_id == media::AudioDeviceDescription::kDefaultDeviceId ||
+       raw_unique_id == media::AudioDeviceDescription::kCommunicationsDeviceId) {
+     return raw_unique_id;
+diff --git a/content/browser/renderer_host/render_process_host_impl.cc b/content/browser/renderer_host/render_process_host_impl.cc
+index bc854896652c6ba4acb9a08c431806207fc3b1e3..7913fcb2d55f3805c6dec0eddb2059e5c2c06a01 100644
+--- a/content/browser/renderer_host/render_process_host_impl.cc
++++ b/content/browser/renderer_host/render_process_host_impl.cc
+@@ -3386,6 +3386,7 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
+     switches::kAndroidFontsPath,
+     switches::kAudioBufferSize,
+     switches::kAudioLatencyFactor,
++    switches::kNoAudioIPC,
+     switches::kDisableAroundAudioProcessing,
+     switches::kOpusComplexity,
+     switches::kDisableEncoderQueue,
+diff --git a/content/browser/utility_process_host.cc b/content/browser/utility_process_host.cc
+index 288a4f082e79b7aee18b88caa2d8dfd8e2721a09..d54861f97b8f06d614a3e82b520b398ac5ecfe47 100644
+--- a/content/browser/utility_process_host.cc
++++ b/content/browser/utility_process_host.cc
+@@ -272,6 +272,7 @@ bool UtilityProcessHost::StartProcess() {
+       // These flags are used by the audio service:
+       switches::kAudioBufferSize,
+       switches::kAudioLatencyFactor,
++      switches::kNoAudioIPC,
+       switches::kDisableAroundAudioProcessing,
+       switches::kOpusComplexity,
+       switches::kDisableEncoderQueue,
+diff --git a/content/public/browser/media_device_id.cc b/content/public/browser/media_device_id.cc
+index 0cc1de482243e8d0c8c0e4a90865bf7d746c8297..59fc1da322d8f3d68e89897a93187608921e0e7b 100644
+--- a/content/public/browser/media_device_id.cc
++++ b/content/public/browser/media_device_id.cc
+@@ -3,11 +3,13 @@
+ // found in the LICENSE file.
+ #include "content/public/browser/media_device_id.h"
+ 
++#include "base/command_line.h"
+ #include "base/strings/string_util.h"
+ #include "base/threading/sequenced_task_runner_handle.h"
+ #include "content/browser/browser_main_loop.h"
+ #include "content/browser/renderer_host/media/media_stream_manager.h"
+ #include "media/audio/audio_device_description.h"
++#include "media/base/media_switches.h"
+ 
+ namespace content {
+ 
+@@ -52,6 +54,9 @@ void GetMediaDeviceIDForHMAC(
+ }
+ 
+ bool IsValidDeviceId(const std::string& device_id) {
++  if (base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kNoAudioIPC)) {
++    return true;
++  }
+   constexpr int hash_size = 64;  // 32 bytes * 2 char/byte hex encoding
+   if (media::AudioDeviceDescription::IsDefaultDevice(device_id) ||
+       device_id == media::AudioDeviceDescription::kCommunicationsDeviceId)
+diff --git a/media/audio/audio_input_device.cc b/media/audio/audio_input_device.cc
+index 803c1430101a56205a362a99586605033381c181..5188f7ddceb3d4e405554ac7bb91b99c9f40f01c 100644
+--- a/media/audio/audio_input_device.cc
++++ b/media/audio/audio_input_device.cc
+@@ -10,6 +10,7 @@
+ 
+ #include "base/bind.h"
+ #include "base/callback_helpers.h"
++#include "base/command_line.h"
+ #include "base/format_macros.h"
+ #include "base/logging.h"
+ #include "base/macros.h"
+@@ -19,8 +20,10 @@
+ #include "base/threading/thread_restrictions.h"
+ #include "base/trace_event/trace_event.h"
+ #include "build/build_config.h"
++#include "media/audio/audio_manager.h"
+ #include "media/audio/audio_manager_base.h"
+ #include "media/base/audio_bus.h"
++#include "media/base/media_switches.h"
+ 
+ namespace media {
+ 
+@@ -98,18 +101,62 @@ class AudioInputDevice::AudioThreadCallback
+   DISALLOW_COPY_AND_ASSIGN(AudioThreadCallback);
+ };
+ 
++class AudioInputDevice::AudioCallback
++    : public media::AudioInputStream::AudioInputCallback {
++ public:
++  AudioCallback(
++      CaptureCallback& capture_callback) :
++      capture_callback_(capture_callback)
++  {
++  }
++  ~AudioCallback() override = default;
++
++  // These should not be called when the stream is live.
++  bool received_callback() const { return received_callback_; }
++  bool error_during_callback() const { return error_during_callback_; }
++
++ private:
++  void OnData(const media::AudioBus* source,
++              base::TimeTicks capture_time,
++              double volume) override {
++    TRACE_EVENT1("audio", "AudioInputDevice::AudioCallback::OnData", "capture time (ms)",
++                 (capture_time - base::TimeTicks()).InMillisecondsF());
++
++    if (received_callback_ == false) {
++      received_callback_ = true;
++      capture_callback_.OnCaptureStarted();
++    }
++    capture_callback_.Capture(source, base::TimeTicks::Now(), volume,
++                             false);
++  }
++
++  void OnError() override {
++    error_during_callback_ = true;
++  }
++  bool received_callback_ = false;
++  bool error_during_callback_ = false;
++  CaptureCallback& capture_callback_;
++};
++
+ AudioInputDevice::AudioInputDevice(std::unique_ptr<AudioInputIPC> ipc,
+                                    Purpose purpose,
+-                                   DeadStreamDetection detect_dead_stream)
++                                   DeadStreamDetection detect_dead_stream,
++                                   const std::string& device_id
++                                   )
+     : thread_priority_(ThreadPriorityFromPurpose(purpose)),
+       enable_uma_(purpose == AudioInputDevice::Purpose::kUserInput),
+       callback_(nullptr),
+       ipc_(std::move(ipc)),
+       state_(IDLE),
+       agc_is_enabled_(false),
+-      detect_dead_stream_(detect_dead_stream) {
++      detect_dead_stream_(detect_dead_stream),
++      device_id_(device_id),
++      no_audio_ipc_(base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kNoAudioIPC)) {
++  DVLOG(1) << __func__ << " " << this << " device_id=" << device_id;
+   CHECK(ipc_);
+ 
++  AudioManager::GetMainTaskRunner(); // Assumption is that first time it is called from main thread.
++
+   // The correctness of the code depends on the relative values assigned in the
+   // State enum.
+   static_assert(IPC_CLOSED < IDLE, "invalid enum value assignment 0");
+@@ -136,8 +183,32 @@ void AudioInputDevice::Start() {
+     return;
+ 
+   state_ = CREATING_STREAM;
+-  ipc_->CreateStream(this, audio_parameters_, agc_is_enabled_,
+-                     kRequestedSharedMemoryCount);
++
++  if (no_audio_ipc_) {
++    stream_ = AudioManager::Acquire()->MakeAudioInputStream(audio_parameters_,
++          device_id_,
++          base::BindRepeating(&AudioInputDevice::LogMessage,
++                            base::Unretained(this)));
++    if (!stream_) {
++      AudioManager::Release();
++      return;
++    }
++    if (!(stream_->Open() == media::AudioInputStream::OpenOutcome::kSuccess ||
++        stream_->Open() == media::AudioInputStream::OpenOutcome::kAlreadyOpen)) {
++      stream_->Close();
++      return;
++    }
++    stream_->SetAutomaticGainControl(agc_is_enabled_);
++    audio_callback_os_.reset(new AudioCallback(*callback_));
++    stream_->Start(audio_callback_os_.get());
++    state_ = RECORDING;
++  } else {
++    ipc_->CreateStream(this, audio_parameters_, agc_is_enabled_,
++                       kRequestedSharedMemoryCount);
++  }
++}
++
++void AudioInputDevice::LogMessage(const std::string& message) {
+ }
+ 
+ void AudioInputDevice::Stop() {
+@@ -158,7 +229,15 @@ void AudioInputDevice::Stop() {
+ 
+   // Close the stream, if we haven't already.
+   if (state_ >= CREATING_STREAM) {
+-    ipc_->CloseStream();
++    if (no_audio_ipc_) {
++      if (stream_) {
++        stream_->Stop();
++        stream_->Close();
++        AudioManager::Release();
++      }
++    } else {
++      ipc_->CloseStream();
++    }
+     state_ = IDLE;
+     agc_is_enabled_ = false;
+   }
+@@ -184,8 +263,13 @@ void AudioInputDevice::SetVolume(double volume) {
+     return;
+   }
+ 
+-  if (state_ >= CREATING_STREAM)
+-    ipc_->SetVolume(volume);
++  if (state_ >= CREATING_STREAM) {
++    if (stream_) {
++      stream_->SetVolume(volume);
++    } else {
++      ipc_->SetVolume(volume);
++    }
++  }
+ }
+ 
+ void AudioInputDevice::SetAutomaticGainControl(bool enabled) {
+@@ -210,8 +294,13 @@ void AudioInputDevice::SetOutputDeviceForAec(
+                "output_device_id", output_device_id);
+ 
+   output_device_id_for_aec_ = output_device_id;
+-  if (state_ > CREATING_STREAM)
+-    ipc_->SetOutputDeviceForAec(output_device_id);
++  if (state_ > CREATING_STREAM) {
++    if (stream_) {
++      stream_->SetOutputDeviceForAec(output_device_id);
++    } else {
++      ipc_->SetOutputDeviceForAec(output_device_id);
++    }
++  }
+ }
+ 
+ void AudioInputDevice::OnStreamCreated(
+@@ -343,6 +432,7 @@ void AudioInputDevice::OnIPCClosed() {
+ }
+ 
+ AudioInputDevice::~AudioInputDevice() {
++  DVLOG(1) << __func__ << " " << this;
+ #if DCHECK_IS_ON()
+   // Make sure we've stopped the stream properly before destructing |this|.
+   DCHECK_LE(state_, IDLE);
+diff --git a/media/audio/audio_input_device.h b/media/audio/audio_input_device.h
+index ab9d0991cf63a5356842095de23c4e4b653a87af..5abf71d4b89b1bbeb38209e8240809526bdbec9b 100644
+--- a/media/audio/audio_input_device.h
++++ b/media/audio/audio_input_device.h
+@@ -62,6 +62,7 @@
+ #include "third_party/abseil-cpp/absl/types/optional.h"
+ 
+ namespace media {
++class AudioInputStream;
+ 
+ class MEDIA_EXPORT AudioInputDevice : public AudioCapturerSource,
+                                       public AudioInputIPCDelegate {
+@@ -75,7 +76,8 @@ class MEDIA_EXPORT AudioInputDevice : public AudioCapturerSource,
+   // |detect_dead_stream| controls the dead stream detection.
+   AudioInputDevice(std::unique_ptr<AudioInputIPC> ipc,
+                    Purpose purpose,
+-                   DeadStreamDetection detect_dead_stream);
++                   DeadStreamDetection detect_dead_stream,
++                   const std::string& device_id);
+ 
+   // AudioCapturerSource implementation.
+   void Initialize(const AudioParameters& params,
+@@ -119,6 +121,7 @@ class MEDIA_EXPORT AudioInputDevice : public AudioCapturerSource,
+   void OnError(AudioCapturerSource::ErrorCode code) override;
+   void OnMuted(bool is_muted) override;
+   void OnIPCClosed() override;
++  void LogMessage(const std::string& message);
+ 
+   // This is called by |alive_checker_| if it detects that the input stream is
+   // dead.
+@@ -162,6 +165,18 @@ class MEDIA_EXPORT AudioInputDevice : public AudioCapturerSource,
+   // is created.
+   absl::optional<std::string> output_device_id_for_aec_;
+ 
++  class AudioCallback;
++  // Holds a pointer to the callback object that receives audio data from
++  // the lower audio layer. Valid only while 'recording' (between calls to
++  // stream_->Start() and stream_->Stop()).
++  // The value of this pointer is only set and read on the audio thread while
++  // the callbacks themselves occur on the hw callback thread. More details
++  // in the AudioCallback class in the cc file.
++  std::unique_ptr<AudioCallback> audio_callback_os_;
++  std::string device_id_;
++  bool no_audio_ipc_ = false;
++  AudioInputStream* stream_ = nullptr;
++
+   DISALLOW_IMPLICIT_CONSTRUCTORS(AudioInputDevice);
+ };
+ 
+diff --git a/media/audio/audio_manager.cc b/media/audio/audio_manager.cc
+index f04c67116c0d4812a41355f2bb212949f94bd00d..1c72649d4c772d3ff36b15d77ae11b682a908eb7 100644
+--- a/media/audio/audio_manager.cc
++++ b/media/audio/audio_manager.cc
+@@ -18,7 +18,9 @@
+ #include "base/power_monitor/power_monitor.h"
+ #include "base/single_thread_task_runner.h"
+ #include "base/thread_annotations.h"
++#include "base/threading/thread_task_runner_handle.h"
+ #include "build/build_config.h"
++#include "media/audio/audio_thread_impl.h"
+ #include "media/audio/fake_audio_log_factory.h"
+ #include "media/base/media_switches.h"
+ 
+@@ -31,6 +33,8 @@ namespace {
+ 
+ // The singleton instance of AudioManager. This is set when Create() is called.
+ AudioManager* g_last_created = nullptr;
++AudioManager* g_audio_manager = nullptr;
++int g_reference_count = 0;
+ 
+ // Helper class for managing global AudioManager data.
+ class AudioManagerHelper {
+@@ -83,6 +87,7 @@ AudioManager::AudioManager(std::unique_ptr<AudioThread> audio_thread)
+     : audio_thread_(std::move(audio_thread)) {
+   DCHECK(audio_thread_);
+ 
++  DVLOG(1) << __func__ << " " << this;
+   if (g_last_created) {
+     // We create multiple instances of AudioManager only when testing.
+     // We should not encounter this case in production.
+@@ -97,6 +102,7 @@ AudioManager::~AudioManager() {
+   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+   DCHECK(shutdown_);
+ 
++  DVLOG(1) << __func__ << " " << this;
+   if (g_last_created == this) {
+     g_last_created = nullptr;
+   } else {
+@@ -125,6 +131,34 @@ std::unique_ptr<AudioManager> AudioManager::CreateForTesting(
+   return Create(std::move(audio_thread), GetHelper()->fake_log_factory());
+ }
+ 
++// static
++AudioManager* AudioManager::Acquire() {
++  DVLOG(1) << __func__ << " " << g_audio_manager << " count: " << g_reference_count;
++  g_reference_count++;    // No thread safety as expected to be called from main thread only.
++  if (!g_audio_manager) {
++    g_audio_manager = Create(std::make_unique<AudioThreadImpl>(), nullptr).release();
++  }
++  return g_audio_manager;
++}
++
++// static
++void AudioManager::Release() {
++  DVLOG(1) << __func__ << " " << g_audio_manager << " count: " << g_reference_count;
++  g_reference_count--;    // No thread safety as expected to be called from main thread only.
++  if (!g_reference_count) {
++    g_audio_manager->Shutdown();
++    delete g_audio_manager;
++    g_audio_manager = nullptr;
++  }
++}
++
++// static
++base::SingleThreadTaskRunner* AudioManager::GetMainTaskRunner() {
++  static base::SingleThreadTaskRunner* g_main_task_runner =
++    base::ThreadTaskRunnerHandle::Get().get();
++  return g_main_task_runner;
++}
++
+ // static
+ void AudioManager::SetGlobalAppName(const std::string& app_name) {
+   GetHelper()->set_app_name(app_name);
+diff --git a/media/audio/audio_manager.h b/media/audio/audio_manager.h
+index 508775f23f9cfeed9a5ec70d220f7eda9821631d..46ea1a0334f0c285fa7dd0f8d90eb884f92bf0ac 100644
+--- a/media/audio/audio_manager.h
++++ b/media/audio/audio_manager.h
+@@ -60,6 +60,10 @@ class MEDIA_EXPORT AudioManager {
+   static std::unique_ptr<AudioManager> CreateForTesting(
+       std::unique_ptr<AudioThread> audio_thread);
+ 
++  static AudioManager* Acquire();
++  static void Release();
++  static base::SingleThreadTaskRunner* GetMainTaskRunner();
++
+   // Sets the name of the audio source as seen by external apps.
+   static void SetGlobalAppName(const std::string& app_name);
+ 
+diff --git a/media/audio/audio_output_device.cc b/media/audio/audio_output_device.cc
+index 338d9f622e327642e360b4f4bcf82cfa0a98552c..c75d21efc76cee5bc9944c353a32e4bbd006de97 100644
+--- a/media/audio/audio_output_device.cc
++++ b/media/audio/audio_output_device.cc
+@@ -12,6 +12,7 @@
+ #include <utility>
+ 
+ #include "base/callback_helpers.h"
++#include "base/command_line.h"
+ #include "base/logging.h"
+ #include "base/macros.h"
+ #include "base/metrics/histogram_macros.h"
+@@ -23,12 +24,50 @@
+ #include "base/trace_event/trace_event.h"
+ #include "build/build_config.h"
+ #include "media/audio/audio_device_description.h"
++#include "media/audio/audio_io.h"
++#include "media/audio/audio_manager.h"
+ #include "media/audio/audio_output_device_thread_callback.h"
+ #include "media/base/bind_to_current_loop.h"
+ #include "media/base/limits.h"
++#include "media/base/media_switches.h"
+ 
+ namespace media {
+ 
++class AudioOutputDevice::AudioCallback
++    : public AudioOutputStream::AudioSourceCallback {
++ public:
++  AudioCallback(
++      RenderCallback& render_callback) :
++      render_callback_(render_callback)
++  {
++  }
++  ~AudioCallback() override {
++    DVLOG(1) << __func__;
++  }
++  // Make sure that callback doesn't get called after AudioOutputDevice::Stop() completes.
++  void Stop() {
++    base::AutoLock auto_lock(stopping_lock_);
++    stopped_ = true;
++  }
++ private:
++  int OnMoreData(base::TimeDelta delay,
++                           base::TimeTicks delay_timestamp,
++                           int prior_frames_skipped,
++                           AudioBus* dest) override {
++    base::AutoLock auto_lock(stopping_lock_);
++    if (stopped_) {
++      return 0;
++    }
++    return render_callback_.Render(delay, delay_timestamp, prior_frames_skipped, dest);
++  }
++
++  void OnError(ErrorType type) override {
++  }
++  RenderCallback& render_callback_;
++  base::Lock stopping_lock_;
++  bool stopped_ = false;
++};
++
+ AudioOutputDevice::AudioOutputDevice(
+     std::unique_ptr<AudioOutputIPC> ipc,
+     const scoped_refptr<base::SingleThreadTaskRunner>& io_task_runner,
+@@ -42,27 +81,34 @@ AudioOutputDevice::AudioOutputDevice(
+       device_id_(sink_params.device_id),
+       processing_id_(sink_params.processing_id),
+       stopping_hack_(false),
++      no_audio_ipc_(base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kNoAudioIPC)),
+       did_receive_auth_(base::WaitableEvent::ResetPolicy::MANUAL,
+                         base::WaitableEvent::InitialState::NOT_SIGNALED),
+       output_params_(AudioParameters::UnavailableDeviceParams()),
+       device_status_(OUTPUT_DEVICE_STATUS_ERROR_INTERNAL),
+       auth_timeout_(authorization_timeout) {
++  AudioManager::GetMainTaskRunner(); // Assumption is that first time it is called from main thread.
++  DVLOG(1) << __func__ << " " << this << " device_id=" << device_id_;
+   DCHECK(ipc_);
+   DCHECK(io_task_runner_);
+ }
+ 
+ void AudioOutputDevice::Initialize(const AudioParameters& params,
+                                    RenderCallback* callback) {
+-  io_task_runner_->PostTask(
+-      FROM_HERE, base::BindOnce(&AudioOutputDevice::InitializeOnIOThread, this,
+-                                params, callback));
++  if (no_audio_ipc_) {
++    InitializeOnIOThread(params, callback);
++  } else {
++    io_task_runner_->PostTask(
++        FROM_HERE, base::BindOnce(&AudioOutputDevice::InitializeOnIOThread, this,
++                                  params, callback));
++  }
+ }
+ 
+ void AudioOutputDevice::InitializeOnIOThread(const AudioParameters& params,
+                                              RenderCallback* callback) {
+   DCHECK(!callback_) << "Calling Initialize() twice?";
+   DCHECK(params.IsValid());
+-  DVLOG(1) << __func__ << ": " << params.AsHumanReadableString();
++  DVLOG(1) << __func__ << " " << this << ": " << params.AsHumanReadableString();
+   audio_parameters_ = params;
+ 
+   base::AutoLock auto_lock(audio_thread_lock_);
+@@ -73,6 +119,7 @@ void AudioOutputDevice::InitializeOnIOThread(const AudioParameters& params,
+ }
+ 
+ AudioOutputDevice::~AudioOutputDevice() {
++  DVLOG(1) << __func__ << " " << this;
+   {
+     // Abort any pending callbacks. Technically we don't need to acquire the
+     // lock here since there should be no other calls outstanding, but because
+@@ -105,20 +152,36 @@ void AudioOutputDevice::RequestDeviceAuthorization() {
+ 
+ void AudioOutputDevice::Start() {
+   TRACE_EVENT0("audio", "AudioOutputDevice::Start");
+-  io_task_runner_->PostTask(
+-      FROM_HERE,
+-      base::BindOnce(&AudioOutputDevice::CreateStreamOnIOThread, this));
++  if (no_audio_ipc_) {
++    AudioManager::GetMainTaskRunner()->PostTask(
++        FROM_HERE,
++        base::BindOnce(&AudioOutputDevice::CreateStreamOnMainThread, this));
++  } else {
++    io_task_runner_->PostTask(
++        FROM_HERE,
++        base::BindOnce(&AudioOutputDevice::CreateStreamOnIOThread, this));
++  }
+ }
+ 
+ void AudioOutputDevice::Stop() {
++  DVLOG(1) << __func__ << " " << this;
+   TRACE_EVENT0("audio", "AudioOutputDevice::Stop");
+   {
+     base::AutoLock auto_lock(audio_thread_lock_);
+     audio_thread_.reset();
+     stopping_hack_ = true;
+   }
+-  io_task_runner_->PostTask(
+-      FROM_HERE, base::BindOnce(&AudioOutputDevice::ShutDownOnIOThread, this));
++  if (no_audio_ipc_) {
++    if (audio_callback_os_) {
++      audio_callback_os_->Stop();
++    }
++    AudioManager::GetMainTaskRunner()->PostTask(
++      FROM_HERE,
++      base::BindOnce(&AudioOutputDevice::ShutDownOnMainThread, this));
++  } else {
++    io_task_runner_->PostTask(
++        FROM_HERE, base::BindOnce(&AudioOutputDevice::ShutDownOnIOThread, this));
++  }
+ }
+ 
+ void AudioOutputDevice::Play() {
+@@ -183,6 +246,9 @@ bool AudioOutputDevice::IsOptimizedForHardwareParameters() {
+ }
+ 
+ bool AudioOutputDevice::CurrentThreadIsRenderingThread() {
++  if (no_audio_ipc_) {
++    return true;
++  }
+   // Since this function is supposed to be called on the rendering thread,
+   // it's safe to access |audio_callback_| here. It will always be valid when
+   // the rendering thread is running.
+@@ -193,6 +259,7 @@ void AudioOutputDevice::RequestDeviceAuthorizationOnIOThread() {
+   DCHECK(io_task_runner_->BelongsToCurrentThread());
+   DCHECK_EQ(state_, IDLE);
+ 
++  DVLOG(1) << __func__ << " " << this << " state:" << state_;
+   state_ = AUTHORIZATION_REQUESTED;
+   ipc_->RequestDeviceAuthorization(this, session_id_, device_id_);
+ 
+@@ -259,6 +326,7 @@ void AudioOutputDevice::FlushOnIOThread() {
+ }
+ 
+ void AudioOutputDevice::ShutDownOnIOThread() {
++  DVLOG(1) << __func__ << " " << this;
+   DCHECK(io_task_runner_->BelongsToCurrentThread());
+ 
+   if (ipc_)
+@@ -288,6 +356,46 @@ void AudioOutputDevice::ShutDownOnIOThread() {
+   stopping_hack_ = false;
+ }
+ 
++void AudioOutputDevice::CreateStreamOnMainThread() {
++  DVLOG(1) << __func__ << " " << this;
++  base::AutoLock auto_lock(audio_thread_lock_);
++  if (stopping_hack_) {
++    return;
++  }
++  if (state_ == IDLE && !(did_receive_auth_.IsSignaled() && device_id_.empty())) {
++    RequestDeviceAuthorizationOnIOThread();
++  }
++  stream_ = AudioManager::Acquire()->MakeAudioOutputStream(audio_parameters_,
++        device_id_,
++        base::BindRepeating(&AudioOutputDevice::LogMessage,
++                          base::Unretained(this)));
++  if (!stream_) {
++    AudioManager::Release();
++    return;
++  }
++  if (!stream_->Open()) {
++    stream_->Close();
++    return;
++  }
++  audio_callback_os_.reset(new AudioCallback(*callback_));
++  stream_->Start(audio_callback_os_.get());
++  state_ = STREAM_CREATION_REQUESTED;
++}
++
++void AudioOutputDevice::LogMessage(const std::string& message) {
++}
++
++void AudioOutputDevice::ShutDownOnMainThread() {
++  DVLOG(1) << __func__ << " " << this << " stream:" << stream_;
++  if (stream_) {
++    stream_->Stop();
++    stream_->Close();
++    AudioManager::Release();
++  }
++  io_task_runner_->PostTask(
++    FROM_HERE, base::BindOnce(&AudioOutputDevice::ShutDownOnIOThread, this));
++}
++
+ void AudioOutputDevice::SetVolumeOnIOThread(double volume) {
+   DCHECK(io_task_runner_->BelongsToCurrentThread());
+   if (ipc_)
+diff --git a/media/audio/audio_output_device.h b/media/audio/audio_output_device.h
+index 97704136e851e2ff802b45d6c24b64811b32939b..5beb8a8959dbce25564bd7a64de471bd484a4eb1 100644
+--- a/media/audio/audio_output_device.h
++++ b/media/audio/audio_output_device.h
+@@ -87,6 +87,7 @@ class SingleThreadTaskRunner;
+ 
+ namespace media {
+ class AudioOutputDeviceThreadCallback;
++class AudioOutputStream;
+ 
+ class MEDIA_EXPORT AudioOutputDevice : public AudioRendererSink,
+                                        public AudioOutputIPCDelegate {
+@@ -165,6 +166,10 @@ class MEDIA_EXPORT AudioOutputDevice : public AudioRendererSink,
+   void ShutDownOnIOThread();
+   void SetVolumeOnIOThread(double volume);
+ 
++  // Methods called on main thread required for Core Audio access on MacOS.
++  void CreateStreamOnMainThread();
++  void ShutDownOnMainThread();
++
+   // Process device authorization result on the IO thread.
+   void ProcessDeviceAuthorizationOnIOThread(
+       OutputDeviceStatus device_status,
+@@ -176,6 +181,7 @@ class MEDIA_EXPORT AudioOutputDevice : public AudioRendererSink,
+ 
+   OutputDeviceInfo GetOutputDeviceInfo_Signaled();
+   void OnAuthSignal();
++  void LogMessage(const std::string& message);
+ 
+   const scoped_refptr<base::SingleThreadTaskRunner> io_task_runner_;
+ 
+@@ -225,6 +231,17 @@ class MEDIA_EXPORT AudioOutputDevice : public AudioRendererSink,
+   // the callback via Start(). See http://crbug.com/151051 for details.
+   bool stopping_hack_ GUARDED_BY(audio_thread_lock_);
+ 
++  class AudioCallback;
++  // Holds a pointer to the callback object that receives audio data from
++  // the lower audio layer. Valid only while 'recording' (between calls to
++  // stream_->Start() and stream_->Stop()).
++  // The value of this pointer is only set and read on the audio thread while
++  // the callbacks themselves occur on the hw callback thread. More details
++  // in the AudioCallback class in the cc file.
++  std::unique_ptr<AudioCallback> audio_callback_os_;
++  bool no_audio_ipc_ = false;
++  AudioOutputStream* stream_ = nullptr;
++
+   base::WaitableEvent did_receive_auth_;
+   AudioParameters output_params_;
+   OutputDeviceStatus device_status_;
+diff --git a/media/audio/audio_source_parameters.h b/media/audio/audio_source_parameters.h
+index efd2da31abd0f7fae8b2aedfa323868e9b5e5bf3..ae07e0175895bce4243da69c0012726bf7f747fe 100644
+--- a/media/audio/audio_source_parameters.h
++++ b/media/audio/audio_source_parameters.h
+@@ -31,6 +31,7 @@ struct MEDIA_EXPORT AudioSourceParameters final {
+     AudioProcessingSettings settings;
+   };
+ 
++  std::string device_id;
+   absl::optional<ProcessingConfig> processing;
+ };
+ 
+diff --git a/media/audio/mac/audio_manager_mac.cc b/media/audio/mac/audio_manager_mac.cc
+index 9228c6ef6d7e05ac67bd3f9e97725ecaf9bae411..e18fee569e4eecdf138fb24071ffa01de4910fac 100644
+--- a/media/audio/mac/audio_manager_mac.cc
++++ b/media/audio/mac/audio_manager_mac.cc
+@@ -514,11 +514,15 @@ AudioManagerMac::AudioManagerMac(std::unique_ptr<AudioThread> audio_thread,
+       weak_ptr_factory_(this) {
+   SetMaxOutputStreamsAllowed(kMaxOutputStreams);
+ 
+-  // PostTask since AudioManager creation may be on the startup path and this
+-  // may be slow.
+-  GetTaskRunner()->PostTask(
+-      FROM_HERE, base::BindOnce(&AudioManagerMac::InitializeOnAudioThread,
+-                                weak_ptr_factory_.GetWeakPtr()));
++  if (!audio_log_factory) {
++    InitializeOnAudioThread();
++  } else {
++    // PostTask since AudioManager creation may be on the startup path and this
++    // may be slow.
++    GetTaskRunner()->PostTask(
++        FROM_HERE, base::BindOnce(&AudioManagerMac::InitializeOnAudioThread,
++                                  weak_ptr_factory_.GetWeakPtr()));
++  }
+ }
+ 
+ AudioManagerMac::~AudioManagerMac() = default;
+diff --git a/media/base/media_switches.cc b/media/base/media_switches.cc
+index 93d5acf4f2530107b3620dfb92accde52ae36aca..c7626b3e0db478222eb78a8b3322ee3c822a83ac 100644
+--- a/media/base/media_switches.cc
++++ b/media/base/media_switches.cc
+@@ -23,6 +23,9 @@ namespace switches {
+ // 0 is default, 1 - 10ms, 2 - 20ms, etc.
+ const char kAudioLatencyFactor[] = "audio-latency-factor";
+ 
++// Turns off IPC for audio
++const char kNoAudioIPC[] = "no-audio-ipc";
++
+ // Disable Around audio processing.
+ const char kDisableAroundAudioProcessing[] = "disable-around-audio-processing";
+ 
+diff --git a/media/base/media_switches.h b/media/base/media_switches.h
+index cabecd4af7387215783000cf4a35c05672b5e406..652169767495e83c0eae34417da69f4040a75eee 100644
+--- a/media/base/media_switches.h
++++ b/media/base/media_switches.h
+@@ -23,6 +23,7 @@ class CommandLine;
+ namespace switches {
+ 
+ MEDIA_EXPORT extern const char kAudioLatencyFactor[];
++MEDIA_EXPORT extern const char kNoAudioIPC[];
+ MEDIA_EXPORT extern const char kDisableAroundAudioProcessing[];
+ MEDIA_EXPORT extern const char kOpusComplexity[];
+ MEDIA_EXPORT extern const char kDisableEncoderQueue[];
+diff --git a/sandbox/policy/mac/sandbox_mac.mm b/sandbox/policy/mac/sandbox_mac.mm
+index c6605154cbb0220556cba6bdf4159e123cb9b429..fd6d7bcb527057f69ff6f3f7acb05e2290413437 100644
+--- a/sandbox/policy/mac/sandbox_mac.mm
++++ b/sandbox/policy/mac/sandbox_mac.mm
+@@ -12,6 +12,7 @@
+ #include "base/files/scoped_file.h"
+ #include "base/logging.h"
+ #include "base/posix/eintr_wrapper.h"
++#include "media/base/media_switches.h"
+ #include "sandbox/policy/mac/audio.sb.h"
+ #include "sandbox/policy/mac/cdm.sb.h"
+ #include "sandbox/policy/mac/common.sb.h"
+@@ -84,6 +85,9 @@
+       break;
+     case SandboxType::kRenderer:
+       profile += kSeatbeltPolicyString_renderer;
++      if (base::CommandLine::ForCurrentProcess()->HasSwitch(::switches::kNoAudioIPC)) {
++        profile += kSeatbeltPolicyString_audio;
++      }
+       break;
+     case SandboxType::kNoSandbox:
+     case SandboxType::kVideoCapture:
+diff --git a/services/audio/public/cpp/device_factory.cc b/services/audio/public/cpp/device_factory.cc
+index 00c2638af3435197bc10b0fb63e27f68c93f0275..084b7dd6446780501ebeab528ad93e3be9be38f6 100644
+--- a/services/audio/public/cpp/device_factory.cc
++++ b/services/audio/public/cpp/device_factory.cc
+@@ -22,7 +22,8 @@ scoped_refptr<media::AudioCapturerSource> CreateInputDevice(
+       std::move(stream_factory), device_id, std::move(log));
+   return base::MakeRefCounted<media::AudioInputDevice>(
+       std::move(ipc), media::AudioInputDevice::Purpose::kUserInput,
+-      detect_dead_stream);
++      detect_dead_stream,
++      device_id);
+ }
+ 
+ scoped_refptr<media::AudioCapturerSource> CreateInputDevice(
+diff --git a/third_party/blink/renderer/modules/media/audio/web_audio_device_factory.cc b/third_party/blink/renderer/modules/media/audio/web_audio_device_factory.cc
+index a6b703662baafb1d76b6f32100807e1ad4d06403..fc6cd98c21219feae217db78e77f8f42564e769c 100644
+--- a/third_party/blink/renderer/modules/media/audio/web_audio_device_factory.cc
++++ b/third_party/blink/renderer/modules/media/audio/web_audio_device_factory.cc
+@@ -182,7 +182,8 @@ WebAudioDeviceFactory::NewAudioCapturerSource(
+       blink::WebAudioInputIPCFactory::GetInstance().CreateAudioInputIPC(
+           frame_token, params),
+       media::AudioInputDevice::Purpose::kUserInput,
+-      media::AudioInputDevice::DeadStreamDetection::kEnabled);
++      media::AudioInputDevice::DeadStreamDetection::kEnabled,
++      params.device_id);
+ }
+ 
+ // static
+diff --git a/third_party/blink/renderer/modules/mediastream/local_media_stream_audio_source.cc b/third_party/blink/renderer/modules/mediastream/local_media_stream_audio_source.cc
+index d284b26908e2095df0cef8f8852d24068ba8aa36..699456bcbd3e22084369dcf228dea72a40525092 100644
+--- a/third_party/blink/renderer/modules/mediastream/local_media_stream_audio_source.cc
++++ b/third_party/blink/renderer/modules/mediastream/local_media_stream_audio_source.cc
+@@ -86,8 +86,10 @@ bool LocalMediaStreamAudioSource::EnsureSourceIsStarted() {
+ 
+   auto* web_frame =
+       static_cast<WebLocalFrame*>(WebFrame::FromCoreFrame(consumer_frame_));
++  auto source_params = media::AudioSourceParameters(device().session_id());
++  source_params.device_id = device().id;
+   source_ = Platform::Current()->NewAudioCapturerSource(
+-      web_frame, media::AudioSourceParameters(device().session_id()));
++      web_frame, source_params);
+   source_->Initialize(GetAudioParameters(), this);
+   source_->Start();
+   return true;
+diff --git a/third_party/blink/renderer/modules/mediastream/processed_local_audio_source.cc b/third_party/blink/renderer/modules/mediastream/processed_local_audio_source.cc
+index b0b277e9813d52e5b32cf9904dc53487008af3b7..6c7f43a9e6414f53c3f007fb61af007fa44460c3 100644
+--- a/third_party/blink/renderer/modules/mediastream/processed_local_audio_source.cc
++++ b/third_party/blink/renderer/modules/mediastream/processed_local_audio_source.cc
+@@ -393,6 +393,7 @@ bool ProcessedLocalAudioSource::EnsureSourceIsStarted() {
+       GetAudioParameters().AsHumanReadableString().c_str()));
+   auto* web_frame =
+       static_cast<WebLocalFrame*>(WebFrame::FromCoreFrame(consumer_frame_));
++  source_params.device_id = device().id;
+   scoped_refptr<media::AudioCapturerSource> new_source =
+       Platform::Current()->NewAudioCapturerSource(web_frame, source_params);
+   new_source->Initialize(params, this);

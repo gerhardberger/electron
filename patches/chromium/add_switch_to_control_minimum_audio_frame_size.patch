@@ -1,0 +1,89 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: gellert <gellert.hegyi@around.co>
+Date: Fri, 13 Aug 2021 01:19:48 +0200
+Subject: add switch to control minimum audio frame size
+
+This patch adds a switch to control minimum audio frame size.
+
+diff --git a/content/browser/renderer_host/render_process_host_impl.cc b/content/browser/renderer_host/render_process_host_impl.cc
+index 0dbb7fad5c9f3b3889b0825d553992d6fe2745f9..8072e45bc2bdadec4f4b6f434565401763222e32 100644
+--- a/content/browser/renderer_host/render_process_host_impl.cc
++++ b/content/browser/renderer_host/render_process_host_impl.cc
+@@ -3385,6 +3385,7 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
+     switches::kAllowLoopbackInPeerConnection,
+     switches::kAndroidFontsPath,
+     switches::kAudioBufferSize,
++    switches::kAudioLatencyFactor,
+     switches::kAutoplayPolicy,
+     switches::kMojoCoreLibraryPath,
+     switches::kDisable2dCanvasImageChromium,
+diff --git a/content/browser/utility_process_host.cc b/content/browser/utility_process_host.cc
+index dc2de5687268e0692086543ed688799d350e4e32..9e44fe6591569487a23d650cca13f19e6c7a3582 100644
+--- a/content/browser/utility_process_host.cc
++++ b/content/browser/utility_process_host.cc
+@@ -271,6 +271,7 @@ bool UtilityProcessHost::StartProcess() {
+       switches::kEnableExperimentalWebPlatformFeatures,
+       // These flags are used by the audio service:
+       switches::kAudioBufferSize,
++      switches::kAudioLatencyFactor,
+       switches::kAudioServiceQuitTimeoutMs,
+       switches::kDisableAudioOutput,
+       switches::kFailAudioStreamCreation,
+diff --git a/media/audio/mac/audio_manager_mac.cc b/media/audio/mac/audio_manager_mac.cc
+index f58ac1d55acac1895391579275a12b0f9802491d..9228c6ef6d7e05ac67bd3f9e97725ecaf9bae411 100644
+--- a/media/audio/mac/audio_manager_mac.cc
++++ b/media/audio/mac/audio_manager_mac.cc
+@@ -19,6 +19,7 @@
+ #include "base/memory/free_deleter.h"
+ #include "base/power_monitor/power_monitor.h"
+ #include "base/power_monitor/power_observer.h"
++#include "base/strings/string_number_conversions.h"
+ #include "base/strings/sys_string_conversions.h"
+ #include "base/threading/thread_checker.h"
+ #include "media/audio/audio_device_description.h"
+@@ -1036,6 +1037,17 @@ bool AudioManagerMac::MaybeChangeBufferSize(AudioDeviceID device_id,
+   }
+   DVLOG(1) << "valid IO buffer size range: [" << minimum << ", " << maximum
+            << "]";
++  const base::CommandLine* cmd_line = base::CommandLine::ForCurrentProcess();
++  int audio_latency_factor = 0;
++  std::string audio_latency_factor_str(cmd_line->GetSwitchValueASCII(
++      switches::kAudioLatencyFactor));
++  if (base::StringToInt(audio_latency_factor_str, &audio_latency_factor) && audio_latency_factor > 0) {
++    int base_frame_size = HardwareSampleRateForDevice(device_id) / 100;
++    for (int i = 1; i <= audio_latency_factor && i * base_frame_size <= (int)maximum; i++) {
++        minimum = i * base_frame_size;
++    }
++    DVLOG(1) << switches::kAudioLatencyFactor << ": " << audio_latency_factor << ", minimum: " << minimum;
++  }
+   buffer_size = desired_buffer_size;
+   if (buffer_size < minimum)
+     buffer_size = minimum;
+diff --git a/media/base/media_switches.cc b/media/base/media_switches.cc
+index 039681128b9f9cee2bb565ec9ac393995dd06a14..13f077e700e561276c2ce85d4df3fba951e230b0 100644
+--- a/media/base/media_switches.cc
++++ b/media/base/media_switches.cc
+@@ -19,6 +19,10 @@
+ 
+ namespace switches {
+ 
++// Allow users to specify a custom buffer size in 10ms multiples.
++// 0 is default, 1 - 10ms, 2 - 20ms, etc.
++const char kAudioLatencyFactor[] = "audio-latency-factor";
++
+ // Allow users to specify a custom buffer size for debugging purpose.
+ const char kAudioBufferSize[] = "audio-buffer-size";
+ 
+diff --git a/media/base/media_switches.h b/media/base/media_switches.h
+index 4a8a693426930e62b5d2d19aac1a5c4927076f36..330500692d9933509c2c50c16b2d7e3c4f33d551 100644
+--- a/media/base/media_switches.h
++++ b/media/base/media_switches.h
+@@ -22,6 +22,8 @@ class CommandLine;
+ 
+ namespace switches {
+ 
++MEDIA_EXPORT extern const char kAudioLatencyFactor[];
++
+ MEDIA_EXPORT extern const char kAudioBufferSize[];
+ 
+ MEDIA_EXPORT extern const char kAudioServiceQuitTimeoutMs[];

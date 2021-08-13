@@ -1,0 +1,48 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Eldar Rello <eldar.rello@gmail.com>
+Date: Tue, 13 Apr 2021 23:26:23 +0300
+Subject: Make Opus complexity configurable with command line switch
+
+Make Opus complexity configurable with command line switch
+
+Signed-off-by: gellert <gellert.hegyi@around.co>
+
+diff --git a/audio/channel_send.cc b/audio/channel_send.cc
+index 725dff1f3d12f9f9b55e4823cfb5a06168e245ff..46bce3d73429ed4e6b6a4e1a8f0f092e0242af38 100644
+--- a/audio/channel_send.cc
++++ b/audio/channel_send.cc
+@@ -534,6 +534,7 @@ ChannelSend::ChannelSend(
+       HasSwitch(switches::kDisableEncoderQueue)) {
+     use_encoder_queue_ = false;
+   }
++  (void)worker_thread_checker_;
+ }
+ 
+ ChannelSend::~ChannelSend() {
+diff --git a/modules/audio_coding/codecs/opus/audio_encoder_opus.cc b/modules/audio_coding/codecs/opus/audio_encoder_opus.cc
+index ffea8bc7551dc487dee3294c6635d859083cb9b4..130e1b3fed10204e763be37adfbf5593f45d7937 100644
+--- a/modules/audio_coding/codecs/opus/audio_encoder_opus.cc
++++ b/modules/audio_coding/codecs/opus/audio_encoder_opus.cc
+@@ -17,6 +17,9 @@
+ #include <utility>
+ 
+ #include "absl/strings/match.h"
++#include "base/command_line.h"
++#include "base/strings/string_number_conversions.h"
++#include "media/base/media_switches.h"
+ #include "modules/audio_coding/audio_network_adaptor/audio_network_adaptor_impl.h"
+ #include "modules/audio_coding/audio_network_adaptor/controller_manager.h"
+ #include "modules/audio_coding/codecs/opus/audio_coder_opus_common.h"
+@@ -253,7 +256,11 @@ absl::optional<AudioEncoderOpusConfig> AudioEncoderOpusImpl::SdpToConfig(
+   config.application = config.num_channels == 1
+                            ? AudioEncoderOpusConfig::ApplicationMode::kVoip
+                            : AudioEncoderOpusConfig::ApplicationMode::kAudio;
+-
++  int opus_complexity;
++  if (base::StringToInt(base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
++      switches::kOpusComplexity), &opus_complexity)) {
++    config.complexity = opus_complexity;
++  }
+   constexpr int kMinANAFrameLength = kANASupportedFrameLengths[0];
+   constexpr int kMaxANAFrameLength =
+       kANASupportedFrameLengths[arraysize(kANASupportedFrameLengths) - 1];

@@ -1,0 +1,75 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: gellert <gellert.hegyi@around.co>
+Date: Mon, 25 May 2020 23:29:01 +0200
+Subject: disables some dchecks for smooth testing build
+
+This patch disables some dchecks that could fail for Around during runtime, but they have been checked and is not a problem for the app.
+
+Signed-off-by: gellert <gellert.hegyi@around.co>
+
+diff --git a/base/observer_list.h b/base/observer_list.h
+index a62fa36b73c477dbd8b5ac9d062673a2a37f30a5..685e8c14d65987d781eec771ec8ab9426fc57e80 100644
+--- a/base/observer_list.h
++++ b/base/observer_list.h
+@@ -269,7 +269,7 @@ class ObserverList {
+   void AddObserver(ObserverType* obs) {
+     DCHECK(obs);
+     if (HasObserver(obs)) {
+-      NOTREACHED() << "Observers can only be added once!";
++      // NOTREACHED() << "Observers can only be added once!";
+       return;
+     }
+     observers_count_++;
+diff --git a/content/renderer/media/renderer_webaudiodevice_impl.cc b/content/renderer/media/renderer_webaudiodevice_impl.cc
+index 637d248a1b0093e96c323a8991e141b6ed976ab4..04fe5baa8be42d388c35b85a63e2ed3f86630379 100644
+--- a/content/renderer/media/renderer_webaudiodevice_impl.cc
++++ b/content/renderer/media/renderer_webaudiodevice_impl.cc
+@@ -264,7 +264,7 @@ int RendererWebAudioDeviceImpl::Render(base::TimeDelta delay,
+     delay -=
+         media::AudioTimestampHelper::FramesToTime(dest->frames(), SampleRate());
+   }
+-  DCHECK_GE(delay, base::TimeDelta());
++  // DCHECK_GE(delay, base::TimeDelta());
+ 
+   client_callback_->Render(
+       web_audio_dest_data_, dest->frames(), delay.InSecondsF(),
+diff --git a/third_party/blink/renderer/modules/webgl/webgl2_rendering_context_base.cc b/third_party/blink/renderer/modules/webgl/webgl2_rendering_context_base.cc
+index d706480b2ce4c7d3da4c22784da9d040df0dfe20..2dcfac64b9cc9ae20674cad712cc11e78186dbc6 100644
+--- a/third_party/blink/renderer/modules/webgl/webgl2_rendering_context_base.cc
++++ b/third_party/blink/renderer/modules/webgl/webgl2_rendering_context_base.cc
+@@ -837,7 +837,7 @@ void WebGL2RenderingContextBase::readPixels(GLint x,
+ 
+   // Due to WebGL's same-origin restrictions, it is not possible to
+   // taint the origin using the WebGL API.
+-  DCHECK(canvas()->OriginClean());
++  // DCHECK(canvas()->OriginClean());
+ 
+   if (!ValidateValueFitNonNegInt32("readPixels", "offset", offset))
+     return;
+diff --git a/third_party/blink/renderer/platform/mediastream/media_stream_audio_processor_options.cc b/third_party/blink/renderer/platform/mediastream/media_stream_audio_processor_options.cc
+index 146ab1f1443f1e9ce253c44f3eaf731b1d9ce4dd..3a132d3bf0cc95a9b7fd947bc171c8ab2a319c79 100644
+--- a/third_party/blink/renderer/platform/mediastream/media_stream_audio_processor_options.cc
++++ b/third_party/blink/renderer/platform/mediastream/media_stream_audio_processor_options.cc
+@@ -191,8 +191,7 @@ bool AudioProcessingProperties::HasSameReconfigurableSettings(
+ 
+ bool AudioProcessingProperties::HasSameNonReconfigurableSettings(
+     const AudioProcessingProperties& other) const {
+-  return disable_hw_noise_suppression == other.disable_hw_noise_suppression &&
+-         goog_audio_mirroring == other.goog_audio_mirroring &&
++  return goog_audio_mirroring == other.goog_audio_mirroring &&
+          goog_auto_gain_control == other.goog_auto_gain_control &&
+          goog_experimental_echo_cancellation ==
+              other.goog_experimental_echo_cancellation &&
+diff --git a/third_party/blink/renderer/platform/mediastream/webaudio_media_stream_source.cc b/third_party/blink/renderer/platform/mediastream/webaudio_media_stream_source.cc
+index 30800b44aa008300949b1c329f71ef627c014204..7161a963eb33792fc614c12682438c72bc7e484a 100644
+--- a/third_party/blink/renderer/platform/mediastream/webaudio_media_stream_source.cc
++++ b/third_party/blink/renderer/platform/mediastream/webaudio_media_stream_source.cc
+@@ -31,7 +31,7 @@ WebAudioMediaStreamSource::~WebAudioMediaStreamSource() {
+ 
+ void WebAudioMediaStreamSource::SetFormat(size_t number_of_channels,
+                                           float sample_rate) {
+-  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
++  // DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+   VLOG(1) << "WebAudio media stream source changed format to: channels="
+           << number_of_channels << ", sample_rate=" << sample_rate;
+ 

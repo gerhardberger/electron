@@ -1,0 +1,317 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: gellert <gellert.hegyi@around.co>
+Date: Fri, 13 Aug 2021 11:42:52 +0200
+Subject: linux add window will-resize did-resize events
+
+This patch adds similar window did-resize and will-resize events to linux as there is for macOS and Windows.
+
+diff --git a/ui/aura/window_tree_host.cc b/ui/aura/window_tree_host.cc
+index 35e0e635d1f167e05eac2734f4d93b665facc67b..df9d9b17f8e4e24634dd431c7789a67e7c2d70d6 100644
+--- a/ui/aura/window_tree_host.cc
++++ b/ui/aura/window_tree_host.cc
+@@ -471,6 +471,24 @@ void WindowTreeHost::OnHostMovedInPixels(
+     observer.OnHostMovedInPixels(this, new_location_in_pixels);
+ }
+ 
++void WindowTreeHost::OnHostWillResize(const gfx::Size& new_size_in_pixels) {
++  if (!compositor_)
++    return;
++  display::Display display =
++      display::Screen::GetScreen()->GetDisplayNearestWindow(window());
++  device_scale_factor_ = display.device_scale_factor();
++  UpdateRootWindowSizeInPixels();
++  UpdateCompositorScaleAndSize(new_size_in_pixels);
++
++  for (WindowTreeHostObserver& observer : observers_)
++    observer.OnHostWillResize(this);
++}
++
++void WindowTreeHost::OnHostDidResize() {
++  for (WindowTreeHostObserver& observer : observers_)
++    observer.OnHostDidResize(this);
++}
++
+ void WindowTreeHost::OnHostResizedInPixels(
+     const gfx::Size& new_size_in_pixels) {
+   // The compositor is deleted from WM_DESTROY, but we don't delete things until
+diff --git a/ui/aura/window_tree_host.h b/ui/aura/window_tree_host.h
+index 3492004a54fd9fb8a15637fd9676655e26fa830d..22d8417eb5a6455c41b19fbf0b2944df35c484a0 100644
+--- a/ui/aura/window_tree_host.h
++++ b/ui/aura/window_tree_host.h
+@@ -286,6 +286,10 @@ class AURA_EXPORT WindowTreeHost : public ui::internal::InputMethodDelegate,
+ 
+   void OnHostMovedInPixels(const gfx::Point& new_location_in_pixels);
+   void OnHostResizedInPixels(const gfx::Size& new_size_in_pixels);
++
++  void OnHostWillResize(const gfx::Size& new_size_in_pixels);
++  void OnHostDidResize();
++
+   void OnHostWorkspaceChanged();
+   void OnHostDisplayChanged();
+   void OnHostCloseRequested();
+diff --git a/ui/aura/window_tree_host_observer.h b/ui/aura/window_tree_host_observer.h
+index 995ada6aa5d53f76f1672cb95040299722da8fd1..ad79d458028104c4a285c3abe88ca740e2e8be88 100644
+--- a/ui/aura/window_tree_host_observer.h
++++ b/ui/aura/window_tree_host_observer.h
+@@ -22,6 +22,9 @@ class AURA_EXPORT WindowTreeHostObserver {
+   // Called when the host's client size has changed.
+   virtual void OnHostResized(WindowTreeHost* host) {}
+ 
++  virtual void OnHostWillResize(WindowTreeHost* host) {}
++  virtual void OnHostDidResize(WindowTreeHost* host) {}
++
+   // Called when the host is moved on screen.
+   virtual void OnHostMovedInPixels(WindowTreeHost* host,
+                                    const gfx::Point& new_origin_in_pixels) {}
+diff --git a/ui/aura/window_tree_host_platform.cc b/ui/aura/window_tree_host_platform.cc
+index 95ffa4fef39b6df842cf543308cbb8a832af48ef..d1be5cc60bdf304b0087b30148f07e31e7822e84 100644
+--- a/ui/aura/window_tree_host_platform.cc
++++ b/ui/aura/window_tree_host_platform.cc
+@@ -208,6 +208,16 @@ void WindowTreeHostPlatform::LockMouse(Window* window) {
+   WindowTreeHost::LockMouse(window);
+ }
+ 
++#if defined(OS_LINUX)
++void WindowTreeHostPlatform::OnWillResize(const gfx::Rect& new_bounds) {
++  OnHostWillResize(bounds_in_pixels_.size());
++}
++
++void WindowTreeHostPlatform::OnDidResize() {
++  OnHostDidResize();
++}
++#endif
++
+ void WindowTreeHostPlatform::OnBoundsChanged(const BoundsChange& change) {
+   // It's possible this function may be called recursively. Only notify
+   // observers on initial entry. This way observers can safely assume that
+diff --git a/ui/aura/window_tree_host_platform.h b/ui/aura/window_tree_host_platform.h
+index 2969ac7aebf02b26cf750e0be506b084944aeb56..45136b4962fedc475a6dac0390c600c14db0bee4 100644
+--- a/ui/aura/window_tree_host_platform.h
++++ b/ui/aura/window_tree_host_platform.h
+@@ -68,6 +68,12 @@ class AURA_EXPORT WindowTreeHostPlatform : public WindowTreeHost,
+ 
+   // ui::PlatformWindowDelegate:
+   void OnBoundsChanged(const BoundsChange& change) override;
++
++#if defined(OS_LINUX)
++  void OnWillResize(const gfx::Rect& new_bounds) override;
++  void OnDidResize() override;
++#endif
++
+   void OnDamageRect(const gfx::Rect& damaged_region) override;
+   void DispatchEvent(ui::Event* event) override;
+   void OnCloseRequest() override;
+diff --git a/ui/platform_window/platform_window_delegate.h b/ui/platform_window/platform_window_delegate.h
+index d3e6ac9a54446acfa2b09c2332c4241117c3394e..6d9f81f7ff211403a9276d4b1573a75a9be2fc29 100644
+--- a/ui/platform_window/platform_window_delegate.h
++++ b/ui/platform_window/platform_window_delegate.h
+@@ -68,6 +68,11 @@ class COMPONENT_EXPORT(PLATFORM_WINDOW) PlatformWindowDelegate {
+ 
+   virtual void OnBoundsChanged(const BoundsChange& change) = 0;
+ 
++#if defined(OS_LINUX)
++  virtual void OnWillResize(const gfx::Rect& new_bounds) = 0;
++  virtual void OnDidResize() = 0;
++#endif
++
+   // Note that |damaged_region| is in the platform-window's coordinates, in
+   // physical pixels.
+   virtual void OnDamageRect(const gfx::Rect& damaged_region) = 0;
+diff --git a/ui/platform_window/x11/x11_window.cc b/ui/platform_window/x11/x11_window.cc
+index 55eab0cb37324d882f597b1bb5331f2cd2385d94..d2fb239159990406f3113b8f3d3a1606efe8724b 100644
+--- a/ui/platform_window/x11/x11_window.cc
++++ b/ui/platform_window/x11/x11_window.cc
+@@ -1317,6 +1317,14 @@ void X11Window::OnXWindowBoundsChanged(const gfx::Rect& bounds) {
+   platform_window_delegate_->OnBoundsChanged(bounds);
+ }
+ 
++void X11Window::OnXWindowWillResize(const gfx::Rect& bounds) {
++  platform_window_delegate_->OnWillResize(bounds);
++}
++
++void X11Window::OnXWindowDidResize() {
++  platform_window_delegate_->OnDidResize();
++}
++
+ void X11Window::OnXWindowCloseRequested() {
+   platform_window_delegate_->OnCloseRequest();
+ }
+@@ -2020,6 +2028,19 @@ void X11Window::HandleEvent(const x11::Event& xev) {
+                                     expose->height);
+     OnXWindowDamageEvent(damage_rect_in_pixels);
+   } else if (auto* focus = xev.As<x11::FocusEvent>()) {
++    if (focus->mode == x11::NotifyMode::Grab) {
++      is_mouse_button_down_ = true;
++    }
++
++    if (focus->mode == x11::NotifyMode::Ungrab) {
++      is_mouse_button_down_ = false;
++
++      if (is_resizing_) {
++        is_resizing_ = false;
++        OnXWindowDidResize();
++      }
++    }
++
+     OnFocusEvent(focus->opcode == x11::FocusEvent::In, focus->mode,
+                  focus->detail);
+   } else if (auto* configure = xev.As<x11::ConfigureNotifyEvent>()) {
+@@ -2250,6 +2271,13 @@ void X11Window::DelayedResize(const gfx::Rect& bounds_in_pixels) {
+                    ++current_counter_value_);
+   }
+ 
++  if (is_mouse_button_down_) {
++    if (!is_resizing_) {
++      OnXWindowWillResize(bounds_in_pixels);
++    }
++    is_resizing_ = true;
++  }
++
+   CancelResize();
+   NotifyBoundsChanged(bounds_in_pixels);
+ 
+diff --git a/ui/platform_window/x11/x11_window.h b/ui/platform_window/x11/x11_window.h
+index bd1bf9411477ddf7ace9315b2deb4323230183bb..4272c071939a9f36396236a857e423025c31d365 100644
+--- a/ui/platform_window/x11/x11_window.h
++++ b/ui/platform_window/x11/x11_window.h
+@@ -142,6 +142,10 @@ class X11_WINDOW_EXPORT X11Window
+   void OnXWindowStateChanged();
+   void OnXWindowDamageEvent(const gfx::Rect& damage_rect);
+   void OnXWindowBoundsChanged(const gfx::Rect& size);
++
++  void OnXWindowWillResize(const gfx::Rect& size) override;
++  void OnXWindowDidResize() override;
++
+   void OnXWindowCloseRequested();
+   void OnXWindowIsActiveChanged(bool active);
+   void OnXWindowWorkspaceChanged();
+@@ -480,6 +484,9 @@ class X11_WINDOW_EXPORT X11Window
+ 
+   base::CancelableOnceCallback<void(x11::Cursor)> on_cursor_loaded_;
+ 
++  bool is_resizing_ = false;
++  bool is_mouse_button_down_ = false;
++
+   base::WeakPtrFactory<X11Window> weak_ptr_factory_{this};
+ 
+   DISALLOW_COPY_AND_ASSIGN(X11Window);
+diff --git a/ui/views/widget/desktop_aura/desktop_native_widget_aura.cc b/ui/views/widget/desktop_aura/desktop_native_widget_aura.cc
+index b27610b31fbdb3fe4b02503ed88e2dbaef4a395e..46bc07c42d857a478d92dc45eb44c3040e4043d4 100644
+--- a/ui/views/widget/desktop_aura/desktop_native_widget_aura.cc
++++ b/ui/views/widget/desktop_aura/desktop_native_widget_aura.cc
+@@ -1304,6 +1304,21 @@ void DesktopNativeWidgetAura::OnHostCloseRequested(aura::WindowTreeHost* host) {
+   GetWidget()->Close();
+ }
+ 
++#if defined(OS_LINUX)
++void DesktopNativeWidgetAura::OnHostWillResize(aura::WindowTreeHost* host) {
++  if (desktop_window_tree_host_->IsAnimatingClosed())
++    return;
++
++  gfx::Rect new_bounds = gfx::Rect(host->window()->bounds().size());
++  content_window_->SetBounds(new_bounds);
++  native_widget_delegate_->OnNativeWidgetWillResize(new_bounds.size());
++}
++
++void DesktopNativeWidgetAura::OnHostDidResize(aura::WindowTreeHost* host) {
++  native_widget_delegate_->OnNativeWidgetDidResize();
++}
++#endif
++
+ void DesktopNativeWidgetAura::OnHostResized(aura::WindowTreeHost* host) {
+   // Don't update the bounds of the child layers when animating closed. If we
+   // did it would force a paint, which we don't want. We don't want the paint
+diff --git a/ui/views/widget/desktop_aura/desktop_native_widget_aura.h b/ui/views/widget/desktop_aura/desktop_native_widget_aura.h
+index 054ac8dcbea9035aa51c88c2430b93ecc12f34b3..9dae9ee3da0005e2888964685043eb0cf0dafc2e 100644
+--- a/ui/views/widget/desktop_aura/desktop_native_widget_aura.h
++++ b/ui/views/widget/desktop_aura/desktop_native_widget_aura.h
+@@ -259,6 +259,12 @@ class VIEWS_EXPORT DesktopNativeWidgetAura
+   // aura::WindowTreeHostObserver:
+   void OnHostCloseRequested(aura::WindowTreeHost* host) override;
+   void OnHostResized(aura::WindowTreeHost* host) override;
++
++#if defined(OS_LINUX)
++  void OnHostWillResize(aura::WindowTreeHost* host) override;
++  void OnHostDidResize(aura::WindowTreeHost* host) override;
++#endif
++
+   void OnHostWorkspaceChanged(aura::WindowTreeHost* host) override;
+   void OnHostMovedInPixels(aura::WindowTreeHost* host,
+                            const gfx::Point& new_origin_in_pixels) override;
+diff --git a/ui/views/widget/native_widget_delegate.h b/ui/views/widget/native_widget_delegate.h
+index 12e702107880b369532a2339e441e1b6c8625c2b..ba3a2a7b3231e1d5aad597f6afe65d1c3ac2e0bd 100644
+--- a/ui/views/widget/native_widget_delegate.h
++++ b/ui/views/widget/native_widget_delegate.h
+@@ -93,6 +93,11 @@ class VIEWS_EXPORT NativeWidgetDelegate {
+   // e.g. maximize.
+   virtual void OnNativeWidgetSizeChanged(const gfx::Size& new_size) = 0;
+ 
++#if defined(OS_LINUX)
++  virtual void OnNativeWidgetWillResize(const gfx::Size& new_size) = 0;
++  virtual void OnNativeWidgetDidResize() = 0;
++#endif
++
+   // Called when NativeWidget changed workspaces or its visible on all
+   // workspaces state changes.
+   virtual void OnNativeWidgetWorkspaceChanged() = 0;
+diff --git a/ui/views/widget/widget.cc b/ui/views/widget/widget.cc
+index a742d7d7f5d56511b249fe178faee113316a721f..2e6f63879f201dd822a6818e7d9ec8d6f45dec5c 100644
+--- a/ui/views/widget/widget.cc
++++ b/ui/views/widget/widget.cc
+@@ -1374,6 +1374,25 @@ void Widget::OnNativeWidgetMove() {
+     observer.OnWidgetBoundsChanged(this, GetWindowBoundsInScreen());
+ }
+ 
++#if defined(OS_LINUX)
++void Widget::OnNativeWidgetWillResize(const gfx::Size& new_size) {
++  View* root = GetRootView();
++  if (root)
++    root->SetSize(new_size);
++
++  NotifyCaretBoundsChanged(GetInputMethod());
++  SaveWindowPlacementIfInitialized();
++
++  for (WidgetObserver& observer : observers_)
++    observer.OnWidgetWillResize(this, GetWindowBoundsInScreen());
++}
++
++void Widget::OnNativeWidgetDidResize() {
++  for (WidgetObserver& observer : observers_)
++    observer.OnWidgetDidResize(this);
++}
++#endif
++
+ void Widget::OnNativeWidgetSizeChanged(const gfx::Size& new_size) {
+   TRACE_EVENT0("ui", "Widget::OnNativeWidgetSizeChanged");
+ 
+diff --git a/ui/views/widget/widget.h b/ui/views/widget/widget.h
+index d6ce8c4934ed16112c7b97a96606f8957aa75693..badfc434dc95c159ab750d50347fe7e6d667d833 100644
+--- a/ui/views/widget/widget.h
++++ b/ui/views/widget/widget.h
+@@ -994,6 +994,12 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
+   gfx::Size GetMaximumSize() const override;
+   void OnNativeWidgetMove() override;
+   void OnNativeWidgetSizeChanged(const gfx::Size& new_size) override;
++
++#if defined(OS_LINUX)
++  void OnNativeWidgetWillResize(const gfx::Size& new_size) override;
++  void OnNativeWidgetDidResize() override;
++#endif
++
+   void OnNativeWidgetWorkspaceChanged() override;
+   void OnNativeWidgetWindowShowStateChanged() override;
+   void OnNativeWidgetBeginUserBoundsChange() override;
+diff --git a/ui/views/widget/widget_observer.h b/ui/views/widget/widget_observer.h
+index 4050dd33db58b9957cd18470ddd1cf6328fd81f1..9c63abd77c9cf3ccbe27b343aea71094c1b2083f 100644
+--- a/ui/views/widget/widget_observer.h
++++ b/ui/views/widget/widget_observer.h
+@@ -49,6 +49,9 @@ class VIEWS_EXPORT WidgetObserver : public base::CheckedObserver {
+   virtual void OnWidgetBoundsChanged(Widget* widget,
+                                      const gfx::Rect& new_bounds) {}
+ 
++  virtual void OnWidgetWillResize(Widget* widget, const gfx::Rect& new_bounds) {}
++  virtual void OnWidgetDidResize(Widget* widget) {}
++
+   virtual void OnWidgetThemeChanged(Widget* widget) {}
+ 
+  protected:

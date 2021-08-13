@@ -1,0 +1,30 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: gellert <gellert.hegyi@around.co>
+Date: Sat, 16 May 2020 00:11:23 +0200
+Subject: disables goog agc
+
+Disables experimental AGC1 mode in MediaStreamAudioProcessor.
+
+Signed-off-by: gellert <gellert.hegyi@around.co>
+
+diff --git a/third_party/blink/renderer/platform/mediastream/media_stream_audio_processor_options.cc b/third_party/blink/renderer/platform/mediastream/media_stream_audio_processor_options.cc
+index 3a132d3bf0cc95a9b7fd947bc171c8ab2a319c79..d8708a15beb9ed10b9b5d720122271f58a77c562 100644
+--- a/third_party/blink/renderer/platform/mediastream/media_stream_audio_processor_options.cc
++++ b/third_party/blink/renderer/platform/mediastream/media_stream_audio_processor_options.cc
+@@ -458,12 +458,14 @@ std::unique_ptr<webrtc::AudioProcessing> CreateWebRtcAudioProcessingModule(
+     experimental_agc->digital_adaptive_disabled =
+         hybrid_agc_params.has_value() && !hybrid_agc_params->dry_run;
+     config.Set<webrtc::ExperimentalAgc>(experimental_agc);
+-#if BUILDFLAG(IS_CHROMECAST)
++// @AROUND we want the Experimental AGC option to always be turned off if
++// it's disabled in the APM properties (media_stream_audio_processor_options.cc)
++// #if defined(IS_CHROMECAST)
+   } else {
+     // Do not use the analog controller.
+     config.Set<webrtc::ExperimentalAgc>(
+         new webrtc::ExperimentalAgc(/*enabled=*/false));
+-#endif  // BUILDFLAG(IS_CHROMECAST)
++// #endif  // BUILDFLAG(IS_CHROMECAST)
+   }
+ 
+   // Create and configure the webrtc::AudioProcessing.

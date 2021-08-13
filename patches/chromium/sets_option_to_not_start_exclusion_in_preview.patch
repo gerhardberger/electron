@@ -1,0 +1,21 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: gellert <gellert.hegyi@around.co>
+Date: Tue, 30 Jun 2020 18:56:09 +0200
+Subject: sets option to not start exclusion in preview
+
+This patch sets a flag that will prevent window exclusion while in preview when doing screensharing
+
+Signed-off-by: gellert <gellert.hegyi@around.co>
+
+diff --git a/content/browser/media/capture/desktop_capture_device.cc b/content/browser/media/capture/desktop_capture_device.cc
+index a81a2d14b782d2ca43a11dd40ff12e1dcd989df4..51dcf88d0925023bd1133a4f88366b7dd073ddc9 100644
+--- a/content/browser/media/capture/desktop_capture_device.cc
++++ b/content/browser/media/capture/desktop_capture_device.cc
+@@ -263,6 +263,7 @@ void DesktopCaptureDevice::Core::AllocateAndStart(
+   DCHECK(!wake_lock_);
+   RequestWakeLock();
+ 
++  desktop_capturer_->should_exclude_ = true;
+   desktop_capturer_->Start(this);
+   // Assume it will be always started successfully for now.
+   client_->OnStarted();

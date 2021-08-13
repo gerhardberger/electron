@@ -1,0 +1,78 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Gellert Hegyi <gellert.hegyi@around.co>
+Date: Wed, 10 Jun 2020 15:29:12 +0200
+Subject: win: excludes own windows from screensharing
+
+This patch removes all of the windows from screensharing that has the same pid as the app itself.
+
+Signed-off-by: gellert <gellert.hegyi@around.co>
+
+diff --git a/modules/desktop_capture/win/screen_capturer_win_magnifier.cc b/modules/desktop_capture/win/screen_capturer_win_magnifier.cc
+index 214eb0e463617c943b2e105b3271788287163a56..dae26f57fb40fb6a89ab9b612b5ac8af5488c971 100644
+--- a/modules/desktop_capture/win/screen_capturer_win_magnifier.cc
++++ b/modules/desktop_capture/win/screen_capturer_win_magnifier.cc
+@@ -329,14 +329,50 @@ bool ScreenCapturerWinMagnifier::InitializeMagnifier() {
+     }
+   }
+ 
++  ExcludeOwnWindows();
++
+   magnifier_initialized_ = true;
+   return true;
+ }
+ 
++void ScreenCapturerWinMagnifier::ExcludeOwnWindows() {
++  std::vector<HWND> hwndsToExclude;
++  DWORD ownpid = ::GetCurrentProcessId();
++
++  HWND hCurWnd = NULL;
++  do {
++    hCurWnd = FindWindowEx(NULL, hCurWnd, NULL, NULL);
++    DWORD dwProcessID = 0;
++    GetWindowThreadProcessId(hCurWnd, &dwProcessID);
++    if (dwProcessID == ownpid) {
++      hwndsToExclude.push_back(hCurWnd);
++    }
++  }
++  while (hCurWnd != NULL);
++
++  if (hwndsToExclude.size() != excluded_window_list_.size()) {
++    excluded_window_list_ = hwndsToExclude;
++    HWND* excluded_window_list = hwndsToExclude.data();
++    if (hwndsToExclude.size() > 0) {
++      BOOL result = set_window_filter_list_func_(
++          magnifier_window_, MW_FILTERMODE_EXCLUDE, hwndsToExclude.size(), excluded_window_list);
++      if (!result) {
++        mag_uninitialize_func_();
++        RTC_LOG_F(LS_WARNING)
++            << "Failed to initialize ScreenCapturerWinMagnifier: "
++              "error from MagSetWindowFilterList "
++            << GetLastError();
++      }
++    }
++  }
++}
++
+ void ScreenCapturerWinMagnifier::OnCaptured(void* data,
+                                             const MAGIMAGEHEADER& header) {
+   DesktopFrame* current_frame = queue_.current_frame();
+ 
++  ExcludeOwnWindows();
++
+   // Verify the format.
+   // TODO(jiayl): support capturing sources with pixel formats other than RGBA.
+   int captured_bytes_per_pixel = header.cbSize / header.width / header.height;
+diff --git a/modules/desktop_capture/win/screen_capturer_win_magnifier.h b/modules/desktop_capture/win/screen_capturer_win_magnifier.h
+index 19202a75e97596ff9dfb4f2a2180478ffa38e80e..5f8e9fd0f3a6b25cecb7d156aa8cc7a791fc5b87 100644
+--- a/modules/desktop_capture/win/screen_capturer_win_magnifier.h
++++ b/modules/desktop_capture/win/screen_capturer_win_magnifier.h
+@@ -103,6 +103,9 @@ class ScreenCapturerWinMagnifier : public DesktopCapturer {
+   ScreenId current_screen_id_ = kFullDesktopScreenId;
+   std::wstring current_device_key_;
+   HWND excluded_window_ = NULL;
++  
++  std::vector<HWND> excluded_window_list_;
++  void ExcludeOwnWindows();
+ 
+   // Queue of the frames buffers.
+   ScreenCaptureFrameQueue<SharedDesktopFrame> queue_;

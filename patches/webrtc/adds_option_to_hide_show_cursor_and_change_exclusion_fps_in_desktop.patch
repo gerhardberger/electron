@@ -1,0 +1,106 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: gellert <gellert.hegyi@around.co>
+Date: Thu, 12 Aug 2021 19:27:15 +0200
+Subject: adds option to hide show cursor and change exclusion fps in desktop
+ screensharing
+
+This patch adds the ability to the desktop capturerer to hide and show cursor and change exclusion fps in desktop screensharing.
+
+diff --git a/modules/desktop_capture/desktop_and_cursor_composer.cc b/modules/desktop_capture/desktop_and_cursor_composer.cc
+index 1fa186f02ecaa60cee5f992b1d894287fc704c1a..6e48851c2fed1d0a9f2a8320b4c9a24d84175497 100644
+--- a/modules/desktop_capture/desktop_and_cursor_composer.cc
++++ b/modules/desktop_capture/desktop_and_cursor_composer.cc
+@@ -69,7 +69,8 @@ class DesktopFrameWithCursor : public DesktopFrame {
+                          const MouseCursor& cursor,
+                          const DesktopVector& position,
+                          const DesktopRect& previous_cursor_rect,
+-                         bool cursor_changed);
++                         bool cursor_changed,
++                         bool show_cursor);
+   ~DesktopFrameWithCursor() override;
+ 
+   DesktopRect cursor_rect() const { return cursor_rect_; }
+@@ -89,7 +90,8 @@ DesktopFrameWithCursor::DesktopFrameWithCursor(
+     const MouseCursor& cursor,
+     const DesktopVector& position,
+     const DesktopRect& previous_cursor_rect,
+-    bool cursor_changed)
++    bool cursor_changed,
++    bool show_cursor)
+     : DesktopFrame(frame->size(),
+                    frame->stride(),
+                    frame->data(),
+@@ -119,16 +121,18 @@ DesktopFrameWithCursor::DesktopFrameWithCursor(
+   restore_frame_->CopyPixelsFrom(*this, cursor_rect_.top_left(),
+                                  DesktopRect::MakeSize(restore_frame_->size()));
+ 
+-  // Blit the cursor.
+-  uint8_t* cursor_rect_data =
+-      reinterpret_cast<uint8_t*>(data()) + cursor_rect_.top() * stride() +
+-      cursor_rect_.left() * DesktopFrame::kBytesPerPixel;
+-  DesktopVector origin_shift = cursor_rect_.top_left().subtract(cursor_origin);
+-  AlphaBlend(cursor_rect_data, stride(),
+-             cursor.image()->data() +
+-                 origin_shift.y() * cursor.image()->stride() +
+-                 origin_shift.x() * DesktopFrame::kBytesPerPixel,
+-             cursor.image()->stride(), cursor_rect_.size());
++  if (show_cursor) {
++    // Blit the cursor.
++    uint8_t* cursor_rect_data =
++        reinterpret_cast<uint8_t*>(data()) + cursor_rect_.top() * stride() +
++        cursor_rect_.left() * DesktopFrame::kBytesPerPixel;
++    DesktopVector origin_shift = cursor_rect_.top_left().subtract(cursor_origin);
++    AlphaBlend(cursor_rect_data, stride(),
++              cursor.image()->data() +
++                  origin_shift.y() * cursor.image()->stride() +
++                  origin_shift.x() * DesktopFrame::kBytesPerPixel,
++              cursor.image()->stride(), cursor_rect_.size());
++  }
+ }
+ 
+ DesktopFrameWithCursor::~DesktopFrameWithCursor() {
+@@ -207,6 +211,8 @@ bool DesktopAndCursorComposer::IsOccluded(const DesktopVector& pos) {
+ void DesktopAndCursorComposer::OnCaptureResult(
+     DesktopCapturer::Result result,
+     std::unique_ptr<DesktopFrame> frame) {
++  desktop_capturer_->exclusion_fps_ = exclusion_fps_;
++
+   if (frame && cursor_) {
+     if (!frame->may_contain_cursor() &&
+         frame->rect().Contains(cursor_position_) &&
+@@ -226,7 +232,7 @@ void DesktopAndCursorComposer::OnCaptureResult(
+ #endif
+       auto frame_with_cursor = std::make_unique<DesktopFrameWithCursor>(
+           std::move(frame), *cursor_, relative_position, previous_cursor_rect_,
+-          cursor_changed_);
++          cursor_changed_, show_cursor_);
+       previous_cursor_rect_ = frame_with_cursor->cursor_rect();
+       cursor_changed_ = false;
+       frame = std::move(frame_with_cursor);
+diff --git a/modules/desktop_capture/desktop_capturer.h b/modules/desktop_capture/desktop_capturer.h
+index 15b749c91ddd762201f05d51326bf1809ee33c32..eba5daa2dd586071a2dd5c596f7dcc8a0b7563eb 100644
+--- a/modules/desktop_capture/desktop_capturer.h
++++ b/modules/desktop_capture/desktop_capturer.h
+@@ -81,6 +81,8 @@ class RTC_EXPORT DesktopCapturer {
+   // valid until capturer is destroyed.
+   virtual void Start(Callback* callback) = 0;
+   bool should_exclude_ = false;
++  bool show_cursor_ = true;
++  float exclusion_fps_ = 5.0f;
+ 
+   // Sets SharedMemoryFactory that will be used to create buffers for the
+   // captured frames. The factory can be invoked on a thread other than the one
+diff --git a/modules/desktop_capture/mac/screen_capturer_mac.mm b/modules/desktop_capture/mac/screen_capturer_mac.mm
+index 5921702b40afb29a01d24c25befbee973cc848bb..93670c410c2d2bc45d95294a6696af2ebbf4a034 100644
+--- a/modules/desktop_capture/mac/screen_capturer_mac.mm
++++ b/modules/desktop_capture/mac/screen_capturer_mac.mm
+@@ -387,8 +387,7 @@ DesktopRect GetExcludedWindowPixelBounds(CGWindowID window, float dip_to_pixel_s
+     copy_region.Translate(-display_bounds.left(), -display_bounds.top());
+ 
+     if (should_exclude_) {
+-      float window_exclude_capture_fps = 5.0f;
+-      float delta = 1000.0f / window_exclude_capture_fps;
++      float delta = 1000.0f / exclusion_fps_;
+       if (last_exclude_capture_ms_ == 0 || rtc::TimeSince(last_exclude_capture_ms_) > delta) {
+         last_exclude_capture_ms_ = rtc::SystemTimeMillis();
+         excluded_images_.clear();

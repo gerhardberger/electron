@@ -1,0 +1,95 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: gellert <gellert.hegyi@around.co>
+Date: Fri, 13 Aug 2021 10:25:31 +0200
+Subject: Add switches to disable Around audio processing, set opus complexity
+ and disable audio encoder queue
+
+Add switches to disable Around audio processing, set opus complexity and disable audio encoder queue.
+
+diff --git a/content/browser/renderer_host/render_process_host_impl.cc b/content/browser/renderer_host/render_process_host_impl.cc
+index 8072e45bc2bdadec4f4b6f434565401763222e32..bc854896652c6ba4acb9a08c431806207fc3b1e3 100644
+--- a/content/browser/renderer_host/render_process_host_impl.cc
++++ b/content/browser/renderer_host/render_process_host_impl.cc
+@@ -3386,6 +3386,9 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
+     switches::kAndroidFontsPath,
+     switches::kAudioBufferSize,
+     switches::kAudioLatencyFactor,
++    switches::kDisableAroundAudioProcessing,
++    switches::kOpusComplexity,
++    switches::kDisableEncoderQueue,
+     switches::kAutoplayPolicy,
+     switches::kMojoCoreLibraryPath,
+     switches::kDisable2dCanvasImageChromium,
+diff --git a/content/browser/utility_process_host.cc b/content/browser/utility_process_host.cc
+index 9e44fe6591569487a23d650cca13f19e6c7a3582..288a4f082e79b7aee18b88caa2d8dfd8e2721a09 100644
+--- a/content/browser/utility_process_host.cc
++++ b/content/browser/utility_process_host.cc
+@@ -272,6 +272,9 @@ bool UtilityProcessHost::StartProcess() {
+       // These flags are used by the audio service:
+       switches::kAudioBufferSize,
+       switches::kAudioLatencyFactor,
++      switches::kDisableAroundAudioProcessing,
++      switches::kOpusComplexity,
++      switches::kDisableEncoderQueue,
+       switches::kAudioServiceQuitTimeoutMs,
+       switches::kDisableAudioOutput,
+       switches::kFailAudioStreamCreation,
+diff --git a/media/base/media_switches.cc b/media/base/media_switches.cc
+index 13f077e700e561276c2ce85d4df3fba951e230b0..93d5acf4f2530107b3620dfb92accde52ae36aca 100644
+--- a/media/base/media_switches.cc
++++ b/media/base/media_switches.cc
+@@ -23,6 +23,15 @@ namespace switches {
+ // 0 is default, 1 - 10ms, 2 - 20ms, etc.
+ const char kAudioLatencyFactor[] = "audio-latency-factor";
+ 
++// Disable Around audio processing.
++const char kDisableAroundAudioProcessing[] = "disable-around-audio-processing";
++
++// Sets opus complexity 0-9.
++const char kOpusComplexity[] = "opus-complexity";
++
++// Moves Opus encoding from worker threads to capture thread.
++const char kDisableEncoderQueue[] = "disable-encoder-queue";
++
+ // Allow users to specify a custom buffer size for debugging purpose.
+ const char kAudioBufferSize[] = "audio-buffer-size";
+ 
+diff --git a/media/base/media_switches.h b/media/base/media_switches.h
+index 330500692d9933509c2c50c16b2d7e3c4f33d551..cabecd4af7387215783000cf4a35c05672b5e406 100644
+--- a/media/base/media_switches.h
++++ b/media/base/media_switches.h
+@@ -23,6 +23,9 @@ class CommandLine;
+ namespace switches {
+ 
+ MEDIA_EXPORT extern const char kAudioLatencyFactor[];
++MEDIA_EXPORT extern const char kDisableAroundAudioProcessing[];
++MEDIA_EXPORT extern const char kOpusComplexity[];
++MEDIA_EXPORT extern const char kDisableEncoderQueue[];
+ 
+ MEDIA_EXPORT extern const char kAudioBufferSize[];
+ 
+diff --git a/third_party/blink/renderer/modules/mediastream/media_stream_audio_processor.cc b/third_party/blink/renderer/modules/mediastream/media_stream_audio_processor.cc
+index f5747e7b987f6a22f349fc477a5b5d685fb7f1a8..9834091a7179bdcdf67e5dd5ac3f9b33fa6f0295 100644
+--- a/third_party/blink/renderer/modules/mediastream/media_stream_audio_processor.cc
++++ b/third_party/blink/renderer/modules/mediastream/media_stream_audio_processor.cc
+@@ -27,6 +27,7 @@
+ #include "media/base/audio_parameters.h"
+ #include "media/base/channel_layout.h"
+ #include "media/base/limits.h"
++#include "media/base/media_switches.h"
+ #include "media/webrtc/helpers.h"
+ #include "third_party/abseil-cpp/absl/types/optional.h"
+ #include "third_party/blink/public/common/features.h"
+@@ -576,6 +577,12 @@ void MediaStreamAudioProcessor::InitializeCaptureFifo(
+   // The output channels from the fifo is normally the same as input.
+   int fifo_output_channels = input_format.channels();
+ 
++  if (base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kDisableAroundAudioProcessing)) {
++    auto config = audio_processing_->GetConfig();
++    config.around_audio_processing.enabled = false;
++    audio_processing_->ApplyConfig(config);
++  }
++
+   bool aroundAudioProcessingEnabled = audio_processing_->GetConfig().around_audio_processing.enabled;
+ 
+   media::ChannelLayout output_channel_layout;

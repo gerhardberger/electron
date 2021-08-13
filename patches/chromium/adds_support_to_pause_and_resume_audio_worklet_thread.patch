@@ -1,0 +1,109 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: gellert <gellert.hegyi@around.co>
+Date: Mon, 12 Apr 2021 16:45:05 +0200
+Subject: adds support to pause and resume audio worklet thread
+
+This patch adds support using the around-dc internal datachannel to pause and resume audio processing on the audio worklet thread.
+
+Signed-off-by: gellert <gellert.hegyi@around.co>
+
+diff --git a/third_party/blink/renderer/platform/audio/audio_destination.cc b/third_party/blink/renderer/platform/audio/audio_destination.cc
+index d32f68ce9771a304ac998cb506f575e3dd58bb45..4cd8797eefba5b18c982c4df820550ca53944693 100644
+--- a/third_party/blink/renderer/platform/audio/audio_destination.cc
++++ b/third_party/blink/renderer/platform/audio/audio_destination.cc
+@@ -213,15 +213,17 @@ void AudioDestination::Render(const WebVector<float*>& destination_data,
+     output_bus_->SetChannelMemory(i, destination_data[i], number_of_frames);
+ 
+   if (worklet_task_runner_) {
+-    // Use the dual-thread rendering if the AudioWorklet is activated.
+-    size_t frames_to_render =
+-        fifo_->PullAndUpdateEarmark(output_bus_.get(), number_of_frames);
+-    PostCrossThreadTask(
+-        *worklet_task_runner_, FROM_HERE,
+-        CrossThreadBindOnce(&AudioDestination::RequestRender,
+-                            WrapRefCounted(this), number_of_frames,
+-                            frames_to_render, delay, delay_timestamp,
+-                            prior_frames_skipped));
++    if (!should_pause_worklet_) {
++      // Use the dual-thread rendering if the AudioWorklet is activated.
++      size_t frames_to_render =
++          fifo_->PullAndUpdateEarmark(output_bus_.get(), number_of_frames);
++      PostCrossThreadTask(
++          *worklet_task_runner_, FROM_HERE,
++          CrossThreadBindOnce(&AudioDestination::RequestRender,
++                              WrapRefCounted(this), number_of_frames,
++                              frames_to_render, delay, delay_timestamp,
++                              prior_frames_skipped));
++    }
+   } else {
+     // Otherwise use the single-thread rendering.
+     size_t frames_to_render = fifo_->Pull(output_bus_.get(), number_of_frames);
+@@ -325,6 +327,8 @@ void AudioDestination::StartWithWorkletTaskRunner(
+   worklet_task_runner_ = std::move(worklet_task_runner);
+   web_audio_device_->Start();
+   SetDeviceState(DeviceState::kRunning);
++
++  SetupDataChannelObserver();
+ }
+ 
+ void AudioDestination::Stop() {
+@@ -332,6 +336,8 @@ void AudioDestination::Stop() {
+   TRACE_EVENT0("webaudio", "AudioDestination::Stop");
+   SendLogMessage(String::Format("%s", __func__));
+ 
++  TeardownDataChannelObserver();
++
+   if (device_state_ == DeviceState::kStopped)
+     return;
+   web_audio_device_->Stop();
+@@ -443,4 +449,10 @@ void AudioDestination::SendLogMessage(const String& message) {
+                        .Utf8());
+ }
+ 
++void AudioDestination::OnCommandReceived(std::string command, std::map<std::string, std::string> params) {
++  if (command == "audio_worklet_status") {
++    should_pause_worklet_ = params["paused"] == "true";
++  }
++}
++
+ }  // namespace blink
+diff --git a/third_party/blink/renderer/platform/audio/audio_destination.h b/third_party/blink/renderer/platform/audio/audio_destination.h
+index 8a9b79dec559c80f973becb3504dc2bd5c158c34..dad2607b8c1fe39fd1e38aac1d2af034dfaf282b 100644
+--- a/third_party/blink/renderer/platform/audio/audio_destination.h
++++ b/third_party/blink/renderer/platform/audio/audio_destination.h
+@@ -42,6 +42,7 @@
+ #include "third_party/blink/renderer/platform/wtf/threading_primitives.h"
+ #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
+ #include "third_party/blink/renderer/platform/wtf/thread_safe_ref_counted.h"
++#include "third_party/webrtc/pc/data_channel_controller.h"
+ 
+ namespace absl {
+ template <typename>
+@@ -65,7 +66,8 @@ class WebAudioLatencyHint;
+ //    AudioWorkletThread.
+ class PLATFORM_EXPORT AudioDestination
+     : public ThreadSafeRefCounted<AudioDestination>,
+-      public WebAudioDevice::RenderCallback {
++      public WebAudioDevice::RenderCallback,
++      public webrtc::AroundCommandObserver {
+   USING_FAST_MALLOC(AudioDestination);
+ 
+  public:
+@@ -141,6 +143,8 @@ class PLATFORM_EXPORT AudioDestination
+   // This should only be called from the audio thread.
+   unsigned RenderQuantumFrames() const { return render_quantum_frames_; }
+ 
++  void OnCommandReceived(std::string command, std::map<std::string, std::string> params) override;
++
+  private:
+   void SetDeviceState(DeviceState);
+ 
+@@ -200,6 +204,8 @@ class PLATFORM_EXPORT AudioDestination
+   // Modified only on the main thread, so it can be read without holding a lock
+   // there.
+   DeviceState device_state_;
++
++  bool should_pause_worklet_ = false;
+ };
+ 
+ }  // namespace blink

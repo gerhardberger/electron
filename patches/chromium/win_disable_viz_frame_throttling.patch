@@ -1,0 +1,39 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: samuelmaddock <samuel.maddock@gmail.com>
+Date: Tue, 6 Oct 2020 19:40:32 -0400
+Subject: win: disable viz frame throttling
+
+In the refactored Around desktop app, we're rendering content into
+remote windows from a hidden background window. This leads to frames
+being dropped by the background window.
+
+Disabling the throttling for the case of undrawn frames resolves the
+issue and restores rendering to 60fps when using
+requestAnimationFrame.
+
+Signed-off-by: gellert <gellert.hegyi@around.co>
+
+diff --git a/components/viz/service/frame_sinks/compositor_frame_sink_support.cc b/components/viz/service/frame_sinks/compositor_frame_sink_support.cc
+index 8c46a63b31f185a3adf3812e735f8f5b0ec9d347..6c7d20b40b5d7469eda0aaf68404eb58ee82cf1a 100644
+--- a/components/viz/service/frame_sinks/compositor_frame_sink_support.cc
++++ b/components/viz/service/frame_sinks/compositor_frame_sink_support.cc
+@@ -1055,6 +1055,11 @@ bool CompositorFrameSinkSupport::ShouldSendBeginFrame(
+   // index must be at least as large as our last drawn frame index.
+   DCHECK_GE(active_frame_index, last_drawn_frame_index_);
+ 
++  // Around edit: Our current desktop application renders content using React
++  // portals into child windows. The parent window is hidden which causes some
++  // frames to not be drawn. We ignore this case to continue receiving updates
++  // so that requestAnimationFrame will be called without throttling.
++#if !defined(OS_WIN) && !defined(OS_LINUX)
+   // Throttle clients that have submitted too many undrawn frames.
+   uint64_t num_undrawn_frames = active_frame_index - last_drawn_frame_index_;
+   if (can_throttle_if_unresponsive_or_excessive &&
+@@ -1062,6 +1067,7 @@ bool CompositorFrameSinkSupport::ShouldSendBeginFrame(
+     RecordShouldSendBeginFrame("ThrottleUndrawnFrames");
+     return false;
+   }
++#endif
+ 
+   // No other conditions apply so send the begin frame.
+   RecordShouldSendBeginFrame("SendDefault");

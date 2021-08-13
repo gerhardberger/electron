@@ -1,0 +1,645 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: gellert <gellert.hegyi@around.co>
+Date: Sat, 16 May 2020 01:15:07 +0200
+Subject: aec + webaudio
+
+This patch adds mixes webaudio output into echo canceller
+
+Signed-off-by: gellert <gellert.hegyi@around.co>
+
+diff --git a/third_party/blink/renderer/modules/mediastream/media_stream_renderer_factory.cc b/third_party/blink/renderer/modules/mediastream/media_stream_renderer_factory.cc
+index 8d320bd56f5a8b652c07f4ca43902c9f9573faa3..7bd81dfafa76851322bcf0f7b3a9e7d1126940ef 100644
+--- a/third_party/blink/renderer/modules/mediastream/media_stream_renderer_factory.cc
++++ b/third_party/blink/renderer/modules/mediastream/media_stream_renderer_factory.cc
+@@ -19,6 +19,7 @@
+ #include "third_party/blink/renderer/modules/peerconnection/peer_connection_dependency_factory.h"
+ #include "third_party/blink/renderer/modules/webrtc/webrtc_audio_device_impl.h"
+ #include "third_party/blink/renderer/modules/webrtc/webrtc_audio_renderer.h"
++#include "third_party/blink/renderer/modules/webrtc/webrtc_external_audio_source_renderer.h"
+ #include "third_party/blink/renderer/platform/mediastream/media_stream_audio_track.h"
+ #include "third_party/blink/renderer/platform/mediastream/media_stream_descriptor.h"
+ #include "third_party/blink/renderer/platform/webrtc/peer_connection_remote_audio_source.h"
+@@ -133,6 +134,30 @@ MediaStreamRendererFactory::GetAudioRenderer(
+         "%s => (creating TrackAudioRenderer for %s audio track)", __func__,
+         audio_track->is_local_track() ? "local" : "remote"));
+ 
++    // @AROUND: WebRtcExternalAudioSourceRenderer allows mixing playback into
++    // the echo cancelled stream. However we must wait until the WebRtcAudioRenderer
++    // is created otherwise WebAudio playback cannot be heard.
++    WebRtcAudioDeviceImpl* audio_device =
++        PeerConnectionDependencyFactory::From(*frame->DomWindow()).GetWebRtcAudioDevice();
++    DCHECK(audio_device);
++
++    webrtc::AudioMixer* audio_mixer = PeerConnectionDependencyFactory::From(*frame->DomWindow()).GetWebRtcAudioMixer();
++
++    if (audio_device->renderer()) {
++      // TODO(xians): Add support for the case where the media stream contains
++      // multiple audio tracks.
++      DVLOG(1) << "Creating WebRtcExternalAudioSourceRenderer for remote track.";
++      return new WebRtcExternalAudioSourceRenderer(
++          audio_components[0].Get(),
++          web_frame,
++          /*session_id=*/base::UnguessableToken(),
++          String(device_id),
++          audio_mixer);
++    }
++
++    frame = To<LocalFrame>(WebLocalFrame::ToCoreFrame(*web_frame));
++    DCHECK(frame);
++
+     return new TrackAudioRenderer(audio_components[0].Get(), *frame,
+                                   /*session_id=*/base::UnguessableToken(),
+                                   String(device_id),
+diff --git a/third_party/blink/renderer/modules/peerconnection/peer_connection_dependency_factory.cc b/third_party/blink/renderer/modules/peerconnection/peer_connection_dependency_factory.cc
+index b0405d0bcbd376374a98f76c8e85a8c35edaf994..07a203371d7211c22495bbb165c2e1b65cc656a7 100644
+--- a/third_party/blink/renderer/modules/peerconnection/peer_connection_dependency_factory.cc
++++ b/third_party/blink/renderer/modules/peerconnection/peer_connection_dependency_factory.cc
+@@ -64,6 +64,8 @@
+ #include "third_party/webrtc/media/engine/fake_video_codec_factory.h"
+ #include "third_party/webrtc/media/engine/multiplex_codec_factory.h"
+ #include "third_party/webrtc/media/engine/webrtc_media_engine.h"
++#include "third_party/webrtc/modules/audio_mixer/audio_mixer_impl.h"
++#include "third_party/webrtc/modules/audio_processing/include/audio_processing.h"
+ #include "third_party/webrtc/modules/video_coding/codecs/h264/include/h264.h"
+ #include "third_party/webrtc/rtc_base/openssl_stream_adapter.h"
+ #include "third_party/webrtc/rtc_base/ref_counted_object.h"
+@@ -406,6 +408,7 @@ void PeerConnectionDependencyFactory::CreatePeerConnectionFactory() {
+ #endif  // BUILDFLAG(RTC_USE_H264) && BUILDFLAG(ENABLE_FFMPEG_VIDEO_DECODERS)
+ 
+   EnsureWebRtcAudioDeviceImpl();
++  EnsureWebRtcAudioMixer();
+ 
+   // Init SSL, which will be needed by PeerConnection.
+   if (!rtc::InitializeSSL()) {
+@@ -553,6 +556,7 @@ void PeerConnectionDependencyFactory::InitializeSignalingThread(
+   media_deps.adm = audio_device_.get();
+   media_deps.audio_encoder_factory = blink::CreateWebrtcAudioEncoderFactory();
+   media_deps.audio_decoder_factory = blink::CreateWebrtcAudioDecoderFactory();
++  media_deps.audio_mixer = audio_mixer_.get();
+   media_deps.video_encoder_factory = std::move(webrtc_encoder_factory);
+   media_deps.video_decoder_factory = std::move(webrtc_decoder_factory);
+   // Audio Processing Module (APM) instances are owned and handled by the Blink
+@@ -754,6 +758,12 @@ PeerConnectionDependencyFactory::GetWebRtcAudioDevice() {
+   return audio_device_.get();
+ }
+ 
++webrtc::AudioMixer* PeerConnectionDependencyFactory::GetWebRtcAudioMixer() {
++  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
++  EnsureWebRtcAudioMixer();
++  return audio_mixer_.get();
++}
++
+ void PeerConnectionDependencyFactory::CreateIpcNetworkManagerOnNetworkThread(
+     base::WaitableEvent* event,
+     std::unique_ptr<MdnsResponderAdapter> mdns_responder) {
+@@ -834,6 +844,14 @@ void PeerConnectionDependencyFactory::EnsureWebRtcAudioDeviceImpl() {
+   audio_device_ = new rtc::RefCountedObject<blink::WebRtcAudioDeviceImpl>();
+ }
+ 
++void PeerConnectionDependencyFactory::EnsureWebRtcAudioMixer() {
++  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
++  if (audio_mixer_.get())
++    return;
++
++  audio_mixer_ = webrtc::AudioMixerImpl::Create();
++}
++
+ std::unique_ptr<webrtc::RtpCapabilities>
+ PeerConnectionDependencyFactory::GetSenderCapabilities(const String& kind) {
+   if (kind == "audio") {
+diff --git a/third_party/blink/renderer/modules/peerconnection/peer_connection_dependency_factory.h b/third_party/blink/renderer/modules/peerconnection/peer_connection_dependency_factory.h
+index 08fbc7f0e91351351df293e1610663ffd53e39df..7e9e9680f91f777c0a3e837450d969a6d7aa5457 100644
+--- a/third_party/blink/renderer/modules/peerconnection/peer_connection_dependency_factory.h
++++ b/third_party/blink/renderer/modules/peerconnection/peer_connection_dependency_factory.h
+@@ -41,6 +41,10 @@ namespace gfx {
+ class ColorSpace;
+ }
+ 
++namespace webrtc {
++class AudioMixer;
++}
++
+ namespace blink {
+ 
+ class IpcNetworkManager;
+@@ -122,6 +126,7 @@ class MODULES_EXPORT PeerConnectionDependencyFactory
+       const String& kind);
+ 
+   blink::WebRtcAudioDeviceImpl* GetWebRtcAudioDevice();
++  webrtc::AudioMixer* GetWebRtcAudioMixer();
+ 
+   void EnsureInitialized();
+ 
+@@ -146,6 +151,7 @@ class MODULES_EXPORT PeerConnectionDependencyFactory
+ 
+   // Helper method to create a WebRtcAudioDeviceImpl.
+   void EnsureWebRtcAudioDeviceImpl();
++  void EnsureWebRtcAudioMixer();
+ 
+  private:
+   // ExecutionContextLifecycleObserver:
+@@ -185,6 +191,7 @@ class MODULES_EXPORT PeerConnectionDependencyFactory
+   Member<P2PSocketDispatcher> p2p_socket_dispatcher_;
+ 
+   scoped_refptr<blink::WebRtcAudioDeviceImpl> audio_device_;
++  scoped_refptr<webrtc::AudioMixer> audio_mixer_;
+ 
+   media::GpuVideoAcceleratorFactories* gpu_factories_;
+ 
+diff --git a/third_party/blink/renderer/modules/webrtc/BUILD.gn b/third_party/blink/renderer/modules/webrtc/BUILD.gn
+index c00e88a641cdba476feafd505265aa909f9fabeb..3292a0a6df347eb76fe49b81cbf337dee7a88746 100644
+--- a/third_party/blink/renderer/modules/webrtc/BUILD.gn
++++ b/third_party/blink/renderer/modules/webrtc/BUILD.gn
+@@ -12,6 +12,7 @@ blink_modules_sources("webrtc") {
+     "webrtc_audio_device_not_impl.h",
+     "webrtc_audio_renderer.cc",
+     "webrtc_audio_renderer.h",
++    "webrtc_external_audio_source_renderer.cc",
+   ]
+ 
+   deps = [ "//third_party/blink/renderer/modules/mediastream" ]
+diff --git a/third_party/blink/renderer/modules/webrtc/webrtc_external_audio_source_renderer.cc b/third_party/blink/renderer/modules/webrtc/webrtc_external_audio_source_renderer.cc
+new file mode 100644
+index 0000000000000000000000000000000000000000..5db2ad89704e4baba6d6088403896bce4adda86b
+--- /dev/null
++++ b/third_party/blink/renderer/modules/webrtc/webrtc_external_audio_source_renderer.cc
+@@ -0,0 +1,296 @@
++// Copyright (c) 2012 The Chromium Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include <utility>
++
++#include "base/location.h"
++#include "base/logging.h"
++#include "base/metrics/histogram_macros.h"
++#include "base/synchronization/lock.h"
++#include "base/threading/thread_task_runner_handle.h"
++#include "base/trace_event/trace_event.h"
++#include "media/audio/audio_sink_parameters.h"
++#include "media/base/audio_bus.h"
++#include "media/base/audio_latency.h"
++#include "media/base/audio_fifo.h"
++#include "media/base/multi_channel_resampler.h"
++#include "third_party/blink/public/platform/platform.h"
++#include "third_party/blink/public/platform/modules/mediastream/web_media_stream_track.h"
++#include "third_party/blink/public/web/web_local_frame.h"
++#include "third_party/blink/renderer/core/frame/local_frame.h"
++#include "third_party/blink/renderer/modules/mediastream/media_stream_local_frame_wrapper.h"
++#include "third_party/blink/renderer/modules/peerconnection/peer_connection_dependency_factory.h"
++#include "third_party/blink/renderer/modules/webrtc/webrtc_external_audio_source_renderer.h"
++#include "third_party/blink/renderer/platform/mediastream/media_stream_audio_track.h"
++#include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
++#include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
++#include "third_party/webrtc/common_audio/include/audio_util.h"
++#include "third_party/webrtc/audio/utility/audio_frame_operations.h"
++
++namespace blink {
++
++namespace {
++
++// Translates |num_samples_rendered| into a TimeDelta duration and adds it to
++// |prior_elapsed_render_time|.
++base::TimeDelta ComputeTotalElapsedRenderTime(
++      base::TimeDelta prior_elapsed_render_time,
++    int64_t num_samples_rendered,
++    int sample_rate) {
++    return prior_elapsed_render_time +
++         base::TimeDelta::FromMicroseconds(num_samples_rendered *
++                                           base::Time::kMicrosecondsPerSecond /
++                                           sample_rate);
++}
++
++}  // namespace
++
++// webrtc::AudioMixer::Source implementation
++webrtc::AudioMixer::Source::AudioFrameInfo
++WebRtcExternalAudioSourceRenderer::GetAudioFrameWithInfo(
++      int sample_rate_hz,
++    webrtc::AudioFrame* audio_frame) {
++    TRACE_EVENT1("audio",
++               "WebRtcExternalAudioSourceRenderer::GetAudioFrameWithInfo",
++               "sample_rate_hz ", sample_rate_hz);
++
++  base::AutoLock auto_lock(thread_lock_);
++
++  if (!playing_) {
++      webrtc::AudioFrameOperations::Mute(audio_frame);
++    return webrtc::AudioMixer::Source::AudioFrameInfo::kMuted;
++  }
++
++  if (!audio_fifo_) {
++      DVLOG(1)
++        << "WebRtcExternalAudioSourceRenderer::GetAudioFrameWithInfo "
++        << " audio fifo not initialized";
++    // In all likelihood, the audio in this frame is garbage. We return an
++    // error so that the audio mixer module doesn't add it to the mix. As
++    // a result, it won't be played out and the actions skipped here are
++    // irrelevant.
++    return webrtc::AudioMixer::Source::AudioFrameInfo::kError;
++  }
++
++  // If not with same rate.
++  if (!dest_params_.IsValid() || sample_rate_hz != dest_params_.sample_rate()) {
++      // Set dest parameters
++    dest_params_.Reset(media::AudioParameters::AUDIO_PCM_LOW_LATENCY,
++                      source_params_.channel_layout(), sample_rate_hz,
++                      sample_rate_hz * 10 / 1000);
++    // Create new resampler.
++    resampler_.reset(
++        new media::MultiChannelResampler(
++          source_params_.channels(),
++        static_cast<float>(source_params_.sample_rate()) / dest_params_.sample_rate(),
++        512,
++        base::BindRepeating(&WebRtcExternalAudioSourceRenderer::ProvideInput,base::Unretained(this))));
++  }
++
++  // Create an AudioBus with 10ms frames.
++  std::unique_ptr<media::AudioBus> audio_bus = media::AudioBus::Create(dest_params_);
++
++  // If we have to resampler
++  if (source_params_.sample_rate() != dest_params_.sample_rate()) {
++      // Get audio data and resample.
++    resampler_->Resample(audio_bus->frames(), audio_bus.get());
++  } else {
++      // Get the audio samples from the audio fifo directly.
++    ProvideInput(0, audio_bus.get());
++  }
++
++  // Convert each channel from float to int.
++  for (int i = 0; i < audio_bus->channels(); ++i) {
++      webrtc::FloatToS16(
++         audio_bus->channel(i), audio_bus->frames(),
++                       audio_frame->mutable_data() + i * audio_bus->frames());
++  }
++
++  // Fill out the audio frame properties.
++  audio_frame->ResetWithoutMuting();
++  audio_frame->timestamp_ = static_cast<uint32_t>(num_samples_rendered_);
++  audio_frame->ntp_time_ms_ = GetCurrentRenderTime().InMilliseconds();
++  audio_frame->num_channels_ = audio_bus->channels();
++  audio_frame->channel_layout_ =
++      webrtc::GuessChannelLayout(audio_bus->channels());
++  audio_frame->samples_per_channel_ = audio_bus->frames();
++  audio_frame->sample_rate_hz_ = sample_rate_hz;
++  num_samples_rendered_ += audio_bus->frames();
++
++  float output_gain = volume_;
++
++  // Output volume scaling
++  if (output_gain < 0.99f || output_gain > 1.01f) {
++      // TODO(solenberg): Combine with mute state - this can cause clicks!
++    webrtc::AudioFrameOperations::ScaleWithSat(output_gain, audio_frame);
++  }
++
++  return webrtc::AudioMixer::Source::AudioFrameInfo::kNormal;
++}
++
++int WebRtcExternalAudioSourceRenderer::Ssrc() const {
++    NOTREACHED();
++  return 0;
++}
++
++// A way for this source to say that GetAudioFrameWithInfo called
++// with this sample rate or higher will not cause quality loss.
++int WebRtcExternalAudioSourceRenderer::PreferredSampleRate() const {
++    return source_params_.IsValid() ? source_params_.sample_rate() : 44100;
++}
++
++// WebMediaStreamAudioSink implementation
++void WebRtcExternalAudioSourceRenderer::OnData(const media::AudioBus& audio_bus,
++                                base::TimeTicks reference_time) {
++    DCHECK(!reference_time.is_null());
++
++  TRACE_EVENT1("audio", "WebRtcExternalAudioSourceRenderer::OnData", "reference time (ms)",
++               (reference_time - base::TimeTicks()).InMillisecondsF());
++
++  base::AutoLock auto_lock(thread_lock_);
++  if (!audio_fifo_)
++    return;
++  if (audio_fifo_->frames() + audio_bus.frames() > audio_fifo_->max_frames()) {
++      audio_fifo_->Clear();
++  }
++  audio_fifo_->Push(&audio_bus);
++}
++
++void WebRtcExternalAudioSourceRenderer::OnSetFormat(
++      const media::AudioParameters& params) {
++    DVLOG(1) << "WebRtcExternalAudioSourceRenderer::OnSetFormat: "
++           << params.AsHumanReadableString();
++  base::AutoLock auto_lock(thread_lock_);
++  if (!source_params_.IsValid() ||
++      (source_params_.sample_rate() != params.sample_rate() ||
++       source_params_.channels() != params.channels())) {
++      source_params_ = params;
++
++    // 40 ms fifo at most.
++    audio_fifo_.reset(
++        new media::AudioFifo(
++          source_params_.channels(), source_params_.sample_rate() * 40 / 1000));
++  }
++}
++
++WebRtcExternalAudioSourceRenderer::WebRtcExternalAudioSourceRenderer(
++                                       MediaStreamComponent* audio_component,
++                                       WebLocalFrame* playout_web_frame,
++                                       const base::UnguessableToken& session_id,
++                                       const String& device_id,
++                                       webrtc::AudioMixer* audio_mixer)
++    : audio_component_(audio_component),
++      internal_playout_frame_(
++            std::make_unique<MediaStreamInternalFrameWrapper>(playout_web_frame)),
++      session_id_(session_id),
++      task_runner_(
++            playout_web_frame->GetTaskRunner(blink::TaskType::kInternalMedia)),
++      num_samples_rendered_(0),
++      playing_(false),
++      output_device_id_(device_id),
++      volume_(0.0),
++      audio_mixer_(audio_mixer) {
++  DCHECK(MediaStreamAudioTrack::From(audio_component_.Get()));
++  DCHECK(task_runner_->BelongsToCurrentThread());
++  DVLOG(1) << "WebRtcExternalAudioSourceRenderer::WebRtcExternalAudioSourceRenderer()";
++}
++
++WebRtcExternalAudioSourceRenderer::~WebRtcExternalAudioSourceRenderer() {
++    DCHECK(task_runner_->BelongsToCurrentThread());
++  DVLOG(1) << "WebRtcExternalAudioSourceRenderer::~WebRtcExternalAudioSourceRenderer()";
++}
++
++void WebRtcExternalAudioSourceRenderer::Start() {
++    DVLOG(1) << "WebRtcExternalAudioSourceRenderer::Start()";
++  DCHECK(task_runner_->BelongsToCurrentThread());
++  DCHECK_EQ(playing_, false);
++
++  // We get audio data from |audio_track_|...
++  WebMediaStreamAudioSink::AddToAudioTrack(
++        this, WebMediaStreamTrack(audio_component_.Get()));
++  // ...and webrtc audio mixer will get audio data from us.
++  audio_mixer_->AddSource(this);
++
++  base::AutoLock auto_lock(thread_lock_);
++  prior_elapsed_render_time_ = base::TimeDelta();
++  num_samples_rendered_ = 0;
++}
++
++void WebRtcExternalAudioSourceRenderer::Stop() {
++    DVLOG(1) << "WebRtcExternalAudioSourceRenderer::Stop()";
++  DCHECK(task_runner_->BelongsToCurrentThread());
++
++  Pause();
++
++  // Remove us from the webrtc audio mixer.
++  audio_mixer_->RemoveSource(this);
++
++  // Ensure that the capturer stops feeding us with captured audio.
++  WebMediaStreamAudioSink::RemoveFromAudioTrack(
++        this, WebMediaStreamTrack(audio_component_.Get()));
++}
++
++void WebRtcExternalAudioSourceRenderer::Play() {
++    DVLOG(1) << "WebRtcExternalAudioSourceRenderer::Play()";
++  DCHECK(task_runner_->BelongsToCurrentThread());
++
++  playing_ = true;
++}
++
++void WebRtcExternalAudioSourceRenderer::Pause() {
++    DVLOG(1) << "WebRtcExternalAudioSourceRenderer::Pause()";
++  DCHECK(task_runner_->BelongsToCurrentThread());
++
++  playing_ = false;
++
++  base::AutoLock auto_lock(thread_lock_);
++  if (audio_fifo_)
++    audio_fifo_->Clear();
++}
++
++void WebRtcExternalAudioSourceRenderer::SetVolume(float volume) {
++    DVLOG(1) << "WebRtcExternalAudioSourceRenderer::SetVolume(" << volume << ")";
++  DCHECK(task_runner_->BelongsToCurrentThread());
++
++  // Cache the volume.
++  volume_ = volume;
++}
++
++base::TimeDelta WebRtcExternalAudioSourceRenderer::GetCurrentRenderTime() {
++    if (source_params_.IsValid()) {
++      return ComputeTotalElapsedRenderTime(prior_elapsed_render_time_,
++                                         num_samples_rendered_,
++                                         source_params_.sample_rate());
++  }
++  return prior_elapsed_render_time_;
++}
++
++bool WebRtcExternalAudioSourceRenderer::IsLocalRenderer() {
++    DCHECK(task_runner_->BelongsToCurrentThread());
++  return MediaStreamAudioTrack::From(audio_component_.Get())->is_local_track();
++}
++
++void WebRtcExternalAudioSourceRenderer::SwitchOutputDevice(
++      const std::string& device_id,
++    media::OutputDeviceStatusCB callback) {
++    DVLOG(1) << "WebRtcExternalAudioSourceRenderer::SwitchOutputDevice()";
++  DCHECK(task_runner_->BelongsToCurrentThread());
++
++  output_device_id_ = String(device_id.data(), device_id.size());
++}
++
++
++void WebRtcExternalAudioSourceRenderer::ProvideInput(int frame_delay,
++                                                     media::AudioBus* audio_bus) {
++    // Check we have enought data.
++  if (!audio_fifo_ || audio_fifo_->frames() < audio_bus->frames()) {
++      audio_bus->Zero();
++    return;
++  }
++
++  // Get the audio samples from the audio fifo.
++  audio_fifo_->Consume(audio_bus, 0, audio_bus->frames());
++}
++
++}  // namespace blink
+diff --git a/third_party/blink/renderer/modules/webrtc/webrtc_external_audio_source_renderer.h b/third_party/blink/renderer/modules/webrtc/webrtc_external_audio_source_renderer.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..32dd449ed99754cf2217701c5d43d18fb21e05ff
+--- /dev/null
++++ b/third_party/blink/renderer/modules/webrtc/webrtc_external_audio_source_renderer.h
+@@ -0,0 +1,177 @@
++// Copyright (c) 2012 The Chromium Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_WEBRTC_WEBRTC_EXTERNAL_AUDIO_SOURCE_RENDERER_H_
++#define THIRD_PARTY_BLINK_RENDERER_MODULES_WEBRTC_WEBRTC_EXTERNAL_AUDIO_SOURCE_RENDERER_H_
++
++#include <stdint.h>
++
++#include <memory>
++
++#include "base/callback.h"
++#include "base/macros.h"
++#include "base/memory/scoped_refptr.h"
++#include "base/single_thread_task_runner.h"
++#include "base/synchronization/lock.h"
++#include "base/unguessable_token.h"
++#include "third_party/blink/public/platform/modules/mediastream/web_media_stream_audio_renderer.h"
++#include "third_party/blink/public/platform/modules/mediastream/web_media_stream_audio_sink.h"
++#include "third_party/blink/renderer/platform/mediastream/media_stream_component.h"
++#include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
++#include "third_party/webrtc/api/media_stream_interface.h"
++#include "third_party/webrtc/api/audio/audio_mixer.h"
++
++
++namespace media {
++  class AudioBus;
++class AudioFifo;
++class AudioParameters;
++class MultiChannelResampler;
++}  // namespace media
++
++namespace blink {
++
++class WebLocalFrame;
++class MediaStreamInternalFrameWrapper;
++
++// WebRtcExternalAudioSourceRenderer is a WebMediaStreamAudioRenderer for plumbing audio
++// data generated from either remote (but not
++// PeerConnection/WebRTC-sourced) MediaStreamAudioTracks to an webraudio output
++// device, reconciling differences in the rates of production and consumption of
++// the audio data.
++//
++// REMOVE:
++// This class uses AudioDeviceFactory to create media::AudioRendererSink and
++// owns/manages their lifecycles.  Output devices are automatically re-created
++// in response to audio format changes, or use of the SwitchOutputDevice() API
++// by client code.
++//
++// Audio data is feed-in from the source via calls to OnData().  The
++// internally-owned media::AudioOutputDevice calls Render() to pull-out that
++// audio data.  However, because of clock differences and other environmental
++// factors, the audio will inevitably feed-in at a rate different from the rate
++// it is being rendered-out.  media::AudioShifter is used to buffer, stretch
++// and skip audio to maintain time synchronization between the producer and
++// consumer.
++//
++// See TrackAudioRenderer for reference implementation.
++class WebRtcExternalAudioSourceRenderer : public WebMediaStreamAudioRenderer,
++                           public WebMediaStreamAudioSink,
++                           public webrtc::AudioMixer::Source {
++   public:
++  // Creates a renderer for the given |audio_track|.  |playout_render_frame_id|
++  // refers to the RenderFrame that owns this instance (e.g., it contains the
++  // DOM widget representing the player).  |session_id| and |device_id| are
++  // optional, and are used to direct audio output to a pre-selected device;
++  // otherwise, audio is output to the default device for the system.
++  //
++  // Called on the main thread.
++  WebRtcExternalAudioSourceRenderer(MediaStreamComponent* audio_component,
++                                    WebLocalFrame* playout_web_frame,
++                                    const base::UnguessableToken& session_id,
++                                    const String& device_id,
++                                    webrtc::AudioMixer* audio_mixer);
++
++  // WebMediaStreamAudioSink implementation.
++  // Called on the AudioInputDevice worker thread.
++  void OnData(const media::AudioBus& audio_bus,
++              base::TimeTicks reference_time) override;
++
++  // Called on the AudioInputDevice worker thread.
++  void OnSetFormat(const media::AudioParameters& params) override;
++
++  // WebMediaStreamAudioRenderer implementation.
++
++  // Called on the main thread.
++  void Start() override;
++  void Stop() override;
++  void Play() override;
++  void Pause() override;
++  void SetVolume(float volume) override;
++  base::TimeDelta GetCurrentRenderTime() override;
++  bool IsLocalRenderer() override;
++  void SwitchOutputDevice(const std::string& device_id,
++                          media::OutputDeviceStatusCB callback) override;
++
++  // webrtc::AudioMixer::Source implementation
++  // Overwrites |audio_frame|. The data_ field is overwritten with
++  // 10 ms of new audio (either 1 or 2 interleaved channels) at
++  // |sample_rate_hz|. All fields in |audio_frame| must be updated.
++ AudioFrameInfo GetAudioFrameWithInfo(
++      int sample_rate_hz,
++    webrtc::AudioFrame* audio_frame) override;
++
++  // A way for a mixer implementation to distinguish participants.
++  int Ssrc() const override;
++
++  // A way for this source to say that GetAudioFrameWithInfo called
++  // with this sample rate or higher will not cause quality loss.
++  int PreferredSampleRate() const override;
++
++
++
++
++ protected:
++  ~WebRtcExternalAudioSourceRenderer() override;
++
++ private:
++  void ProvideInput(int frame_delay, media::AudioBus* audio_bus);
++
++  // The audio track which provides access to the source data to render.
++  //
++  // This class is calling WebMediaStreamAudioSink::AddToAudioTrack() and
++  // WebMediaStreamAudioSink::RemoveFromAudioTrack() to connect and
++  // disconnect with the audio track.
++  Persistent<MediaStreamComponent> audio_component_;
++
++  // The WebLocalFrame in which the audio is rendered into |sink_|.
++  std::unique_ptr<MediaStreamInternalFrameWrapper> internal_playout_frame_;
++  const base::UnguessableToken session_id_;
++
++  // MessageLoop associated with the single thread that performs all control
++  // tasks.  Set to the MessageLoop that invoked the ctor.
++  const scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
++
++  // Audio fifo.
++  std::unique_ptr<media::AudioFifo> audio_fifo_;
++
++  // Audio converter between track and webrtc audio params
++  std::unique_ptr<media::MultiChannelResampler> resampler_;
++
++  // These track the time duration of all the audio rendered so far by this
++  // instance.  |prior_elapsed_render_time_| tracks the time duration of all
++  // audio rendered before the last format change.  |num_samples_rendered_|
++  // tracks the number of audio samples rendered since the last format change.
++  base::TimeDelta prior_elapsed_render_time_;
++  int64_t num_samples_rendered_;
++
++  // The audio parameters of the track's source.
++  // Must only be touched on the main thread.
++  media::AudioParameters source_params_;
++
++  // Audio parameters requested by webrtc.
++  media::AudioParameters dest_params_;
++
++  // Set when playing, cleared when paused.
++  bool playing_;
++
++  // Protects |audio_shifter_|, |prior_elapsed_render_time_|, and
++  // |num_samples_rendered_|.
++  mutable base::Lock thread_lock_;
++
++  // The preferred device id of the output device or empty for the default
++  // output device.
++  String output_device_id_;
++
++  // Cache value for the volume.
++  float volume_;
++
++  webrtc::AudioMixer* audio_mixer_;
++
++  DISALLOW_COPY_AND_ASSIGN(WebRtcExternalAudioSourceRenderer);
++};
++
++}  // namespace blink
++
++#endif  // THIRD_PARTY_BLINK_RENDERER_MODULES_WEBRTC_WEBRTC_EXTERNAL_AUDIO_SOURCE_RENDERER_H_

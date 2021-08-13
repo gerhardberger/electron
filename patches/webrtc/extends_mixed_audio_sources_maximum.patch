@@ -1,0 +1,22 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: gellert <gellert.hegyi@around.co>
+Date: Tue, 19 May 2020 15:01:15 +0200
+Subject: extends mixed audio sources maximum
+
+This patch extends the mixed audio sources maximum
+
+Signed-off-by: gellert <gellert.hegyi@around.co>
+
+diff --git a/modules/audio_mixer/audio_mixer_impl.h b/modules/audio_mixer/audio_mixer_impl.h
+index 737fcbdc434fd32cc669400cb4d4e11c444b1452..f66202efee649eab26599b4de6193b9ceae1791c 100644
+--- a/modules/audio_mixer/audio_mixer_impl.h
++++ b/modules/audio_mixer/audio_mixer_impl.h
+@@ -36,7 +36,7 @@ class AudioMixerImpl : public AudioMixer {
+   // AudioProcessing only accepts 10 ms frames.
+   static const int kFrameDurationInMs = 10;
+ 
+-  static const int kDefaultNumberOfMixedAudioSources = 3;
++  static const int kDefaultNumberOfMixedAudioSources = 30;
+ 
+   static rtc::scoped_refptr<AudioMixerImpl> Create(
+       int max_sources_to_mix = kDefaultNumberOfMixedAudioSources);

@@ -1,0 +1,139 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: gellert <gellert.hegyi@around.co>
+Date: Tue, 30 Jun 2020 18:57:40 +0200
+Subject: sets option to not start exclusion in preview
+
+This patch sets a flag that will prevent window exclusion while in preview when doing screensharing
+
+Signed-off-by: gellert <gellert.hegyi@around.co>
+
+diff --git a/modules/desktop_capture/desktop_and_cursor_composer.cc b/modules/desktop_capture/desktop_and_cursor_composer.cc
+index 69b8b40c7329bd3b6c24c19e68a7b19d1d82e1ac..1fa186f02ecaa60cee5f992b1d894287fc704c1a 100644
+--- a/modules/desktop_capture/desktop_and_cursor_composer.cc
++++ b/modules/desktop_capture/desktop_and_cursor_composer.cc
+@@ -169,6 +169,7 @@ void DesktopAndCursorComposer::Start(DesktopCapturer::Callback* callback) {
+   callback_ = callback;
+   if (mouse_monitor_)
+     mouse_monitor_->Init(this, MouseCursorMonitor::SHAPE_AND_POSITION);
++  desktop_capturer_->should_exclude_ = should_exclude_;
+   desktop_capturer_->Start(this);
+ }
+ 
+diff --git a/modules/desktop_capture/desktop_capturer.h b/modules/desktop_capture/desktop_capturer.h
+index 64339c0ca623b57f0b3367403986fde5aef1ed02..15b749c91ddd762201f05d51326bf1809ee33c32 100644
+--- a/modules/desktop_capture/desktop_capturer.h
++++ b/modules/desktop_capture/desktop_capturer.h
+@@ -80,6 +80,7 @@ class RTC_EXPORT DesktopCapturer {
+   // Called at the beginning of a capturing session. |callback| must remain
+   // valid until capturer is destroyed.
+   virtual void Start(Callback* callback) = 0;
++  bool should_exclude_ = false;
+ 
+   // Sets SharedMemoryFactory that will be used to create buffers for the
+   // captured frames. The factory can be invoked on a thread other than the one
+diff --git a/modules/desktop_capture/mac/screen_capturer_mac.mm b/modules/desktop_capture/mac/screen_capturer_mac.mm
+index 4f8acf4230b7d8383ebf2ba89d4a4f8ed6456d62..a6876f5b98fe642c9d168a79854cc82def07a31e 100644
+--- a/modules/desktop_capture/mac/screen_capturer_mac.mm
++++ b/modules/desktop_capture/mac/screen_capturer_mac.mm
+@@ -326,7 +326,6 @@ DesktopRect GetExcludedWindowPixelBounds(CGWindowID window, float dip_to_pixel_s
+ }
+ 
+ bool ScreenCapturerMac::CgBlit(const DesktopFrame& frame, const DesktopRegion& region) {
+-
+   MacDisplayConfigurations displays_to_capture;
+   if (current_display_) {
+     // Capturing a single screen. Note that the screen id may change when
+@@ -368,16 +367,18 @@ DesktopRect GetExcludedWindowPixelBounds(CGWindowID window, float dip_to_pixel_s
+     // Translate the region to be copied into display-relative coordinates.
+     copy_region.Translate(-display_bounds.left(), -display_bounds.top());
+ 
+-    float window_exclude_capture_fps = 5.0f;
+-    float delta = 1000.0f / window_exclude_capture_fps;
+-    if (last_exclude_capture_ms_ == 0 || rtc::TimeSince(last_exclude_capture_ms_) > delta) {
+-      last_exclude_capture_ms_ = rtc::SystemTimeMillis();
+-      excluded_images_.clear();
+-      excluded_window_bounds_list_.clear();
+-      excluded_image_data_list_.clear();
++    if (should_exclude_) {
++      float window_exclude_capture_fps = 5.0f;
++      float delta = 1000.0f / window_exclude_capture_fps;
++      if (last_exclude_capture_ms_ == 0 || rtc::TimeSince(last_exclude_capture_ms_) > delta) {
++        last_exclude_capture_ms_ = rtc::SystemTimeMillis();
++        excluded_images_.clear();
++        excluded_window_bounds_list_.clear();
++        excluded_image_data_list_.clear();
++      }
+     }
+ 
+-    if (excluded_images_.size() == 0) {
++    if (should_exclude_ && excluded_images_.size() == 0) {
+       for(std::vector<CGWindowID>::size_type i = 0; i < excluded_windows_.size(); i++) {
+         CGWindowID excluded_window = excluded_windows_[i];
+ 
+@@ -429,35 +430,38 @@ DesktopRect GetExcludedWindowPixelBounds(CGWindowID window, float dip_to_pixel_s
+                i.rect());
+     }
+ 
+-    for(std::vector<DesktopRect>::size_type i = 0; i < excluded_window_bounds_list_.size(); i++) {
+-      DesktopRect excluded_window_bounds = excluded_window_bounds_list_[i];
+-      rtc::ScopedCFTypeRef<CGImageRef> excluded_image = excluded_images_[i];
+-      rtc::ScopedCFTypeRef<CFDataRef> excluded_image_data = excluded_image_data_list_[i];
++    if (should_exclude_) {
++      for(std::vector<DesktopRect>::size_type i = 0; i < excluded_window_bounds_list_.size(); i++) {
++        DesktopRect excluded_window_bounds = excluded_window_bounds_list_[i];
++        rtc::ScopedCFTypeRef<CGImageRef> excluded_image = excluded_images_[i];
++        rtc::ScopedCFTypeRef<CFDataRef> excluded_image_data = excluded_image_data_list_[i];
+ 
+-      if (!excluded_image_data.get()) {
+-        continue;
+-      }
+-      RTC_DCHECK(excluded_image_data);
+-      display_base_address = CFDataGetBytePtr(excluded_image_data.get());
+-      src_bytes_per_row = CGImageGetBytesPerRow(excluded_image.get());
+-
+-      // Translate the bounds relative to the desktop, because |frame| data
+-      // starts from the desktop top-left corner.
+-      DesktopRect window_bounds_relative_to_desktop(excluded_window_bounds);
+-      window_bounds_relative_to_desktop.Translate(-screen_pixel_bounds_.left(),
+-                                                  -screen_pixel_bounds_.top());
+-
+-      DesktopRect rect_to_copy = DesktopRect::MakeSize(excluded_window_bounds.size());
+-      rect_to_copy.IntersectWith(DesktopRect::MakeWH(CGImageGetWidth(excluded_image.get()),
+-                                                     CGImageGetHeight(excluded_image.get())));
+-
+-      if (CGImageGetBitsPerPixel(excluded_image.get()) / 8 == DesktopFrame::kBytesPerPixel) {
+-        CopyRect(display_base_address,
+-                 src_bytes_per_row,
+-                 frame.GetFrameDataAtPos(window_bounds_relative_to_desktop.top_left()),
+-                 frame.stride(),
+-                 DesktopFrame::kBytesPerPixel,
+-                 rect_to_copy);
++        if (!excluded_image_data.get()) {
++          continue;
++        }
++
++        RTC_DCHECK(excluded_image_data);
++        display_base_address = CFDataGetBytePtr(excluded_image_data.get());
++        src_bytes_per_row = CGImageGetBytesPerRow(excluded_image.get());
++
++        // Translate the bounds relative to the desktop, because |frame| data
++        // starts from the desktop top-left corner.
++        DesktopRect window_bounds_relative_to_desktop(excluded_window_bounds);
++        window_bounds_relative_to_desktop.Translate(-screen_pixel_bounds_.left(),
++                                                    -screen_pixel_bounds_.top());
++
++        DesktopRect rect_to_copy = DesktopRect::MakeSize(excluded_window_bounds.size());
++        rect_to_copy.IntersectWith(DesktopRect::MakeWH(CGImageGetWidth(excluded_image.get()),
++                                                      CGImageGetHeight(excluded_image.get())));
++
++        if (CGImageGetBitsPerPixel(excluded_image.get()) / 8 == DesktopFrame::kBytesPerPixel) {
++          CopyRect(display_base_address,
++                  src_bytes_per_row,
++                  frame.GetFrameDataAtPos(window_bounds_relative_to_desktop.top_left()),
++                  frame.stride(),
++                  DesktopFrame::kBytesPerPixel,
++                  rect_to_copy);
++        }
+       }
+     }
+   }

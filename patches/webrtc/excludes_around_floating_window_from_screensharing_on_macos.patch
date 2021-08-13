@@ -1,0 +1,206 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: gellert <gellert.hegyi@around.co>
+Date: Wed, 27 May 2020 22:51:00 +0200
+Subject: excludes around floating window from screensharing on macos
+
+This patch excludes the around floating window from screensharing. It excludes every window that is in floating window level and owned by the process.
+
+Signed-off-by: gellert <gellert.hegyi@around.co>
+
+diff --git a/modules/desktop_capture/mac/screen_capturer_mac.h b/modules/desktop_capture/mac/screen_capturer_mac.h
+index 68b8655b1cb6f21ae552e7295c7097153bb1c7b5..95d2deb058c2315e9c940290943c86e48ccb35c3 100644
+--- a/modules/desktop_capture/mac/screen_capturer_mac.h
++++ b/modules/desktop_capture/mac/screen_capturer_mac.h
+@@ -101,7 +101,11 @@ class ScreenCapturerMac final : public DesktopCapturer {
+   // Monitoring display reconfiguration.
+   rtc::scoped_refptr<DesktopConfigurationMonitor> desktop_config_monitor_;
+ 
+-  CGWindowID excluded_window_ = 0;
++  std::vector<CGWindowID> excluded_windows_;
++  std::vector<rtc::ScopedCFTypeRef<CFDataRef>> excluded_image_data_list_;
++  std::vector<rtc::ScopedCFTypeRef<CGImageRef>> excluded_images_;
++  std::vector<DesktopRect> excluded_window_bounds_list_;
++  int64_t last_exclude_capture_ms_ = 0;
+ 
+   // List of streams, one per screen.
+   std::vector<CGDisplayStreamRef> display_streams_;
+diff --git a/modules/desktop_capture/mac/screen_capturer_mac.mm b/modules/desktop_capture/mac/screen_capturer_mac.mm
+index a79384c7a3a65078823a398c52100b7065d3339b..4f8acf4230b7d8383ebf2ba89d4a4f8ed6456d62 100644
+--- a/modules/desktop_capture/mac/screen_capturer_mac.mm
++++ b/modules/desktop_capture/mac/screen_capturer_mac.mm
+@@ -61,8 +61,13 @@ void CopyRect(const uint8_t* src_plane,
+ // Returns an array of CGWindowID for all the on-screen windows except
+ // |window_to_exclude|, or NULL if the window is not found or it fails. The
+ // caller should release the returned CFArrayRef.
+-CFArrayRef CreateWindowListWithExclusion(CGWindowID window_to_exclude) {
+-  if (!window_to_exclude) return nullptr;
++CFArrayRef CreateWindowListWithExclusion(std::vector<CGWindowID>* windows_to_exclude) {
++  windows_to_exclude->clear();
++  int own_pid = getpid();
++  const CGWindowLevel floating_layer = CGWindowLevelForKey(kCGFloatingWindowLevelKey);
++  const CGWindowLevel toolbar_layer = CGWindowLevelForKey(kCGScreenSaverWindowLevelKey) + 1;
++  static const CGWindowLevel kAroundFloatingLayer = 19;
++  static const CGWindowLevel kAroundAppNotificationsWindowLevel = 22;
+ 
+   CFArrayRef all_windows =
+       CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly, kCGNullWindowID);
+@@ -77,9 +82,29 @@ CFArrayRef CreateWindowListWithExclusion(CGWindowID window_to_exclude) {
+         reinterpret_cast<CFDictionaryRef>(CFArrayGetValueAtIndex(all_windows, i));
+ 
+     CGWindowID id = GetWindowId(window);
+-    if (id == window_to_exclude) {
+-      found = true;
+-      continue;
++
++    CFNumberRef pid_ref = static_cast<CFNumberRef>(CFDictionaryGetValue(window,
++      kCGWindowOwnerPID));
++    int pid;
++    if (!CFNumberGetValue(pid_ref, kCFNumberIntType, &pid)) continue;
++
++    CFNumberRef layer_ref = static_cast<CFNumberRef>(CFDictionaryGetValue(window,
++      kCGWindowLayer));
++    int layer;
++    if (!CFNumberGetValue(layer_ref, kCFNumberIntType, &layer)) continue;
++
++    if (pid == own_pid) {
++      if (
++        layer == floating_layer || // screen share overlay
++        layer == toolbar_layer || // screen share toolbar
++        layer == kAroundFloatingLayer ||
++        layer == kAroundAppNotificationsWindowLevel
++      ) {
++        windows_to_exclude->push_back(id);
++
++        found = true;
++        continue;
++      }
+     }
+     CFArrayAppendValue(returned_array, reinterpret_cast<void*>(id));
+   }
+@@ -197,7 +222,7 @@ DesktopRect GetExcludedWindowPixelBounds(CGWindowID window, float dip_to_pixel_s
+   TRACE_EVENT0("webrtc", "creenCapturerMac::CaptureFrame");
+   int64_t capture_start_time_nanos = rtc::TimeNanos();
+ 
+-  queue_.MoveToNextFrame();
++  // queue_.MoveToNextFrame();
+   RTC_DCHECK(!queue_.current_frame() || !queue_.current_frame()->IsShared());
+ 
+   MacDesktopConfiguration new_config = desktop_config_monitor_->desktop_configuration();
+@@ -232,7 +257,15 @@ DesktopRect GetExcludedWindowPixelBounds(CGWindowID window, float dip_to_pixel_s
+   // If the current buffer is from an older generation then allocate a new one.
+   // Note that we can't reallocate other buffers at this point, since the caller
+   // may still be reading from them.
+-  if (!queue_.current_frame()) queue_.ReplaceCurrentFrame(SharedDesktopFrame::Wrap(CreateFrame()));
++  if (!queue_.current_frame()) {
++    queue_.ReplaceCurrentFrame(SharedDesktopFrame::Wrap(CreateFrame()));
++
++    // If not all screen region is dirty, copy the entire contents of the previous capture buffer,
++    // to capture over.
++    if (queue_.previous_frame() && !region.Equals(DesktopRegion(screen_pixel_bounds_))) {
++      memcpy(queue_.current_frame()->data(), queue_.previous_frame()->data(), queue_.current_frame()->stride() * queue_.current_frame()->size().height());
++    }
++  }
+ 
+   DesktopFrame* current_frame = queue_.current_frame();
+ 
+@@ -264,7 +297,7 @@ DesktopRect GetExcludedWindowPixelBounds(CGWindowID window, float dip_to_pixel_s
+ }
+ 
+ void ScreenCapturerMac::SetExcludedWindow(WindowId window) {
+-  excluded_window_ = window;
++  // excluded_window_ = window;
+ }
+ 
+ bool ScreenCapturerMac::GetSourceList(SourceList* screens) {
+@@ -293,11 +326,6 @@ DesktopRect GetExcludedWindowPixelBounds(CGWindowID window, float dip_to_pixel_s
+ }
+ 
+ bool ScreenCapturerMac::CgBlit(const DesktopFrame& frame, const DesktopRegion& region) {
+-  // If not all screen region is dirty, copy the entire contents of the previous capture buffer,
+-  // to capture over.
+-  if (queue_.previous_frame() && !region.Equals(DesktopRegion(screen_pixel_bounds_))) {
+-    memcpy(frame.data(), queue_.previous_frame()->data(), frame.stride() * frame.size().height());
+-  }
+ 
+   MacDisplayConfigurations displays_to_capture;
+   if (current_display_) {
+@@ -317,7 +345,7 @@ DesktopRect GetExcludedWindowPixelBounds(CGWindowID window, float dip_to_pixel_s
+   }
+ 
+   // Create the window list once for all displays.
+-  CFArrayRef window_list = CreateWindowListWithExclusion(excluded_window_);
++  CFArrayRef window_list = CreateWindowListWithExclusion(&excluded_windows_);
+ 
+   for (size_t i = 0; i < displays_to_capture.size(); ++i) {
+     const MacDisplayConfiguration& display_config = displays_to_capture[i];
+@@ -340,19 +368,39 @@ DesktopRect GetExcludedWindowPixelBounds(CGWindowID window, float dip_to_pixel_s
+     // Translate the region to be copied into display-relative coordinates.
+     copy_region.Translate(-display_bounds.left(), -display_bounds.top());
+ 
+-    DesktopRect excluded_window_bounds;
+-    rtc::ScopedCFTypeRef<CGImageRef> excluded_image;
+-    if (excluded_window_ && window_list) {
+-      // Get the region of the excluded window relative the primary display.
+-      excluded_window_bounds =
+-          GetExcludedWindowPixelBounds(excluded_window_, display_config.dip_to_pixel_scale);
+-      excluded_window_bounds.IntersectWith(display_config.pixel_bounds);
+-
+-      // Create the image under the excluded window first, because it's faster
+-      // than captuing the whole display.
+-      if (!excluded_window_bounds.is_empty()) {
+-        excluded_image = CreateExcludedWindowRegionImage(
+-            excluded_window_bounds, display_config.dip_to_pixel_scale, window_list);
++    float window_exclude_capture_fps = 5.0f;
++    float delta = 1000.0f / window_exclude_capture_fps;
++    if (last_exclude_capture_ms_ == 0 || rtc::TimeSince(last_exclude_capture_ms_) > delta) {
++      last_exclude_capture_ms_ = rtc::SystemTimeMillis();
++      excluded_images_.clear();
++      excluded_window_bounds_list_.clear();
++      excluded_image_data_list_.clear();
++    }
++
++    if (excluded_images_.size() == 0) {
++      for(std::vector<CGWindowID>::size_type i = 0; i < excluded_windows_.size(); i++) {
++        CGWindowID excluded_window = excluded_windows_[i];
++
++        DesktopRect excluded_window_bounds;
++        rtc::ScopedCFTypeRef<CGImageRef> excluded_image;
++        // Get the region of the excluded window relative the primary display.
++        excluded_window_bounds =
++          GetExcludedWindowPixelBounds(excluded_window, display_config.dip_to_pixel_scale);
++        excluded_window_bounds.IntersectWith(display_config.pixel_bounds);
++
++        // Create the image under the excluded window first, because it's faster
++        // than captuing the whole display.
++        if (!excluded_window_bounds.is_empty()) {
++          excluded_image = CreateExcludedWindowRegionImage(
++              excluded_window_bounds, display_config.dip_to_pixel_scale, window_list);
++        }
++
++        CGDataProviderRef provider = CGImageGetDataProvider(excluded_image.get());
++        rtc::ScopedCFTypeRef<CFDataRef> excluded_image_data(CGDataProviderCopyData(provider));
++
++        excluded_images_.push_back(excluded_image);
++        excluded_window_bounds_list_.push_back(excluded_window_bounds);
++        excluded_image_data_list_.push_back(excluded_image_data);
+       }
+     }
+ 
+@@ -381,9 +429,14 @@ DesktopRect GetExcludedWindowPixelBounds(CGWindowID window, float dip_to_pixel_s
+                i.rect());
+     }
+ 
+-    if (excluded_image) {
+-      CGDataProviderRef provider = CGImageGetDataProvider(excluded_image.get());
+-      rtc::ScopedCFTypeRef<CFDataRef> excluded_image_data(CGDataProviderCopyData(provider));
++    for(std::vector<DesktopRect>::size_type i = 0; i < excluded_window_bounds_list_.size(); i++) {
++      DesktopRect excluded_window_bounds = excluded_window_bounds_list_[i];
++      rtc::ScopedCFTypeRef<CGImageRef> excluded_image = excluded_images_[i];
++      rtc::ScopedCFTypeRef<CFDataRef> excluded_image_data = excluded_image_data_list_[i];
++
++      if (!excluded_image_data.get()) {
++        continue;
++      }
+       RTC_DCHECK(excluded_image_data);
+       display_base_address = CFDataGetBytePtr(excluded_image_data.get());
+       src_bytes_per_row = CGImageGetBytesPerRow(excluded_image.get());

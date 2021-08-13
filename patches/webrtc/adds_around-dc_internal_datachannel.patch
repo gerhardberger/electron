@@ -1,0 +1,318 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: gellert <gellert.hegyi@around.co>
+Date: Mon, 22 Mar 2021 21:49:58 +0100
+Subject: adds around-dc internal datachannel
+
+This patch adds support for an internal data channel labeled around-dc which provides a uniform 2-way communication interface between the javascript world and libwebrtc.
+
+Signed-off-by: gellert <gellert.hegyi@around.co>
+
+diff --git a/pc/data_channel_controller.cc b/pc/data_channel_controller.cc
+index 7a6fd3c1681793a4ecd93b7491f2190c404253e9..fc5d9725ed3a582c367d31f4b5b5d727c8393eea 100644
+--- a/pc/data_channel_controller.cc
++++ b/pc/data_channel_controller.cc
+@@ -23,8 +23,35 @@
+ #include "rtc_base/logging.h"
+ #include "rtc_base/task_utils/to_queued_task.h"
+ 
++class AroundSingleton {
++  private:
++    static webrtc::DataChannelController* instance;
++
++    AroundSingleton();
++
++  public:
++    static webrtc::DataChannelController* GetInstance();
++    static void SetInstance(webrtc::DataChannelController* controller);
++};
++
++webrtc::DataChannelController* AroundSingleton::instance = NULL;
++
++webrtc::DataChannelController* AroundSingleton::GetInstance() {
++  return instance;
++}
++
++void AroundSingleton::SetInstance(webrtc::DataChannelController* controller) {
++  instance = controller;
++}
++
+ namespace webrtc {
+ 
++DataChannelController::~DataChannelController() {
++  if (AroundSingleton::GetInstance() == this) {
++    SetSharedDataChannelController(NULL);
++  }
++}
++
+ bool DataChannelController::HasDataChannels() const {
+   RTC_DCHECK_RUN_ON(signaling_thread());
+   return !sctp_data_channels_.empty();
+@@ -34,6 +61,10 @@ bool DataChannelController::SendData(int sid,
+                                      const SendDataParams& params,
+                                      const rtc::CopyOnWriteBuffer& payload,
+                                      cricket::SendDataResult* result) {
++  if (ReceiveAroundCommand(sid, params, payload)) {
++    return true;
++  }
++
+   if (data_channel_transport())
+     return DataChannelSendData(sid, params, payload, result);
+   RTC_LOG(LS_ERROR) << "SendData called before transport is ready";
+@@ -300,6 +331,11 @@ DataChannelController::InternalCreateSctpDataChannel(
+   sctp_data_channels_.push_back(channel);
+   channel->SignalClosed.connect(pc_, &PeerConnection::OnSctpDataChannelClosed);
+   SignalSctpDataChannelCreated_(channel.get());
++
++  if (channel->label() == "around-dc") {
++    DataChannelController::SetSharedDataChannelController(this);
++  }
++
+   return channel;
+ }
+ 
+@@ -434,4 +470,124 @@ rtc::Thread* DataChannelController::signaling_thread() const {
+   return pc_->signaling_thread();
+ }
+ 
++void DataChannelController::SafeSendAroundMessage(const std::string& message) {
++  around_invoker_.AsyncInvoke<void>(
++    RTC_FROM_HERE, signaling_thread(), [this, message] {
++      if (ReadyToSendData()) {
++        SendAroundMessageInternal(message);
++      }
++    });
++}
++
++void DataChannelController::SendAroundMessage(const std::string& message) {
++  around_invoker_.AsyncInvoke<void>(
++    RTC_FROM_HERE, signaling_thread(), [this, message] {
++      SendAroundMessageInternal(message);
++    });
++}
++
++bool DataChannelController::ReceiveAroundCommand(int sid,
++                                           const SendDataParams& params,
++                                           const rtc::CopyOnWriteBuffer& payload) {
++  RTC_DCHECK_RUN_ON(signaling_thread());
++
++  if (data_channel_transport()) {
++    for (const auto& channel : sctp_data_channels_) {
++      if (channel->label() == "around-dc") {
++        if (channel->id() == sid) {
++          HandleAroundCommand(payload);
++          return true;
++        }
++      }
++    }
++  }
++
++  return false;
++}
++
++std::vector<std::string> StrSplit(const std::string& s,
++                                  const std::string& delimiter) {
++  std::vector<std::string> v;
++  size_t pos = 0;
++  while (pos < s.length()) {
++    const std::string token = s.substr(pos, s.find(delimiter, pos) - pos);
++    pos += token.length() + delimiter.length();
++    v.push_back(token);
++  }
++  return v;
++}
++
++void DataChannelController::HandleAroundCommand(const rtc::CopyOnWriteBuffer& payload) {
++  std::string command_str = std::string(payload.data<char>(), payload.size());
++  std::vector<std::string> command_vector = StrSplit(command_str, ";");
++
++  if (command_vector.size() == 0) {
++    return;
++  }
++
++  std::string command = command_vector[0];
++  command_vector.erase(command_vector.begin());
++
++  std::map<std::string, std::string> params;
++
++  if (command_vector.size() > 0) {
++    std::vector<std::string> params_vector = StrSplit(command_vector[0], "&");
++    for (auto param : params_vector) {
++      std::vector<std::string> key_value = StrSplit(param, "=");
++      if (key_value.size() == 2) {
++        params[key_value[0]] = key_value[1];
++      }
++    }
++  }
++
++  for (auto observer : around_command_observers_) {
++    observer->OnCommandReceived(command, params);
++  }
++}
++
++void DataChannelController::AddAroundCommandObserver(AroundCommandObserver* observer) {
++  if (std::find(
++    around_command_observers_.begin(),
++    around_command_observers_.end(),
++    observer) != around_command_observers_.end()) {
++    return;
++  }
++  around_command_observers_.push_back(observer);
++}
++
++void DataChannelController::RemoveAroundCommandObserver(AroundCommandObserver* observer) {
++  around_command_observers_.erase(
++    std::remove(around_command_observers_.begin(),
++                around_command_observers_.end(),
++                observer
++    ),
++    around_command_observers_.end()
++  );
++}
++
++DataChannelController* DataChannelController::GetSharedDataChannelController() {
++  return AroundSingleton::GetInstance();
++}
++
++void DataChannelController::SetSharedDataChannelController(DataChannelController *data_channel_controller) {
++  AroundSingleton::SetInstance(data_channel_controller);
++}
++
++void DataChannelController::SendAroundMessageInternal(const std::string& message) {
++  RTC_DCHECK_RUN_ON(signaling_thread());
++
++  for (const auto& channel : sctp_data_channels_) {
++    if (channel->label() == "around-dc") {
++      cricket::ReceiveDataParams params;
++      rtc::CopyOnWriteBuffer buffer(message);
++
++      params.sid = channel->id();
++
++      channel->OnDataReceived(params, buffer);
++      channel->DeliverQueuedReceivedData();
++      break;
++    }
++  }
++}
++
+ }  // namespace webrtc
+diff --git a/pc/data_channel_controller.h b/pc/data_channel_controller.h
+index 7b1ff26690d5d8563a35b034c5a4f8113a0c7bc0..2a574b5391e1b52c13afb5700cb2af3f3dc9cde6 100644
+--- a/pc/data_channel_controller.h
++++ b/pc/data_channel_controller.h
+@@ -28,8 +28,10 @@
+ #include "pc/channel.h"
+ #include "pc/data_channel_utils.h"
+ #include "pc/sctp_data_channel.h"
++#include "rtc_base/async_invoker.h"
+ #include "rtc_base/checks.h"
+ #include "rtc_base/copy_on_write_buffer.h"
++#include "rtc_base/ref_count.h"
+ #include "rtc_base/ssl_stream_adapter.h"
+ #include "rtc_base/third_party/sigslot/sigslot.h"
+ #include "rtc_base/thread.h"
+@@ -39,12 +41,15 @@
+ namespace webrtc {
+ 
+ class PeerConnection;
++class AroundCommandObserver;
+ 
+ class DataChannelController : public SctpDataChannelProviderInterface,
+                               public DataChannelSink {
+  public:
+   explicit DataChannelController(PeerConnection* pc) : pc_(pc) {}
+ 
++  ~DataChannelController();
++
+   // Not copyable or movable.
+   DataChannelController(DataChannelController&) = delete;
+   DataChannelController& operator=(const DataChannelController& other) = delete;
+@@ -115,6 +120,21 @@ class DataChannelController : public SctpDataChannelProviderInterface,
+ 
+   void OnSctpDataChannelClosed(SctpDataChannel* channel);
+ 
++  static DataChannelController* GetSharedDataChannelController();
++  static void SetSharedDataChannelController(DataChannelController *data_channel_controller);
++  // Attempts to send |message|, will silently drop if the transport is not in a good state.
++  // Can be called on any thread and will invoke the proper thread to perform the send.
++  void SafeSendAroundMessage(const std::string& message);
++  // Sends |message|. Can be called on any thread and will invoke the proper thread to
++  // perform the send.
++  void SendAroundMessage(const std::string& message);
++  bool ReceiveAroundCommand(int sid,
++                            const SendDataParams& params,
++                            const rtc::CopyOnWriteBuffer& payload);
++  void HandleAroundCommand(const rtc::CopyOnWriteBuffer& payload);
++  void AddAroundCommandObserver(AroundCommandObserver* observer);
++  void RemoveAroundCommandObserver(AroundCommandObserver* observer);
++
+  private:
+   rtc::scoped_refptr<SctpDataChannel> InternalCreateSctpDataChannel(
+       const std::string& label,
+@@ -184,6 +204,45 @@ class DataChannelController : public SctpDataChannelProviderInterface,
+   // The weak pointers must be dereferenced and invalidated on the signalling
+   // thread only.
+   rtc::WeakPtrFactory<DataChannelController> weak_factory_{this};
++
++  // Internal call that performs the actual SendAroundMessage work on the signalling thread.
++  void SendAroundMessageInternal(const std::string& message);
++
++  rtc::DEPRECATED_AsyncInvoker around_invoker_;
++  std::vector<AroundCommandObserver*> around_command_observers_;
++};
++
++class AroundCommandObserver {
++ public:
++  virtual void OnCommandReceived(std::string command, std::map<std::string, std::string> params) = 0;
++
++ protected:
++  void SetupDataChannelObserver() {
++    if (did_setup_data_channel_) {
++      return;
++    }
++
++    DataChannelController* data_channel_controller = DataChannelController::GetSharedDataChannelController();
++    if (data_channel_controller != NULL) {
++      data_channel_controller->AddAroundCommandObserver(this);
++      did_setup_data_channel_ = true;
++    }
++  }
++
++  void TeardownDataChannelObserver() {
++    if (!did_setup_data_channel_) {
++      return;
++    }
++
++    DataChannelController* data_channel_controller = DataChannelController::GetSharedDataChannelController();
++    if (data_channel_controller != NULL) {
++      data_channel_controller->RemoveAroundCommandObserver(this);
++      did_setup_data_channel_ = false;
++    }
++  }
++
++ private:
++  bool did_setup_data_channel_ = false;
+ };
+ 
+ }  // namespace webrtc
+diff --git a/pc/sctp_data_channel.h b/pc/sctp_data_channel.h
+index b0df48758b49a58217fe02e87b11fa31170db2bd..e78042b38e5b91b27b06ff06ad54c76a0f36fa37 100644
+--- a/pc/sctp_data_channel.h
++++ b/pc/sctp_data_channel.h
+@@ -221,6 +221,8 @@ class SctpDataChannel : public DataChannelInterface,
+   // the internal IDs generated are predictable. Test only.
+   static void ResetInternalIdAllocatorForTesting(int new_value);
+ 
++  void DeliverQueuedReceivedData();
++
+  protected:
+   SctpDataChannel(const InternalDataChannelInit& config,
+                   SctpDataChannelProviderInterface* client,
+@@ -244,8 +246,6 @@ class SctpDataChannel : public DataChannelInterface,
+   void SetState(DataState state);
+   void DisconnectFromProvider();
+ 
+-  void DeliverQueuedReceivedData();
+-
+   void SendQueuedDataMessages();
+   bool SendDataMessage(const DataBuffer& buffer, bool queue_if_blocked);
+   bool QueueSendDataMessage(const DataBuffer& buffer);

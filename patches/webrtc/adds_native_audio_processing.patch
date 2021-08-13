@@ -1,0 +1,1069 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: gellert <gellert.hegyi@around.co>
+Date: Tue, 19 May 2020 13:45:05 +0200
+Subject: adds native audio processing
+
+This patch adds custom denoising for around using a custom rnnoise model with support to set different NS levels and also adds events and handlers to process vad state and other audio related states and params inside libwebrtcs audio processing module.
+
+Signed-off-by: gellert <gellert.hegyi@around.co>
+
+diff --git a/media/engine/webrtc_voice_engine.cc b/media/engine/webrtc_voice_engine.cc
+index aa80c8724aeaf18522b7ac025a9e3e201c91252f..c25c0483b5bf6329390af2013f8ae218873a2ecc 100644
+--- a/media/engine/webrtc_voice_engine.cc
++++ b/media/engine/webrtc_voice_engine.cc
+@@ -627,8 +627,7 @@ bool WebRtcVoiceEngine::ApplyOptions(const AudioOptions& options_in) {
+   if (options.noise_suppression) {
+     const bool enabled = *options.noise_suppression;
+     apm_config.noise_suppression.enabled = enabled;
+-    apm_config.noise_suppression.level =
+-        webrtc::AudioProcessing::Config::NoiseSuppression::Level::kHigh;
++    // Allow audio_processing default for aggressiveness
+     RTC_LOG(LS_INFO) << "NS set to " << enabled;
+   }
+ 
+diff --git a/modules/audio_processing/BUILD.gn b/modules/audio_processing/BUILD.gn
+index a733612ccc9d29ca7693ed91fc41cbf539f3ac24..bf0cf0d2bca25b8de457b1f822e0542018b29629 100644
+--- a/modules/audio_processing/BUILD.gn
++++ b/modules/audio_processing/BUILD.gn
+@@ -48,6 +48,7 @@ rtc_library("api") {
+     "../../rtc_base/system:file_wrapper",
+     "../../rtc_base/system:rtc_export",
+     "agc:gain_control_interface",
++    "around_denoise",
+   ]
+   absl_deps = [ "//third_party/abseil-cpp/absl/types:optional" ]
+ }
+@@ -199,6 +200,9 @@ rtc_library("audio_processing") {
+     "ns",
+     "transient:transient_suppressor_api",
+     "vad",
++    "around_biquad:around_biquad",
++    "around_biquad:mask_compensation_coefficients",
++    "around_agc:around_agc",
+   ]
+   absl_deps = [ "//third_party/abseil-cpp/absl/types:optional" ]
+ 
+diff --git a/modules/audio_processing/aec3/echo_canceller3.cc b/modules/audio_processing/aec3/echo_canceller3.cc
+index 181b649f6d0679404be9d53da982581e47854b54..fdff6a75e2be59fa56fe2341dcd7f296555725a3 100644
+--- a/modules/audio_processing/aec3/echo_canceller3.cc
++++ b/modules/audio_processing/aec3/echo_canceller3.cc
+@@ -85,7 +85,7 @@ void FillSubFrameView(
+   RTC_DCHECK_GE(1, sub_frame_index);
+   RTC_DCHECK_LE(0, sub_frame_index);
+   RTC_DCHECK_EQ(frame->num_bands(), sub_frame_view->size());
+-  RTC_DCHECK_EQ(frame->num_channels(), (*sub_frame_view)[0].size());
++  RTC_DCHECK_GE(frame->num_channels(), (*sub_frame_view)[0].size());
+   for (size_t band = 0; band < sub_frame_view->size(); ++band) {
+     for (size_t channel = 0; channel < (*sub_frame_view)[0].size(); ++channel) {
+       (*sub_frame_view)[band][channel] = rtc::ArrayView<float>(
+@@ -642,7 +642,7 @@ EchoCanceller3::RenderWriter::~RenderWriter() = default;
+ void EchoCanceller3::RenderWriter::Insert(const AudioBuffer& input) {
+   RTC_DCHECK_EQ(AudioBuffer::kSplitBandSize, input.num_frames_per_band());
+   RTC_DCHECK_EQ(num_bands_, input.num_bands());
+-  RTC_DCHECK_EQ(num_channels_, input.num_channels());
++  RTC_DCHECK_LE(num_channels_, input.num_channels());
+ 
+   // TODO(bugs.webrtc.org/8759) Temporary work-around.
+   if (num_bands_ != input.num_bands())
+@@ -756,7 +756,7 @@ EchoCanceller3::~EchoCanceller3() = default;
+ void EchoCanceller3::AnalyzeRender(const AudioBuffer& render) {
+   RTC_DCHECK_RUNS_SERIALIZED(&render_race_checker_);
+ 
+-  RTC_DCHECK_EQ(render.num_channels(), num_render_channels_);
++  RTC_DCHECK_GE(render.num_channels(), num_render_channels_);
+   data_dumper_->DumpRaw("aec3_call_order",
+                         static_cast<int>(EchoCanceller3ApiCall::kRender));
+ 
+@@ -768,7 +768,7 @@ void EchoCanceller3::AnalyzeCapture(const AudioBuffer& capture) {
+   data_dumper_->DumpWav("aec3_capture_analyze_input", capture.num_frames(),
+                         capture.channels_const()[0], sample_rate_hz_, 1);
+   saturated_microphone_signal_ = false;
+-  for (size_t channel = 0; channel < capture.num_channels(); ++channel) {
++  for (size_t channel = 0; channel < num_capture_channels_; ++channel) {
+     saturated_microphone_signal_ |=
+         DetectSaturation(rtc::ArrayView<const float>(
+             capture.channels_const()[channel], capture.num_frames()));
+@@ -789,7 +789,7 @@ void EchoCanceller3::ProcessCapture(AudioBuffer* capture,
+   RTC_DCHECK(capture);
+   RTC_DCHECK_EQ(num_bands_, capture->num_bands());
+   RTC_DCHECK_EQ(AudioBuffer::kSplitBandSize, capture->num_frames_per_band());
+-  RTC_DCHECK_EQ(capture->num_channels(), num_capture_channels_);
++  RTC_DCHECK_GE(capture->num_channels(), num_capture_channels_);
+   data_dumper_->DumpRaw("aec3_call_order",
+                         static_cast<int>(EchoCanceller3ApiCall::kCapture));
+ 
+diff --git a/modules/audio_processing/around_agc/BUILD.gn b/modules/audio_processing/around_agc/BUILD.gn
+new file mode 100644
+index 0000000000000000000000000000000000000000..fb070f868e4252f64990e51b2e4d8d51cba7aca6
+--- /dev/null
++++ b/modules/audio_processing/around_agc/BUILD.gn
+@@ -0,0 +1,15 @@
++import("../../../webrtc.gni")
++
++rtc_source_set("around_agc") {
++  visibility = [ "../*" ]
++  configs += [ "..:apm_debug_dump" ]
++  sources = [
++    "around_agc.h",
++    "around_agc.cc",
++  ]
++  deps = [
++    "../agc2:noise_level_estimator",
++    "../agc2:adaptive_digital",
++    "../agc2:gain_applier",
++  ]
++}
+diff --git a/modules/audio_processing/around_agc/around_agc.cc b/modules/audio_processing/around_agc/around_agc.cc
+new file mode 100644
+index 0000000000000000000000000000000000000000..4301a5efb2748a4ea09f90277f71c83c5d1f6666
+--- /dev/null
++++ b/modules/audio_processing/around_agc/around_agc.cc
+@@ -0,0 +1,101 @@
++#include "./around_agc.h"
++
++#include "common_audio/include/audio_util.h"
++#include "modules/audio_processing/audio_buffer.h"
++#include "modules/audio_processing/include/audio_frame_view.h"
++#include "modules/audio_processing/logging/apm_data_dumper.h"
++#include "rtc_base/atomic_ops.h"
++#include "rtc_base/checks.h"
++
++namespace webrtc {
++
++int AroundAgc::instance_count_ = 0;
++
++constexpr int kSpeechEstimatorAdjacentFramesThreshold = 1;
++constexpr float kSpeechEstimatorInitialSaturationMarginDb = 10.0f;
++constexpr float kSpeechEstimatorExtraSaturationMarginDb = 5.0f;
++constexpr int kGainApplierAdjacentSpeechFramesThreshold = 1;
++constexpr float kMaxGainChangePerSecondDb = 3.0f;
++constexpr float kFakeNoiseLevelDbfs = -50.0f;
++constexpr float kMaxBoostGainDb = 15.0f;
++
++AroundAgc::AroundAgc()
++    : data_dumper_(
++          new ApmDataDumper(rtc::AtomicOps::Increment(&instance_count_))),
++      adaptive_agc_(data_dumper_.get()),
++      limiter_(static_cast<size_t>(48000), data_dumper_.get(), "AroundAgc") {
++}
++
++AroundAgc::~AroundAgc() = default;
++
++void AroundAgc::Initialize(int sample_rate_hz) {
++  RTC_DCHECK(sample_rate_hz == AudioProcessing::kSampleRate8kHz ||
++             sample_rate_hz == AudioProcessing::kSampleRate16kHz ||
++             sample_rate_hz == AudioProcessing::kSampleRate32kHz ||
++             sample_rate_hz == AudioProcessing::kSampleRate48kHz);
++  limiter_.SetSampleRate(sample_rate_hz);
++}
++
++void AroundAgc::Process(AudioBuffer* audio, const float& vad_probability) {
++  AudioFrameView<float> frame(audio->channels(),
++                              audio->num_channels(),
++                              audio->num_frames());
++
++  // Run the adaptive AGC first
++  AdaptiveDigitalGainApplier::FrameInfo info;
++  float limiter_envelope = limiter_.LastAudioLevel();
++  float peak = 0.f;
++  float rms = 0.f;
++  for (const auto& x : frame.channel(0)) {
++    peak = std::max(std::fabs(x), peak);
++    rms += x * x;
++  }
++  VadLevelAnalyzer::Result vad_result = {vad_probability,
++                    FloatS16ToDbfs(std::sqrt(rms / frame.samples_per_channel())),
++                    FloatS16ToDbfs(peak)};
++  info.speech_probability = vad_result.speech_probability;
++  adaptive_agc_.speech_level_estimator_.Update(vad_result);
++  info.speech_level_dbfs = adaptive_agc_.speech_level_estimator_.level_dbfs();
++  info.speech_level_reliable = adaptive_agc_.speech_level_estimator_.IsConfident();
++  info.noise_rms_dbfs = kFakeNoiseLevelDbfs; // Set to fake noise level for max boost limiting.
++  info.headroom_db = adaptive_agc_.saturation_protector_->HeadroomDb();
++  info.limiter_envelope_dbfs =
++      limiter_envelope > 0.0f ? FloatS16ToDbfs(limiter_envelope) : -90.f;
++  adaptive_agc_.gain_applier_.Process(info, frame);
++  adaptive_agc_.saturation_protector_->Analyze(info.speech_probability, vad_result.peak_dbfs,
++                                 info.speech_level_dbfs);
++
++  // Then the limiter
++  limiter_.Process(frame);
++
++  // Finally, scale everything slightly to ensure headroom for encoding
++  constexpr float HEADROOM_SCALE = 0.94406f; // -0.5dB
++  for (auto& x : frame.channel(0)) {
++    x *= HEADROOM_SCALE;
++  }
++}
++
++void AroundAgc::Reset() {
++  adaptive_agc_.speech_level_estimator_.Reset();
++  limiter_.Reset();
++}
++
++AroundAgc::AdaptiveAgc::AdaptiveAgc(ApmDataDumper* apm_data_dumper)
++    : speech_level_estimator_(apm_data_dumper,
++                              kSpeechEstimatorAdjacentFramesThreshold),
++      gain_applier_(apm_data_dumper,
++                    kGainApplierAdjacentSpeechFramesThreshold,
++                    kMaxGainChangePerSecondDb,
++                    kFakeNoiseLevelDbfs + kMaxBoostGainDb,
++                    /* dry_run */ false),
++      noise_level_estimator_(CreateStationaryNoiseEstimator(apm_data_dumper)),
++      saturation_protector_(
++          CreateSaturationProtector(kSpeechEstimatorInitialSaturationMarginDb,
++                                    kSpeechEstimatorExtraSaturationMarginDb,
++                                    kSpeechEstimatorAdjacentFramesThreshold,
++                                    apm_data_dumper)) {
++}
++
++AroundAgc::AdaptiveAgc::~AdaptiveAgc() = default;
++
++}
+diff --git a/modules/audio_processing/around_agc/around_agc.h b/modules/audio_processing/around_agc/around_agc.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..29001e54b84d658891b26bc443e2ce5d0c61c8bf
+--- /dev/null
++++ b/modules/audio_processing/around_agc/around_agc.h
+@@ -0,0 +1,52 @@
++#ifndef MODULES_AUDIO_PROCESSING_AROUND_AGC_H_
++#define MODULES_AUDIO_PROCESSING_AROUND_AGC_H_
++
++#include <memory>
++#include <string>
++
++#include "modules/audio_processing/agc2/adaptive_digital_gain_applier.h"
++#include "modules/audio_processing/agc2/adaptive_mode_level_estimator.h"
++#include "modules/audio_processing/agc2/limiter.h"
++#include "modules/audio_processing/agc2/noise_level_estimator.h"
++#include "modules/audio_processing/agc2/saturation_protector.h"
++#include "modules/audio_processing/include/audio_processing.h"
++#include "modules/audio_processing/include/audio_frame_view.h"
++#include "rtc_base/constructor_magic.h"
++
++namespace webrtc {
++
++class ApmDataDumper;
++class AudioBuffer;
++
++// Applies adaptive digital gain control to a target speech level using
++// an external VAD signal. Based on AGC2::AdaptiveAgc.
++class AroundAgc {
++  public:
++  AroundAgc();
++  ~AroundAgc();
++  void Initialize(int sample_rate_hz);
++  void Process(AudioBuffer* audio, const float& vad_probability);
++  void Reset();
++
++ private:
++  struct AdaptiveAgc {
++    AdaptiveAgc(ApmDataDumper* apm_data_dumper);
++    ~AdaptiveAgc();
++
++    AdaptiveModeLevelEstimator speech_level_estimator_;
++    AdaptiveDigitalGainApplier gain_applier_;
++    std::unique_ptr<NoiseLevelEstimator> noise_level_estimator_;
++    std::unique_ptr<SaturationProtector> saturation_protector_;
++  };
++
++  static int instance_count_;
++  std::unique_ptr<ApmDataDumper> data_dumper_;
++  AdaptiveAgc adaptive_agc_;
++  Limiter limiter_;
++
++  RTC_DISALLOW_COPY_AND_ASSIGN(AroundAgc);
++};
++
++}
++
++#endif
+diff --git a/modules/audio_processing/around_biquad/BUILD.gn b/modules/audio_processing/around_biquad/BUILD.gn
+new file mode 100644
+index 0000000000000000000000000000000000000000..b0ec1cdf1b5f22e02756344aff88a8d45fbe3498
+--- /dev/null
++++ b/modules/audio_processing/around_biquad/BUILD.gn
+@@ -0,0 +1,21 @@
++import("../../../webrtc.gni")
++
++rtc_source_set("around_biquad") {
++  visibility = [ "../*" ]
++  configs += [ "..:apm_debug_dump" ]
++  sources = [
++    "around_biquad.h",
++    "around_biquad.cc",
++  ]
++  deps = [
++    "..:audio_buffer",
++  ]
++}
++
++rtc_source_set("mask_compensation_coefficients") {
++  visibility = [ "../*" ]
++  sources = [
++    "mask_compensation_coefficients.h",
++  ]
++  deps = []
++}
+diff --git a/modules/audio_processing/around_biquad/around_biquad.cc b/modules/audio_processing/around_biquad/around_biquad.cc
+new file mode 100644
+index 0000000000000000000000000000000000000000..4fafad7e634cafc742c1cab61049eddc2450e0fc
+--- /dev/null
++++ b/modules/audio_processing/around_biquad/around_biquad.cc
+@@ -0,0 +1,39 @@
++#include "./around_biquad.h"
++#include "modules/audio_processing/include/audio_frame_view.h"
++
++namespace webrtc {
++
++static const float DEFAULT_COEFFICIENTS[] = {1.0f, 0.0f, 0.0f, 0.0f, 0.0f,};
++
++AroundBiquad::AroundBiquad() :
++  pCoefficients_(DEFAULT_COEFFICIENTS),
++  state_() {
++  Reset();
++}
++
++AroundBiquad::~AroundBiquad() = default;
++
++void AroundBiquad::Initialize(const float* pCoefficients) {
++  pCoefficients_ = pCoefficients;
++}
++
++void AroundBiquad::Reset() {
++  state_[0] = 0.0f;
++  state_[1] = 0.0f;
++}
++
++void AroundBiquad::Process(AudioBuffer* audio) {
++  AudioFrameView<float> frame(audio->channels(),
++                              audio->num_channels(),
++                              audio->num_frames());
++
++  float result;
++  for (float& x : frame.channel(0)) {
++    result = x * pCoefficients_[0] + state_[0];                                  // y[n] = x[n]*b0 + z[-1]
++    state_[0] = x * pCoefficients_[1] - result * pCoefficients_[3] + state_[1];  // z[-1] = x[n]*b1 - y[n]*a1 + z[-2]
++    state_[1] = x * pCoefficients_[2] - result * pCoefficients_[4];              // z[-2] = x[n]*b2 - y[n]*a2
++    x = result;
++  }
++}
++
++}
+diff --git a/modules/audio_processing/around_biquad/around_biquad.h b/modules/audio_processing/around_biquad/around_biquad.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..f4e1d16386526d9ac66644ffcaa9345997acb44f
+--- /dev/null
++++ b/modules/audio_processing/around_biquad/around_biquad.h
+@@ -0,0 +1,33 @@
++#ifndef MODULES_AUDIO_PROCESSING_AROUND_BIQUAD_H_
++#define MODULES_AUDIO_PROCESSING_AROUND_BIQUAD_H_
++
++#include "modules/audio_processing/audio_buffer.h"
++#include "rtc_base/constructor_magic.h"
++
++namespace webrtc {
++
++// Applies biquad processing to the first channel of the provided audio buffer.
++class AroundBiquad {
++  public:
++  AroundBiquad();
++  ~AroundBiquad();
++
++  // Sets the coefficients to use.
++  void Initialize(const float* pCoefficients);
++
++  // Resets internal state.
++  void Reset();
++
++  // Processes the first channel of the buffer.
++  void Process(AudioBuffer* audio);
++
++ private:
++  const float* pCoefficients_;
++  float state_[2];
++
++  RTC_DISALLOW_COPY_AND_ASSIGN(AroundBiquad);
++};
++
++}
++
++#endif
+diff --git a/modules/audio_processing/around_biquad/mask_compensation_coefficients.h b/modules/audio_processing/around_biquad/mask_compensation_coefficients.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..316d560ac8748787a2617b2b428a61ce5e14dc4f
+--- /dev/null
++++ b/modules/audio_processing/around_biquad/mask_compensation_coefficients.h
+@@ -0,0 +1,8 @@
++#ifndef MODULES_AUDIO_PROCESSING_MASK_COMPENSATION_COEFFICIENTS_H_
++#define MODULES_AUDIO_PROCESSING_MASK_COMPENSATION_COEFFICIENTS_H_
++
++// Biquad
++// +8dB High Shelf, f0 1400Hz, Q0.8, with -0.9dB fullband attenuation
++static const float MASK_COMPENSATION_COEFFS[] = {2.140794f, -3.883752f, 1.78456f, -1.704033f, 0.750257f,};
++
++#endif
+diff --git a/modules/audio_processing/around_denoise/BUILD.gn b/modules/audio_processing/around_denoise/BUILD.gn
+new file mode 100644
+index 0000000000000000000000000000000000000000..99ec07cdd04c740c668e2a119abd378b358eb4f5
+--- /dev/null
++++ b/modules/audio_processing/around_denoise/BUILD.gn
+@@ -0,0 +1,12 @@
++import("../../../webrtc.gni")
++
++rtc_source_set("around_denoise") {
++  visibility = [ "../*" ]
++  sources = [
++    "around_denoise.h",
++    "around_denoise.cc",
++  ]
++  deps = [
++    "//third_party/rnnoise_full:rnnoise_full_src",
++  ]
++}
+diff --git a/modules/audio_processing/around_denoise/DEPS b/modules/audio_processing/around_denoise/DEPS
+new file mode 100644
+index 0000000000000000000000000000000000000000..a277a204037e9d9c3a586f42b026ded3705c213a
+--- /dev/null
++++ b/modules/audio_processing/around_denoise/DEPS
+@@ -0,0 +1,3 @@
++include_rules = [
++  "+third_party/rnnoise_full",
++]
+diff --git a/modules/audio_processing/around_denoise/around_denoise.cc b/modules/audio_processing/around_denoise/around_denoise.cc
+new file mode 100644
+index 0000000000000000000000000000000000000000..6a51dcec08fa4b92e9cabb8bdaec2d07393269a9
+--- /dev/null
++++ b/modules/audio_processing/around_denoise/around_denoise.cc
+@@ -0,0 +1,172 @@
++#include <array>
++#include <math.h>
++
++#include "api/array_view.h"
++#include "modules/audio_processing/around_denoise/around_denoise.h"
++#include "modules/audio_processing/audio_buffer.h"
++#include "modules/audio_processing/include/audio_frame_view.h"
++#include "rtc_base/logging.h"
++#include "rtc_base/time_utils.h"
++
++namespace webrtc {
++
++const int VAD_DISABLE_TIMEOUT_MS = 1500;
++const float VAD_DISABLE_THRESHOLD_PCT = 0.75;
++const float VAD_ENABLED_THRESHOLD_PCT = 0.9;
++const float VAD_SMOOTHING_WEMA_ALPHA = 0.09;
++const float VAD_MUTED_SMOOTHING_WEMA_ALPHA = 0.05;
++
++float compute_wema(float prev_value, float new_data_point, float alpha) {
++  return prev_value > 0.0
++    ? (1.0 - alpha) * prev_value + alpha * new_data_point
++    : new_data_point;
++}
++
++AroundDenoiser::AroundDenoiser() = default;
++AroundDenoiser::~AroundDenoiser() {
++  rnnoise_destroy(denoise_state);
++}
++
++void AroundDenoiser::Initialize() {
++  RTC_LOG(LS_INFO) << "@AROUND: initialising denoiser";
++  denoise_state = rnnoise_create(NULL);
++}
++
++void AroundDenoiser::Denoise(AudioBuffer* audioBuffer, float noise_suppression_db) {
++  if (audioBuffer->num_channels() < 1) return;
++
++  AudioFrameView<float> frame(audioBuffer->channels_f(),
++                              audioBuffer->num_channels(),
++                              audioBuffer->num_frames());
++  // ensure the resamplers are set up correctly
++  int source_sample_rate = static_cast<int>(frame.samples_per_channel() * 100);
++  float* raw_frame_data = frame.channel(0).data();
++  InitializeResamplersIfNeeded(source_sample_rate);
++
++  std::array<float, kRNNoiseFrameSize> work_frame;
++  float* frame_data = work_frame.data();
++
++  // Feed the 1st channel to the resampler.
++  resampler_.Resample(raw_frame_data, frame.samples_per_channel(), frame_data,
++                      kRNNoiseFrameSize);
++
++  audio_features.vad_probability =
++      rnnoise_process_frame(denoise_state, frame_data, frame_data, noise_suppression_db);
++
++  ProcessVADState(audio_features.vad_probability, rtc::TimeUTCMillis());
++
++  // resample back to the rendering sample rate,
++  // writing the processed buffer into the output frame
++  reverse_resampler_.Resample(const_cast<const float*>(frame_data),
++                              kRNNoiseFrameSize, raw_frame_data,
++                              frame.samples_per_channel());
++}
++
++AroundDenoiser::AudioFeatures* AroundDenoiser::getCurrentFeatures() {
++  return &audio_features;
++}
++
++void AroundDenoiser::InitializeResamplersIfNeeded(int sample_rate_hz) {
++  resampler_.InitializeIfNeeded(sample_rate_hz, kRNNoiseSampleRate, 1);
++  reverse_resampler_.InitializeIfNeeded(kRNNoiseSampleRate, sample_rate_hz, 1);
++}
++
++void AroundDenoiser::CalculateRMS(AudioBuffer* audioBuffer) {
++  if (audioBuffer->num_channels() < 1) return;
++
++  AudioFrameView<float> frame(audioBuffer->channels_f(),
++                              audioBuffer->num_channels(),
++                              audioBuffer->num_frames());
++  rtc::ArrayView<float> signal = frame.channel(0);
++
++  float sum = 0.0;
++  for (auto& sample : signal) {
++    sum += pow(sample, 2);
++  }
++  audio_features.rms = sqrt(sum / signal.size());
++}
++
++void AroundDenoiser::EncodeFeaturesToSignal(AudioBuffer* audioBuffer) {
++  AudioFrameView<float> frame(audioBuffer->channels_f(),
++                              audioBuffer->num_channels(),
++                              audioBuffer->num_frames());
++  if (frame.num_channels() > 1) {
++    rtc::ArrayView<float> signal = frame.channel(1);
++    signal[0] = audio_features.vad_probability * INT16_MAX;
++    signal[1] = audio_features.rms;
++    // zero out the remaining samples
++    for (size_t sample = 2; sample < signal.size(); sample++) {
++      signal[sample] = 0;
++    }
++  }
++}
++
++void AroundDenoiser::ProcessMutedSpeakingState(float vad, int64_t now) {
++  if (
++    (vad_state_ == MutedStarted) &&
++    (vad_wema_ == 0.0 || vad_wema_ <= VAD_DISABLE_THRESHOLD_PCT) &&
++    muted_vad_disable_timeout_ > 0 &&
++    (now - muted_vad_disable_timeout_ >= VAD_DISABLE_TIMEOUT_MS)
++  ) {
++    vad_state_ = MutedStopped;
++    muted_vad_disable_timeout_ = 0;
++  }
++
++  vad_wema_ = compute_wema(vad_wema_, vad, VAD_MUTED_SMOOTHING_WEMA_ALPHA);
++
++  if (vad_wema_ >= VAD_ENABLED_THRESHOLD_PCT) {
++    vad_state_ = MutedStarted;
++    muted_vad_disable_timeout_ = now;
++  }
++}
++
++void AroundDenoiser::ProcessVADState(float vad, int64_t now) {
++  if (!is_microphone_on_) {
++    ProcessMutedSpeakingState(vad, now);
++    return;
++  }
++
++  if (
++    (vad_state_ == Started || vad_state_ == Sustained) &&
++    (vad == 0.0 || vad <= VAD_DISABLE_THRESHOLD_PCT) &&
++    vad_disable_timeout_ > 0 &&
++    (now - vad_disable_timeout_ >= VAD_DISABLE_TIMEOUT_MS)
++  ) {
++    vad_state_ = Stopped;
++    vad_disable_timeout_ = 0;
++  }
++
++  if (vad >= VAD_ENABLED_THRESHOLD_PCT) {
++    if (vad_state_ == Stopped || vad_state_ == MutedStarted || vad_state_ == MutedStopped) {
++      vad_state_ = Started;
++    }
++    vad_disable_timeout_ = now;
++  }
++
++  vad_wema_ = compute_wema(vad_wema_, vad, VAD_SMOOTHING_WEMA_ALPHA);
++
++  if (
++    vad_state_ == Started &&
++    vad > 0.0 && vad_wema_ > VAD_ENABLED_THRESHOLD_PCT &&
++    vad_state_ != Sustained
++  ) {
++    vad_state_ = Sustained;
++  }
++}
++
++void AroundDenoiser::SetAudioStatus(std::map<std::string, std::string> params) {
++  bool is_microphone_on = params["is_microphone_on"] == "true";
++
++  if (is_microphone_on_ && !is_microphone_on) {
++    vad_wema_ = 0.0;
++  } else if (!is_microphone_on_ && is_microphone_on) {
++    if (vad_state_ == MutedStarted) {
++      vad_state_ = MutedStopped;
++      muted_vad_disable_timeout_ = 0;
++    }
++  }
++
++  is_microphone_on_ = is_microphone_on;
++}
++
++} // namespace webrtc
+diff --git a/modules/audio_processing/around_denoise/around_denoise.h b/modules/audio_processing/around_denoise/around_denoise.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..aab27886cd480212a8794db5cdc64ce3fc3d57d3
+--- /dev/null
++++ b/modules/audio_processing/around_denoise/around_denoise.h
+@@ -0,0 +1,75 @@
++#ifndef MODULES_AUDIO_PROCESSING_AROUND_DENOISE_H_
++#define MODULES_AUDIO_PROCESSING_AROUND_DENOISE_H_
++
++#include "common_audio/resampler/include/push_resampler.h"
++#include "modules/audio_processing/include/audio_processing.h"
++#include "modules/audio_processing/include/audio_processing.h"
++#include "rtc_base/constructor_magic.h"
++
++extern "C" {
++#include "third_party/rnnoise_full/include/rnnoise.h"
++}
++
++namespace webrtc {
++
++constexpr size_t kRNNoiseFrameSize = 480;
++constexpr size_t kRNNoiseSampleRate = 48000;
++constexpr float kAroundDefaultDenoiserVADThreshold = 0.5;
++
++// Custom Denoiser module which uses the full RNNoise model.
++class AroundDenoiser {
++ public:
++  struct AudioFeatures {
++    float vad_probability;
++    float rms;
++  };
++
++  enum VADState { Started, Stopped, Sustained, MutedStarted, MutedStopped };
++
++  AroundDenoiser();
++  ~AroundDenoiser();
++
++  void Initialize();
++  // denoises the first channel of the provided buffer,
++  // calculates the probability of Voice Activity in the buffer
++  // and stores it internally
++  void Denoise(AudioBuffer* audioBuffer, float noise_suppression_db);
++  // calculates RMS of the 1st channel in the given signal
++  // and stores it internally
++  void CalculateRMS(AudioBuffer* audioBuffer);
++  // encodes stored features into the given signal
++  void EncodeFeaturesToSignal(AudioBuffer* audioBuffer);
++
++  AudioFeatures* getCurrentFeatures();
++
++  VADState GetCurrentVADState() { return vad_state_; }
++
++  void SetAudioStatus(std::map<std::string, std::string> params);
++
++  float vad_threshold = kAroundDefaultDenoiserVADThreshold;
++
++ private:
++  // we need two resamplers to convert between rendering
++  // and rnnoise-specific sample rates
++  PushResampler<float> resampler_;
++  PushResampler<float> reverse_resampler_;
++  DenoiseState* denoise_state;
++  AudioFeatures audio_features = AudioFeatures{ 0.0, 0.0 };
++
++  VADState vad_state_ = Stopped;
++  int64_t vad_disable_timeout_ = 0;
++  int64_t muted_vad_disable_timeout_ = 0;
++  float vad_wema_ = 0.0;
++  bool is_microphone_on_ = true;
++
++  void InitializeResamplersIfNeeded(int sample_rate_hz);
++
++  void ProcessVADState(float vad, int64_t now);
++  void ProcessMutedSpeakingState(float vad, int64_t now);
++
++  RTC_DISALLOW_COPY_AND_ASSIGN(AroundDenoiser);
++};
++
++} // namespace webrtc
++
++#endif
+diff --git a/modules/audio_processing/audio_processing_impl.cc b/modules/audio_processing/audio_processing_impl.cc
+index 4a1985545f9be2a3b9fcafa586880b7776ddc751..49ca27f07ecb4c39f9b154e0aa218cf9ed30118f 100644
+--- a/modules/audio_processing/audio_processing_impl.cc
++++ b/modules/audio_processing/audio_processing_impl.cc
+@@ -38,6 +38,8 @@
+ #include "system_wrappers/include/field_trial.h"
+ #include "system_wrappers/include/metrics.h"
+ 
++#include "modules/audio_processing/around_biquad/mask_compensation_coefficients.h"
++
+ #define RETURN_ON_ERR(expr) \
+   do {                      \
+     int err = (expr);       \
+@@ -314,7 +316,9 @@ AudioProcessingImpl::AudioProcessingImpl(
+   Initialize();
+ }
+ 
+-AudioProcessingImpl::~AudioProcessingImpl() = default;
++AudioProcessingImpl::~AudioProcessingImpl() {
++  TeardownDataChannelObserver();
++}
+ 
+ int AudioProcessingImpl::Initialize() {
+   // Run in a single-threaded manner during initialization.
+@@ -428,12 +432,36 @@ void AudioProcessingImpl::InitializeLocked() {
+   InitializePostProcessor();
+   InitializePreProcessor();
+   InitializeCaptureLevelsAdjuster();
++  InitializeAroundDenoiser();
++  InitializeAroundMaskCompensation();
++  InitializeAroundAgc();
++
++  if (config_.around_audio_processing.enabled) {
++    SetupDataChannelObserver();
++  }
+ 
+   if (aec_dump_) {
+     aec_dump_->WriteInitMessage(formats_.api_format, rtc::TimeUTCMillis());
+   }
+ }
+ 
++void AudioProcessingImpl::Stop() {
++  DataChannelController* data_channel_controller = DataChannelController::GetSharedDataChannelController();
++  if (data_channel_controller != NULL) {
++    AroundDenoiser::VADState vad_state = submodules_.around_denoiser->GetCurrentVADState();
++
++    if (vad_state == AroundDenoiser::Started || vad_state == AroundDenoiser::Sustained) {
++      data_channel_controller->SendAroundMessage("vad-stopped");
++    }
++
++    if (vad_state == AroundDenoiser::MutedStarted) {
++      data_channel_controller->SendAroundMessage("speaking-muted-stopped");
++    }
++  }
++
++  TeardownDataChannelObserver();
++}
++
+ int AudioProcessingImpl::InitializeLocked(const ProcessingConfig& config) {
+   UpdateActiveSubmoduleStates();
+ 
+@@ -1202,7 +1230,9 @@ int AudioProcessingImpl::ProcessCaptureStreamLocked() {
+     // capture signal saturation.
+     // TODO(peah): Look into ensuring that this kind of tampering with the
+     // AudioBuffer functionality should not be needed.
+-    capture_buffer->set_num_channels(1);
++    // @AROUND: we disable this because the 2nd channel (if available) will
++    //          contain VAD and/or other metadata
++    // capture_buffer->set_num_channels(1);
+   }
+ 
+   if (submodules_.high_pass_filter &&
+@@ -1275,6 +1305,10 @@ int AudioProcessingImpl::ProcessCaptureStreamLocked() {
+     }
+   }
+ 
++  if (config_.around_audio_processing.enabled) {
++    submodules_.around_denoiser->CalculateRMS(capture_buffer);
++  }
++
+   if (submodules_.gain_control) {
+     // TODO(peah): Add reporting from AEC3 whether there is echo.
+     RETURN_ON_ERR(submodules_.gain_control->ProcessCaptureAudio(
+@@ -1418,10 +1452,66 @@ int AudioProcessingImpl::ProcessCaptureStreamLocked() {
+   }
+   capture_.capture_output_used_last_frame = capture_.capture_output_used;
+ 
++  // @AROUND: Denoiser
++  if (config_.around_audio_processing.enabled) {
++    // Add mask compensation filter if enabled.
++    if (config_.around_audio_processing.mask_compensation) {
++      submodules_.around_mask_compensation->Process(capture_buffer);
++    }
++
++    // Always call this since user-VAD is computed within.
++    submodules_.around_denoiser->Denoise(capture_buffer, config_.around_audio_processing.noise_suppression_db);
++
++    auto features = submodules_.around_denoiser->getCurrentFeatures();
++
++    // Apply final digital AGC
++    submodules_.around_agc->Process(capture_buffer, features->vad_probability);
++
++    submodules_.around_denoiser->EncodeFeaturesToSignal(capture_buffer);
++
++    AroundDenoiser::VADState vad_state = submodules_.around_denoiser->GetCurrentVADState();
++    if (vad_state != previous_vad_state_) {
++      DataChannelController* data_channel_controller = DataChannelController::GetSharedDataChannelController();
++      if (data_channel_controller != NULL) {
++        std::string vad_message("vad-stopped");
++        if (vad_state == AroundDenoiser::Started) vad_message = "vad-started";
++        if (vad_state == AroundDenoiser::Sustained) vad_message = "vad-sustained";
++        if (vad_state == AroundDenoiser::MutedStarted) vad_message = "speaking-muted-started";
++        if (vad_state == AroundDenoiser::MutedStopped) vad_message = "speaking-muted-stopped";
++
++        data_channel_controller->SendAroundMessage(vad_message);
++        previous_vad_state_ = vad_state;
++      }
++    }
++  }
++
+   capture_.was_stream_delay_set = false;
+   return kNoError;
+ }
+ 
++void AudioProcessingImpl::InitializeAroundDenoiser() {
++  // Create and initialize only if enabled and the Around NS doesn't already exist.
++  if (!submodules_.around_denoiser) {
++    submodules_.around_denoiser.reset(new AroundDenoiser());
++    submodules_.around_denoiser->Initialize();
++  }
++}
++
++void AudioProcessingImpl::InitializeAroundMaskCompensation() {
++  if (!submodules_.around_mask_compensation) {
++    submodules_.around_mask_compensation.reset(new AroundBiquad());
++  }
++  submodules_.around_mask_compensation->Initialize(MASK_COMPENSATION_COEFFS);
++}
++
++void AudioProcessingImpl::InitializeAroundAgc() {
++  if (!submodules_.around_agc) {
++    submodules_.around_agc.reset(new AroundAgc());
++  }
++  submodules_.around_agc->Initialize(proc_fullband_sample_rate_hz());
++  submodules_.around_agc->Reset();
++}
++
+ int AudioProcessingImpl::AnalyzeReverseStream(
+     const float* const* data,
+     const StreamConfig& reverse_config) {
+@@ -2208,4 +2298,32 @@ void AudioProcessingImpl::ApmStatsReporter::UpdateStatistics(
+   static_cast<void>(stats_message_passed);
+ }
+ 
++void AudioProcessingImpl::OnCommandReceived(std::string command, std::map<std::string, std::string> params) {
++  if (command == "audio_status") {
++    submodules_.around_denoiser->SetAudioStatus(params);
++  }
++
++  if (command == "noise_suppression") {
++    absl::optional<float> value = rtc::StringToNumber<float>(params["level"]);
++    if (!value.has_value()) {
++      RTC_LOG(LS_ERROR) << "AROUND ERROR: Invalid noise suppression level: " << params["level"];
++      return;
++    }
++
++    config_.around_audio_processing.noise_suppression_db = value.value();
++  }
++
++  if (command == "mask_compensation") {
++    config_.around_audio_processing.mask_compensation =
++      rtc::StringToNumber<unsigned int>(params["enabled"])
++      .value_or(config_.around_audio_processing.mask_compensation);
++
++    // If we just disabled, reset.
++    if (submodules_.around_mask_compensation &&
++        config_.around_audio_processing.mask_compensation) {
++      submodules_.around_mask_compensation->Reset();
++    }
++  }
++}
++
+ }  // namespace webrtc
+diff --git a/modules/audio_processing/audio_processing_impl.h b/modules/audio_processing/audio_processing_impl.h
+index c88cfcde92182c3135d98beba41cd176959000a8..671cc71f4719610f60e3bad54e05103b7fa297da 100644
+--- a/modules/audio_processing/audio_processing_impl.h
++++ b/modules/audio_processing/audio_processing_impl.h
+@@ -22,6 +22,9 @@
+ #include "modules/audio_processing/aec3/echo_canceller3.h"
+ #include "modules/audio_processing/agc/agc_manager_direct.h"
+ #include "modules/audio_processing/agc/gain_control.h"
++#include "modules/audio_processing/around_denoise/around_denoise.h"
++#include "modules/audio_processing/around_biquad/around_biquad.h"
++#include "modules/audio_processing/around_agc/around_agc.h"
+ #include "modules/audio_processing/audio_buffer.h"
+ #include "modules/audio_processing/capture_levels_adjuster/capture_levels_adjuster.h"
+ #include "modules/audio_processing/echo_control_mobile_impl.h"
+@@ -40,6 +43,7 @@
+ #include "modules/audio_processing/rms_level.h"
+ #include "modules/audio_processing/transient/transient_suppressor.h"
+ #include "modules/audio_processing/voice_detection.h"
++#include "pc/data_channel_controller.h"
+ #include "rtc_base/gtest_prod_util.h"
+ #include "rtc_base/ignore_wundef.h"
+ #include "rtc_base/swap_queue.h"
+@@ -51,7 +55,8 @@ namespace webrtc {
+ class ApmDataDumper;
+ class AudioConverter;
+ 
+-class AudioProcessingImpl : public AudioProcessing {
++class AudioProcessingImpl : public AudioProcessing,
++                            public AroundCommandObserver {
+  public:
+   // Methods forcing APM to run in a single-threaded manner.
+   // Acquires both the render and capture locks.
+@@ -65,6 +70,7 @@ class AudioProcessingImpl : public AudioProcessing {
+                       std::unique_ptr<CustomAudioAnalyzer> capture_analyzer);
+   ~AudioProcessingImpl() override;
+   int Initialize() override;
++  void Stop() override;
+   int Initialize(int capture_input_sample_rate_hz,
+                  int capture_output_sample_rate_hz,
+                  int render_sample_rate_hz,
+@@ -139,6 +145,8 @@ class AudioProcessingImpl : public AudioProcessing {
+ 
+   AudioProcessing::Config GetConfig() const override;
+ 
++  void OnCommandReceived(std::string command, std::map<std::string, std::string> params) override;
++
+  protected:
+   // Overridden in a mock.
+   virtual void InitializeLocked()
+@@ -275,6 +283,9 @@ class AudioProcessingImpl : public AudioProcessing {
+       RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_capture_);
+   void InitializePostProcessor() RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_capture_);
+   void InitializeAnalyzer() RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_capture_);
++  void InitializeAroundDenoiser() RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_capture_);
++  void InitializeAroundMaskCompensation() RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_capture_);
++  void InitializeAroundAgc() RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_capture_);
+ 
+   // Initializations of render-only submodules, requiring the render lock
+   // already acquired.
+@@ -398,6 +409,9 @@ class AudioProcessingImpl : public AudioProcessing {
+     std::unique_ptr<LevelEstimator> output_level_estimator;
+     std::unique_ptr<VoiceDetection> voice_detector;
+     std::unique_ptr<CaptureLevelsAdjuster> capture_levels_adjuster;
++    std::unique_ptr<AroundDenoiser> around_denoiser;
++    std::unique_ptr<AroundBiquad> around_mask_compensation;
++    std::unique_ptr<AroundAgc> around_agc;
+   } submodules_;
+ 
+   // State that is written to while holding both the render and capture locks
+@@ -533,6 +547,8 @@ class AudioProcessingImpl : public AudioProcessing {
+       agc_render_signal_queue_;
+   std::unique_ptr<SwapQueue<std::vector<float>, RenderQueueItemVerifier<float>>>
+       red_render_signal_queue_;
++
++  AroundDenoiser::VADState previous_vad_state_ = AroundDenoiser::Stopped;
+ };
+ 
+ }  // namespace webrtc
+diff --git a/modules/audio_processing/gain_control_impl.cc b/modules/audio_processing/gain_control_impl.cc
+index b5454c05ed4545b486bd0579991b6cbcd4c95505..df4b5a6caa14408ea92a998311703775eb269b37 100644
+--- a/modules/audio_processing/gain_control_impl.cc
++++ b/modules/audio_processing/gain_control_impl.cc
+@@ -149,7 +149,7 @@ void GainControlImpl::PackRenderAudioBuffer(
+ int GainControlImpl::AnalyzeCaptureAudio(const AudioBuffer& audio) {
+   RTC_DCHECK(num_proc_channels_);
+   RTC_DCHECK_GE(AudioBuffer::kMaxSplitFrameLength, audio.num_frames_per_band());
+-  RTC_DCHECK_EQ(audio.num_channels(), *num_proc_channels_);
++  RTC_DCHECK_GE(audio.num_channels(), *num_proc_channels_);
+   RTC_DCHECK_LE(*num_proc_channels_, mono_agcs_.size());
+ 
+   int16_t split_band_data[AudioBuffer::kMaxNumBands]
+@@ -202,7 +202,7 @@ int GainControlImpl::ProcessCaptureAudio(AudioBuffer* audio,
+   RTC_DCHECK(num_proc_channels_);
+   RTC_DCHECK_GE(AudioBuffer::kMaxSplitFrameLength,
+                 audio->num_frames_per_band());
+-  RTC_DCHECK_EQ(audio->num_channels(), *num_proc_channels_);
++  RTC_DCHECK_GE(audio->num_channels(), *num_proc_channels_);
+ 
+   stream_is_saturated_ = false;
+   bool error_reported = false;
+diff --git a/modules/audio_processing/high_pass_filter.cc b/modules/audio_processing/high_pass_filter.cc
+index bff7209e96bedfb9b2e735abede7811caea7d0f7..debbd01a8405affad7dca2b5dac9bceabfccd2ae 100644
+--- a/modules/audio_processing/high_pass_filter.cc
++++ b/modules/audio_processing/high_pass_filter.cc
+@@ -66,9 +66,9 @@ HighPassFilter::~HighPassFilter() = default;
+ 
+ void HighPassFilter::Process(AudioBuffer* audio, bool use_split_band_data) {
+   RTC_DCHECK(audio);
+-  RTC_DCHECK_EQ(filters_.size(), audio->num_channels());
++  RTC_DCHECK_LE(filters_.size(), audio->num_channels());
+   if (use_split_band_data) {
+-    for (size_t k = 0; k < audio->num_channels(); ++k) {
++    for (size_t k = 0; k < filters_.size(); ++k) {
+       rtc::ArrayView<float> channel_data = rtc::ArrayView<float>(
+           audio->split_bands(k)[0], audio->num_frames_per_band());
+       filters_[k]->Process(channel_data);
+diff --git a/modules/audio_processing/include/audio_processing.cc b/modules/audio_processing/include/audio_processing.cc
+index 44a90d6e761fd0264fd43b708138528a3391b8e5..cc4d2bd8dce2ef38a4298972aaa0f96f07a08758 100644
+--- a/modules/audio_processing/include/audio_processing.cc
++++ b/modules/audio_processing/include/audio_processing.cc
+@@ -221,6 +221,9 @@ std::string AudioProcessing::Config::ToString() const {
+       << "}}, residual_echo_detector: { enabled: "
+       << residual_echo_detector.enabled
+       << " }, level_estimation: { enabled: " << level_estimation.enabled
++      << " }, around_audio_processing: { enabled: " << around_audio_processing.enabled
++      << ", noise_suppression_db: " << around_audio_processing.noise_suppression_db
++      << ", mask_compensation: " << around_audio_processing.mask_compensation
+       << " }}";
+   return builder.str();
+ }
+diff --git a/modules/audio_processing/include/audio_processing.h b/modules/audio_processing/include/audio_processing.h
+index 64b1b5d107080174df930b424fd6b7df6712619e..9c8321ec98678e93a20ac9605b83dc3e33def737 100644
+--- a/modules/audio_processing/include/audio_processing.h
++++ b/modules/audio_processing/include/audio_processing.h
+@@ -59,9 +59,9 @@ class CustomProcessing;
+ //
+ // Must be provided through AudioProcessingBuilder().Create(config).
+ #if defined(WEBRTC_CHROMIUM_BUILD)
+-static constexpr int kAgcStartupMinVolume = 85;
++static constexpr int kAgcStartupMinVolume = 100;
+ #else
+-static constexpr int kAgcStartupMinVolume = 0;
++static constexpr int kAgcStartupMinVolume = 100;
+ #endif  // defined(WEBRTC_CHROMIUM_BUILD)
+ static constexpr int kClippedLevelMin = 70;
+ 
+@@ -238,7 +238,7 @@ class RTC_EXPORT AudioProcessing : public rtc::RefCountInterface {
+     } capture_level_adjustment;
+ 
+     struct HighPassFilter {
+-      bool enabled = false;
++      bool enabled = true;
+       bool apply_in_full_band = true;
+     } high_pass_filter;
+ 
+@@ -257,6 +257,7 @@ class RTC_EXPORT AudioProcessing : public rtc::RefCountInterface {
+       enum Level { kLow, kModerate, kHigh, kVeryHigh };
+       Level level = kModerate;
+       bool analyze_linear_aec_output_when_available = false;
++      bool encode_voice_activity = false;
+     } noise_suppression;
+ 
+     // Enables transient suppression.
+@@ -422,7 +423,7 @@ class RTC_EXPORT AudioProcessing : public rtc::RefCountInterface {
+     } gain_controller2;
+ 
+     struct ResidualEchoDetector {
+-      bool enabled = true;
++      bool enabled = false;
+     } residual_echo_detector;
+ 
+     // Enables reporting of |output_rms_dbfs| in webrtc::AudioProcessingStats.
+@@ -430,6 +431,13 @@ class RTC_EXPORT AudioProcessing : public rtc::RefCountInterface {
+       bool enabled = false;
+     } level_estimation;
+ 
++    struct AroundAudioProcessing {
++      bool enabled = true;
++      float noise_suppression_db = 15.0f;
++      // Enables a high shelf boosting filter to correct for mask attenuation.
++      bool mask_compensation = false;
++    } around_audio_processing;
++
+     std::string ToString() const;
+   };
+ 
+@@ -567,6 +575,8 @@ class RTC_EXPORT AudioProcessing : public rtc::RefCountInterface {
+   // TODO(webrtc:5298): Change to return void.
+   virtual int Initialize() = 0;
+ 
++  virtual void Stop() = 0;
++
+   // The int16 interfaces require:
+   //   - only |NativeRate|s be used
+   //   - that the input, output and reverse rates must match

@@ -1,0 +1,1584 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: gellert <gellert.hegyi@around.co>
+Date: Thu, 12 Aug 2021 15:39:31 +0200
+Subject: adds shader based transforms to video element
+
+This patch adds support for the data-circle-crop, data-filter-id and data-bounding-box attribute on a video tag that allows to crop the video to a circle, apply different filters and animate a bounding box using shaders for the video element.
+
+diff --git a/cc/layers/video_layer_impl.cc b/cc/layers/video_layer_impl.cc
+index 0c6087a43896cf1f1529251bb4535273eea13c28..5786e6f6f062ce8a434608244d9fad083f637e57 100644
+--- a/cc/layers/video_layer_impl.cc
++++ b/cc/layers/video_layer_impl.cc
+@@ -177,7 +177,7 @@ void VideoLayerImpl::AppendQuads(viz::CompositorRenderPass* render_pass,
+   updater_->AppendQuads(render_pass, frame_, transform, quad_rect,
+                         visible_quad_rect, draw_properties().mask_filter_info,
+                         clip_rect_opt, contents_opaque(), draw_opacity(),
+-                        GetSortingContextId());
++                        GetSortingContextId(), 0, gfx::RectF(0,0,0,0));
+ }
+ 
+ void VideoLayerImpl::DidDraw(viz::ClientResourceProvider* resource_provider) {
+diff --git a/components/viz/common/quads/shared_quad_state.h b/components/viz/common/quads/shared_quad_state.h
+index cd63a69930e6a7b53599e594e5efccb45ee03820..c04f8a6c2719763f40ce98bdc5df423045a27bb1 100644
+--- a/components/viz/common/quads/shared_quad_state.h
++++ b/components/viz/common/quads/shared_quad_state.h
+@@ -74,6 +74,9 @@ class VIZ_COMMON_EXPORT SharedQuadState {
+   absl::optional<size_t> overlay_damage_index;
+   // The amount to skew quads in this layer. For experimental de-jelly effect.
+   float de_jelly_delta_y = 0.0f;
++
++  int filter_id = 0;
++  gfx::RectF bounding_box;
+ };
+ 
+ }  // namespace viz
+diff --git a/components/viz/service/display/ca_layer_overlay.cc b/components/viz/service/display/ca_layer_overlay.cc
+index 060525de1cfa472349a3fe857bbcb8a2df61b681..58364115b6c603d471f573ec5874235f3f83a534 100644
+--- a/components/viz/service/display/ca_layer_overlay.cc
++++ b/components/viz/service/display/ca_layer_overlay.cc
+@@ -258,6 +258,14 @@ class CALayerOverlayProcessorInternal {
+     // but requires APIs not supported on all macOS versions.
+     if (quad->shared_quad_state->mask_filter_info.HasRoundedCorners()) {
+       DCHECK(quad->shared_quad_state->clip_rect);
++
++      // @AROUND: If filter ID is set or bounding box is used always used,
++      // always force a CA layer fail, because those features are implenented
++      // in GL shader level, which in this case are not used.
++      if (quad->shared_quad_state->filter_id > 0 || !quad->shared_quad_state->bounding_box.IsEmpty()) {
++        return CA_LAYER_FAILED_QUAD_ROUNDED_CORNER_NOT_UNIFORM;
++      }
++
+       if (quad->shared_quad_state->mask_filter_info.rounded_corner_bounds()
+               .GetType() > gfx::RRectF::Type::kSingle) {
+         return CA_LAYER_FAILED_QUAD_ROUNDED_CORNER_NOT_UNIFORM;
+diff --git a/components/viz/service/display/direct_renderer.cc b/components/viz/service/display/direct_renderer.cc
+index b6b55e3ef01500fdaed7325048da80739ef55627..56e2d3455cfe9565f6887a7c76eac4609616dd1f 100644
+--- a/components/viz/service/display/direct_renderer.cc
++++ b/components/viz/service/display/direct_renderer.cc
+@@ -213,6 +213,9 @@ void DirectRenderer::DrawFrame(
+     const gfx::DisplayColorSpaces& display_color_spaces,
+     SurfaceDamageRectList surface_damage_rect_list) {
+   DCHECK(visible_);
++
++  device_scale_factor_ = device_scale_factor;
++
+   TRACE_EVENT0("viz,benchmark", "DirectRenderer::DrawFrame");
+   UMA_HISTOGRAM_COUNTS_1M(
+       "Renderer4.renderPassCount",
+diff --git a/components/viz/service/display/direct_renderer.h b/components/viz/service/display/direct_renderer.h
+index 22a9122f444f0dcde98e13963060bafe115bf237..d03b0ece3f588a9ac0cb0edb43c88e1030d59807 100644
+--- a/components/viz/service/display/direct_renderer.h
++++ b/components/viz/service/display/direct_renderer.h
+@@ -158,6 +158,8 @@ class VIZ_SERVICE_EXPORT DirectRenderer {
+   // Return the bounding rect of previously drawn delegated ink trail.
+   gfx::Rect GetDelegatedInkTrailDamageRect();
+ 
++  float device_scale_factor_;
++
+  protected:
+   friend class BspWalkActionDrawPolygon;
+   friend class SkiaDelegatedInkRendererTest;
+diff --git a/components/viz/service/display/gl_renderer.cc b/components/viz/service/display/gl_renderer.cc
+index 1911003301766cbf05ce0f0b828b8faf971a1dbc..426e76308d2f8c395d71b34f23e21a66cd4b1514 100644
+--- a/components/viz/service/display/gl_renderer.cc
++++ b/components/viz/service/display/gl_renderer.cc
+@@ -25,6 +25,7 @@
+ #include "base/strings/string_split.h"
+ #include "base/strings/string_util.h"
+ #include "base/threading/thread_task_runner_handle.h"
++#include "base/time/time.h"
+ #include "base/trace_event/trace_event.h"
+ #include "build/build_config.h"
+ #include "cc/base/math_util.h"
+@@ -1674,7 +1675,9 @@ void GLRenderer::ChooseRPDQProgram(DrawRenderPassDrawQuadParams* params,
+           params->use_aa ? USE_AA : NO_AA, mask_mode, mask_for_background,
+           params->use_color_matrix, tint_gl_composited_content_,
+           params->apply_shader_based_rounded_corner &&
+-              ShouldApplyRoundedCorner(params->quad)),
++              ShouldApplyRoundedCorner(params->quad),
++          params->quad->shared_quad_state->filter_id,
++          !params->quad->shared_quad_state->bounding_box.IsEmpty()),
+           PATCH_CS(params->contents_and_bypass_color_space),
+           PATCH_CS(target_color_space));
+ }
+@@ -2148,7 +2151,9 @@ void GLRenderer::DrawSolidColorQuad(const SolidColorDrawQuad* quad,
+ 
+   SetUseProgram(ProgramKey::SolidColor(use_aa ? USE_AA : NO_AA,
+                                        tint_gl_composited_content_,
+-                                       ShouldApplyRoundedCorner(quad)),
++                                       ShouldApplyRoundedCorner(quad),
++                                       quad->shared_quad_state->filter_id,
++                                       !quad->shared_quad_state->bounding_box.IsEmpty()),
+                 PATCH_CS(CurrentRenderPassColorSpace()),
+                 PATCH_CS(CurrentRenderPassColorSpace()));
+ 
+@@ -2379,7 +2384,9 @@ void GLRenderer::DrawContentQuadAA(const ContentDrawQuadBase* quad,
+                        quad->is_premultiplied ? PREMULTIPLIED_ALPHA
+                                               : NON_PREMULTIPLIED_ALPHA,
+                        false, false, tint_gl_composited_content_,
+-                       ShouldApplyRoundedCorner(quad)),
++                       ShouldApplyRoundedCorner(quad),
++                       quad->shared_quad_state->filter_id,
++                       !quad->shared_quad_state->bounding_box.IsEmpty()),
+       PATCH_CS(quad_resource_lock.color_space()),
+       PATCH_CS(CurrentRenderPassColorSpace()));
+ 
+@@ -2479,7 +2486,9 @@ void GLRenderer::DrawContentQuadNoAA(const ContentDrawQuadBase* quad,
+                                               : NON_PREMULTIPLIED_ALPHA,
+                        !quad->ShouldDrawWithBlending(), has_tex_clamp_rect,
+                        tint_gl_composited_content_,
+-                       ShouldApplyRoundedCorner(quad)),
++                       ShouldApplyRoundedCorner(quad),
++                       quad->shared_quad_state->filter_id,
++                       !quad->shared_quad_state->bounding_box.IsEmpty()),
+       PATCH_CS(quad_resource_lock.color_space()),
+       PATCH_CS(CurrentRenderPassColorSpace()));
+ 
+@@ -2635,7 +2644,9 @@ void GLRenderer::DrawYUVVideoQuad(const YUVVideoDrawQuad* quad,
+   SetUseProgram(
+       ProgramKey::YUVVideo(tex_coord_precision, sampler, alpha_texture_mode,
+                            uv_texture_mode, tint_gl_composited_content_,
+-                           ShouldApplyRoundedCorner(quad)),
++                           ShouldApplyRoundedCorner(quad),
++                           quad->shared_quad_state->filter_id,
++                           !quad->shared_quad_state->bounding_box.IsEmpty()),
+       src_color_space, dst_color_space, /*adjust_src_white_level=*/true);
+ 
+   if (current_program_->tint_color_matrix_location() != -1) {
+@@ -2661,6 +2672,33 @@ void GLRenderer::DrawYUVVideoQuad(const YUVVideoDrawQuad* quad,
+                               1.0f / quad->uv_tex_size.height());
+   }
+ 
++  if (current_program_->bounding_box_location() != -1) {
++    gl_->Uniform4f(
++      current_program_->bounding_box_location(),
++      quad->shared_quad_state->bounding_box.x(),
++      quad->shared_quad_state->bounding_box.y(),
++      quad->shared_quad_state->bounding_box.width(),
++      quad->shared_quad_state->bounding_box.height()
++    );
++  }
++
++  if (current_program_->vertex_bounding_box_location() != -1) {
++    gl_->Uniform4f(
++      current_program_->vertex_bounding_box_location(),
++      quad->shared_quad_state->bounding_box.x(),
++      quad->shared_quad_state->bounding_box.y(),
++      quad->shared_quad_state->bounding_box.width(),
++      quad->shared_quad_state->bounding_box.height()
++    );
++  }
++
++  if (current_program_->scale_factor_location() != -1) {
++    gl_->Uniform1f(
++      current_program_->scale_factor_location(),
++      device_scale_factor_
++    );
++  }
++
+   float ya_vertex_tex_translate_x =
+       quad->ya_tex_coord_rect.x() * ya_tex_scale.width();
+   float ya_vertex_tex_translate_y =
+@@ -2772,10 +2810,55 @@ void GLRenderer::DrawStreamVideoQuad(const StreamVideoDrawQuad* quad,
+                                                    quad->resource_id());
+ 
+   SetUseProgram(ProgramKey::VideoStream(tex_coord_precision,
+-                                        ShouldApplyRoundedCorner(quad)),
++                                        ShouldApplyRoundedCorner(quad),
++                                        quad->shared_quad_state->filter_id,
++                                        !quad->shared_quad_state->bounding_box.IsEmpty()),
+                 PATCH_CS(lock.color_space()),
+                 PATCH_CS(CurrentRenderPassColorSpace()));
+ 
++  if (current_program_->bounding_box_location() != -1) {
++    gl_->Uniform4f(
++      current_program_->bounding_box_location(),
++      draw_cache_.bounding_box.x(),
++      draw_cache_.bounding_box.y(),
++      draw_cache_.bounding_box.width(),
++      draw_cache_.bounding_box.height()
++    );
++  }
++
++  if (current_program_->vertex_bounding_box_location() != -1) {
++    gl_->Uniform4f(
++      current_program_->vertex_bounding_box_location(),
++      draw_cache_.bounding_box.x(),
++      draw_cache_.bounding_box.y(),
++      draw_cache_.bounding_box.width(),
++      draw_cache_.bounding_box.height()
++    );
++  }
++
++  if (current_program_->texture_size_location() != -1) {
++    gl_->Uniform2f(
++      current_program_->texture_size_location(),
++      draw_cache_.texture_size.width(),
++      draw_cache_.texture_size.height()
++    );
++  }
++
++  if (current_program_->vertex_texture_size_location() != -1) {
++    gl_->Uniform2f(
++      current_program_->vertex_texture_size_location(),
++      draw_cache_.texture_size.width(),
++      draw_cache_.texture_size.height()
++    );
++  }
++
++  if (current_program_->scale_factor_location() != -1) {
++    gl_->Uniform1f(
++      current_program_->scale_factor_location(),
++      device_scale_factor_
++    );
++  }
++
+   DCHECK_EQ(GL_TEXTURE0, GetActiveTextureUnit(gl_));
+   gl_->BindTexture(GL_TEXTURE_EXTERNAL_OES, lock.texture_id());
+ 
+@@ -2904,6 +2987,52 @@ void GLRenderer::FlushTextureQuadCache(BoundGeometry flush_binding) {
+   DCHECK_LE(draw_cache_.matrix_data.size(),
+             static_cast<size_t>(std::numeric_limits<int>::max()) / 6u);
+ 
++
++  // printf(">>> TEXTURE SIZE W %d H %d\n", draw_cache_.texture_size.width(),
++  //     draw_cache_.texture_size.height());
++  if (current_program_->bounding_box_location() != -1) {
++    gl_->Uniform4f(
++      current_program_->bounding_box_location(),
++      draw_cache_.bounding_box.x(),
++      draw_cache_.bounding_box.y(),
++      draw_cache_.bounding_box.width(),
++      draw_cache_.bounding_box.height()
++    );
++  }
++
++  if (current_program_->vertex_bounding_box_location() != -1) {
++    gl_->Uniform4f(
++      current_program_->vertex_bounding_box_location(),
++      draw_cache_.bounding_box.x(),
++      draw_cache_.bounding_box.y(),
++      draw_cache_.bounding_box.width(),
++      draw_cache_.bounding_box.height()
++    );
++  }
++
++  if (current_program_->texture_size_location() != -1) {
++    gl_->Uniform2f(
++      current_program_->texture_size_location(),
++      draw_cache_.texture_size.width(),
++      draw_cache_.texture_size.height()
++    );
++  }
++
++  if (current_program_->vertex_texture_size_location() != -1) {
++    gl_->Uniform2f(
++      current_program_->vertex_texture_size_location(),
++      draw_cache_.texture_size.width(),
++      draw_cache_.texture_size.height()
++    );
++  }
++
++  if (current_program_->scale_factor_location() != -1) {
++    gl_->Uniform1f(
++      current_program_->scale_factor_location(),
++      device_scale_factor_
++    );
++  }
++
+   // Draw the quads!
+   gl_->DrawElements(GL_TRIANGLES,
+                     6 * static_cast<int>(draw_cache_.matrix_data.size()),
+@@ -2956,7 +3085,10 @@ void GLRenderer::EnqueueTextureQuad(const TextureDrawQuad* quad,
+       tex_coord_precision, sampler,
+       quad->premultiplied_alpha ? PREMULTIPLIED_ALPHA : NON_PREMULTIPLIED_ALPHA,
+       quad->background_color != SK_ColorTRANSPARENT, need_tex_clamp_rect,
+-      tint_gl_composited_content_, ShouldApplyRoundedCorner(quad));
++      tint_gl_composited_content_, ShouldApplyRoundedCorner(quad),
++      quad->shared_quad_state->filter_id,
++      !quad->shared_quad_state->bounding_box.IsEmpty(),
++      !texture_size.IsEmpty());
+   ResourceId resource_id = quad->resource_id();
+ 
+   size_t max_quads = StaticGeometryBinding::NUM_QUADS;
+@@ -2967,6 +3099,8 @@ void GLRenderer::EnqueueTextureQuad(const TextureDrawQuad* quad,
+       draw_cache_.background_color != quad->background_color ||
+       draw_cache_.mask_filter_info !=
+           quad->shared_quad_state->mask_filter_info ||
++      draw_cache_.bounding_box != quad->shared_quad_state->bounding_box ||
++      draw_cache_.texture_size != texture_size ||
+       draw_cache_.matrix_data.size() >= max_quads ||
+       draw_cache_.is_video_frame != quad->is_video_frame) {
+     FlushTextureQuadCache(SHARED_BINDING);
+@@ -2977,6 +3111,8 @@ void GLRenderer::EnqueueTextureQuad(const TextureDrawQuad* quad,
+     draw_cache_.nearest_neighbor = quad->nearest_neighbor;
+     draw_cache_.background_color = quad->background_color;
+     draw_cache_.mask_filter_info = quad->shared_quad_state->mask_filter_info;
++    draw_cache_.bounding_box = quad->shared_quad_state->bounding_box;
++    draw_cache_.texture_size = texture_size;
+     draw_cache_.is_video_frame = quad->is_video_frame;
+   }
+ 
+@@ -3349,10 +3485,10 @@ void GLRenderer::SetShaderRoundedCorner(
+                  rect.y(), rect.width(), rect.height());
+   gl_->Uniform4f(
+       current_program_->rounded_corner_radius_location(),
+-      bounds_in_screen.GetCornerRadii(gfx::RRectF::Corner::kUpperLeft).x(),
+-      bounds_in_screen.GetCornerRadii(gfx::RRectF::Corner::kUpperRight).x(),
+-      bounds_in_screen.GetCornerRadii(gfx::RRectF::Corner::kLowerRight).x(),
+-      bounds_in_screen.GetCornerRadii(gfx::RRectF::Corner::kLowerLeft).x());
++      bounds_in_screen.GetCornerRadii(gfx::RRectF::Corner::kUpperLeft).x() + 1.0f,
++      bounds_in_screen.GetCornerRadii(gfx::RRectF::Corner::kUpperRight).x() + 1.0f,
++      bounds_in_screen.GetCornerRadii(gfx::RRectF::Corner::kLowerRight).x() + 1.0f,
++      bounds_in_screen.GetCornerRadii(gfx::RRectF::Corner::kLowerLeft).x() + 1.0f);
+ }
+ 
+ void GLRenderer::DrawQuadGeometryClippedByQuadF(
+diff --git a/components/viz/service/display/gl_renderer_draw_cache.h b/components/viz/service/display/gl_renderer_draw_cache.h
+index 6186975bb8235bfcc044f6b49108668b7e13de6c..89dde6c5123b53c7f73bfa83f22f1c5170f64e80 100644
+--- a/components/viz/service/display/gl_renderer_draw_cache.h
++++ b/components/viz/service/display/gl_renderer_draw_cache.h
+@@ -41,6 +41,8 @@ struct TexturedQuadDrawCache {
+   bool nearest_neighbor = false;
+   SkColor background_color = 0;
+   gfx::MaskFilterInfo mask_filter_info;
++  gfx::RectF bounding_box;
++  gfx::Size texture_size;
+ 
+   // A cache for the coalesced quad data.
+   std::vector<Float4> uv_xform_data;
+diff --git a/components/viz/service/display/program_binding.cc b/components/viz/service/display/program_binding.cc
+index 975d1d018453be249298de6f46771e01b60d82fa..a3618363c875efb96a6c313000237b1518c9609b 100644
+--- a/components/viz/service/display/program_binding.cc
++++ b/components/viz/service/display/program_binding.cc
+@@ -36,7 +36,10 @@ bool ProgramKey::operator==(const ProgramKey& other) const {
+          color_conversion_mode_ == other.color_conversion_mode_ &&
+          color_transform_ == other.color_transform_ &&
+          has_output_color_matrix_ == other.has_output_color_matrix_ &&
+-         has_rounded_corner_ == other.has_rounded_corner_;
++         has_rounded_corner_ == other.has_rounded_corner_ &&
++         filter_id_ == other.filter_id_ &&
++         has_bounding_box_ == other.has_bounding_box_ &&
++         has_texture_size_ == other.has_texture_size_;
+ }
+ 
+ bool ProgramKey::operator!=(const ProgramKey& other) const {
+@@ -53,12 +56,16 @@ ProgramKey ProgramKey::DebugBorder() {
+ // static
+ ProgramKey ProgramKey::SolidColor(AAMode aa_mode,
+                                   bool tint_color,
+-                                  bool rounded_corner) {
++                                  bool rounded_corner,
++                                  int filter_id,
++                                  bool has_bounding_box) {
+   ProgramKey result;
+   result.type_ = PROGRAM_TYPE_SOLID_COLOR;
+   result.aa_mode_ = aa_mode;
+   result.has_tint_color_matrix_ = tint_color;
+   result.has_rounded_corner_ = rounded_corner;
++  result.filter_id_ = filter_id;
++  result.has_bounding_box_ = has_bounding_box;
+   return result;
+ }
+ 
+@@ -70,7 +77,9 @@ ProgramKey ProgramKey::Tile(TexCoordPrecision precision,
+                             bool is_opaque,
+                             bool has_tex_clamp_rect,
+                             bool tint_color,
+-                            bool rounded_corner) {
++                            bool rounded_corner,
++                            int filter_id,
++                            bool has_bounding_box) {
+   ProgramKey result;
+   result.type_ = PROGRAM_TYPE_TILE;
+   result.precision_ = precision;
+@@ -81,6 +90,8 @@ ProgramKey ProgramKey::Tile(TexCoordPrecision precision,
+   result.has_tint_color_matrix_ = tint_color;
+   result.premultiplied_alpha_ = premultiplied_alpha;
+   result.has_rounded_corner_ = rounded_corner;
++  result.filter_id_ = filter_id;
++  result.has_bounding_box_ = has_bounding_box;
+   return result;
+ }
+ 
+@@ -91,7 +102,10 @@ ProgramKey ProgramKey::Texture(TexCoordPrecision precision,
+                                bool has_background_color,
+                                bool has_tex_clamp_rect,
+                                bool tint_color,
+-                               bool rounded_corner) {
++                               bool rounded_corner,
++                               int filter_id,
++                               bool has_bounding_box,
++                               bool has_texture_size) {
+   ProgramKey result;
+   result.type_ = PROGRAM_TYPE_TEXTURE;
+   result.precision_ = precision;
+@@ -101,6 +115,9 @@ ProgramKey ProgramKey::Texture(TexCoordPrecision precision,
+   result.has_tex_clamp_rect_ = has_tex_clamp_rect;
+   result.has_tint_color_matrix_ = tint_color;
+   result.has_rounded_corner_ = rounded_corner;
++  result.filter_id_ = filter_id;
++  result.has_bounding_box_ = has_bounding_box;
++  result.has_texture_size_ = has_texture_size;
+   return result;
+ }
+ 
+@@ -113,7 +130,9 @@ ProgramKey ProgramKey::RenderPass(TexCoordPrecision precision,
+                                   bool mask_for_background,
+                                   bool has_color_matrix,
+                                   bool tint_color,
+-                                  bool rounded_corner) {
++                                  bool rounded_corner,
++                                  int filter_id,
++                                  bool has_bounding_box) {
+   ProgramKey result;
+   result.type_ = PROGRAM_TYPE_RENDER_PASS;
+   result.precision_ = precision;
+@@ -125,17 +144,23 @@ ProgramKey ProgramKey::RenderPass(TexCoordPrecision precision,
+   result.has_color_matrix_ = has_color_matrix;
+   result.has_tint_color_matrix_ = tint_color;
+   result.has_rounded_corner_ = rounded_corner;
++  result.filter_id_ = filter_id;
++  result.has_bounding_box_ = has_bounding_box;
+   return result;
+ }
+ 
+ // static
+ ProgramKey ProgramKey::VideoStream(TexCoordPrecision precision,
+-                                   bool rounded_corner) {
++                                   bool rounded_corner,
++                                   int filter_id,
++                                   bool has_bounding_box) {
+   ProgramKey result;
+   result.type_ = PROGRAM_TYPE_VIDEO_STREAM;
+   result.precision_ = precision;
+   result.sampler_ = SAMPLER_TYPE_EXTERNAL_OES;
+   result.has_rounded_corner_ = rounded_corner;
++  result.filter_id_ = filter_id;
++  result.has_bounding_box_ = has_bounding_box;
+   return result;
+ }
+ 
+@@ -145,7 +170,9 @@ ProgramKey ProgramKey::YUVVideo(TexCoordPrecision precision,
+                                 YUVAlphaTextureMode yuv_alpha_texture_mode,
+                                 UVTextureMode uv_texture_mode,
+                                 bool tint_color,
+-                                bool rounded_corner) {
++                                bool rounded_corner,
++                                int filter_id,
++                                bool has_bounding_box) {
+   ProgramKey result;
+   result.type_ = PROGRAM_TYPE_YUV_VIDEO;
+   result.precision_ = precision;
+@@ -158,6 +185,8 @@ ProgramKey ProgramKey::YUVVideo(TexCoordPrecision precision,
+          uv_texture_mode == UV_TEXTURE_MODE_U_V);
+   result.has_tint_color_matrix_ = tint_color;
+   result.has_rounded_corner_ = rounded_corner;
++  result.filter_id_ = filter_id;
++  result.has_bounding_box_ = has_bounding_box;
+   return result;
+ }
+ 
+diff --git a/components/viz/service/display/program_binding.h b/components/viz/service/display/program_binding.h
+index 04b05dd3e84adb3c8c41b8d12a4c66636ee9ac17..ed1d2163fef918eb71470c784e3cbc197363a462 100644
+--- a/components/viz/service/display/program_binding.h
++++ b/components/viz/service/display/program_binding.h
+@@ -79,7 +79,9 @@ class VIZ_SERVICE_EXPORT ProgramKey {
+   static ProgramKey DebugBorder();
+   static ProgramKey SolidColor(AAMode aa_mode,
+                                bool tint_color,
+-                               bool rounded_corner);
++                               bool rounded_corner,
++                               int filter_id,
++                               bool has_bounding_box);
+   static ProgramKey Tile(TexCoordPrecision precision,
+                          SamplerType sampler,
+                          AAMode aa_mode,
+@@ -87,14 +89,19 @@ class VIZ_SERVICE_EXPORT ProgramKey {
+                          bool is_opaque,
+                          bool has_tex_clamp_rect,
+                          bool tint_color,
+-                         bool rounded_corner);
++                         bool rounded_corner,
++                         int filter_id,
++                         bool has_bounding_box);
+   static ProgramKey Texture(TexCoordPrecision precision,
+                             SamplerType sampler,
+                             PremultipliedAlphaMode premultiplied_alpha,
+                             bool has_background_color,
+                             bool has_tex_clamp_rect,
+                             bool tint_color,
+-                            bool rounded_corner);
++                            bool rounded_corner,
++                            int filter_id,
++                            bool has_bounding_box,
++                            bool has_texture_size);
+ 
+   // TODO(ccameron): Merge |mask_for_background| into MaskMode.
+   static ProgramKey RenderPass(TexCoordPrecision precision,
+@@ -105,15 +112,21 @@ class VIZ_SERVICE_EXPORT ProgramKey {
+                                bool mask_for_background,
+                                bool has_color_matrix,
+                                bool tint_color,
+-                               bool rounded_corner);
++                               bool rounded_corner,
++                               int filter_id,
++                               bool has_bounding_box);
+   static ProgramKey VideoStream(TexCoordPrecision precision,
+-                                bool rounded_corner);
++                                bool rounded_corner,
++                                int filter_id,
++                                bool has_bounding_box);
+   static ProgramKey YUVVideo(TexCoordPrecision precision,
+                              SamplerType sampler,
+                              YUVAlphaTextureMode yuv_alpha_texture_mode,
+                              UVTextureMode uv_texture_mode,
+                              bool tint_color,
+-                             bool rounded_corner);
++                             bool rounded_corner,
++                             int filter_id,
++                             bool has_bounding_box);
+ 
+   bool operator==(const ProgramKey& other) const;
+   bool operator!=(const ProgramKey& other) const;
+@@ -157,6 +170,9 @@ class VIZ_SERVICE_EXPORT ProgramKey {
+   bool has_output_color_matrix_ = false;
+   bool has_tint_color_matrix_ = false;
+   bool has_rounded_corner_ = false;
++  int filter_id_ = 0;
++  bool has_bounding_box_ = false;
++  bool has_texture_size_ = false;
+ };
+ 
+ struct ProgramKeyHash {
+@@ -178,7 +194,9 @@ struct ProgramKeyHash {
+            (static_cast<size_t>(key.has_tex_clamp_rect_) << 28) ^
+            (static_cast<size_t>(key.has_output_color_matrix_) << 29) ^
+            (static_cast<size_t>(key.has_tint_color_matrix_) << 30) ^
+-           (static_cast<size_t>(key.has_rounded_corner_) << 31);
++           (static_cast<size_t>(key.has_rounded_corner_) << 31) ^
++           (static_cast<size_t>(key.has_bounding_box_) << 32) ^
++           (static_cast<size_t>(key.has_texture_size_) << 33);
+   }
+ };
+ 
+@@ -189,6 +207,8 @@ class VIZ_SERVICE_EXPORT Program : public ProgramBindingBase {
+   void Initialize(ContextProvider* context_provider, const ProgramKey& key) {
+     // Set parameters that are common to all sub-classes.
+     vertex_shader_.aa_mode_ = key.aa_mode_;
++    vertex_shader_.has_bounding_box_ = key.has_bounding_box_;
++    vertex_shader_.has_texture_size_ = key.has_texture_size_;
+     fragment_shader_.aa_mode_ = key.aa_mode_;
+     fragment_shader_.blend_mode_ = key.blend_mode_;
+     fragment_shader_.tex_coord_precision_ = key.precision_;
+@@ -201,6 +221,9 @@ class VIZ_SERVICE_EXPORT Program : public ProgramBindingBase {
+     fragment_shader_.has_output_color_matrix_ = key.has_output_color_matrix_;
+     fragment_shader_.has_tint_color_matrix_ = key.has_tint_color_matrix_;
+     fragment_shader_.has_rounded_corner_ = key.has_rounded_corner_;
++    fragment_shader_.filter_id_ = key.filter_id_;
++    fragment_shader_.has_bounding_box_ = key.has_bounding_box_;
++    fragment_shader_.has_texture_size_ = key.has_texture_size_;
+ 
+     switch (key.type_) {
+       case PROGRAM_TYPE_DEBUG_BORDER:
+@@ -331,6 +354,21 @@ class VIZ_SERVICE_EXPORT Program : public ProgramBindingBase {
+   int rounded_corner_radius_location() const {
+     return fragment_shader_.rounded_corner_radius_location_;
+   }
++  int bounding_box_location() const {
++    return fragment_shader_.bounding_box_location_;
++  }
++  int vertex_bounding_box_location() const {
++    return vertex_shader_.bounding_box_location_;
++  }
++  int texture_size_location() const {
++    return fragment_shader_.texture_size_location_;
++  }
++  int vertex_texture_size_location() const {
++    return vertex_shader_.texture_size_location_;
++  }
++  int scale_factor_location() const {
++    return fragment_shader_.scale_factor_location_;
++  }
+ 
+   const gfx::ColorTransform* color_transform_for_testing() const {
+     return fragment_shader_.color_transform_;
+@@ -395,6 +433,7 @@ class VIZ_SERVICE_EXPORT Program : public ProgramBindingBase {
+     fragment_shader_.has_varying_alpha_ = true;
+     fragment_shader_.has_background_color_ = key.has_background_color_;
+     fragment_shader_.has_tex_clamp_rect_ = key.has_tex_clamp_rect_;
++    fragment_shader_.has_scale_factor_ = true;
+   }
+ 
+   void InitializeRenderPassProgram(const ProgramKey& key) {
+@@ -436,6 +475,7 @@ class VIZ_SERVICE_EXPORT Program : public ProgramBindingBase {
+     fragment_shader_.has_uniform_alpha_ = true;
+     fragment_shader_.yuv_alpha_texture_mode_ = key.yuv_alpha_texture_mode_;
+     fragment_shader_.uv_texture_mode_ = key.uv_texture_mode_;
++    fragment_shader_.has_scale_factor_ = true;
+   }
+ 
+   void InitializeInternal(ContextProvider* context_provider) {
+diff --git a/components/viz/service/display/shader.cc b/components/viz/service/display/shader.cc
+index 20b599020ddd41a342e088f93cff5a5f1491225d..5c2bf6cae07a100a18db2dc631d5316d51bcbaed 100644
+--- a/components/viz/service/display/shader.cc
++++ b/components/viz/service/display/shader.cc
+@@ -210,6 +210,14 @@ void VertexShader::Init(GLES2Interface* context,
+   if (position_source_ == POSITION_SOURCE_ATTRIBUTE_INDEXED_UNIFORM)
+     uniforms.push_back("quad");
+ 
++  if (has_bounding_box_) {
++    uniforms.push_back("v_bounding_box");
++  }
++
++  if (has_texture_size_) {
++    uniforms.push_back("v_texture_size");
++  }
++
+   locations.resize(uniforms.size());
+ 
+   GetProgramUniformLocations(context, program, uniforms.size(), uniforms.data(),
+@@ -242,6 +250,14 @@ void VertexShader::Init(GLES2Interface* context,
+   }
+   if (position_source_ == POSITION_SOURCE_ATTRIBUTE_INDEXED_UNIFORM)
+     quad_location_ = locations[index++];
++
++  if (has_bounding_box_) {
++    bounding_box_location_ = locations[index++];
++  }
++
++  if (has_texture_size_) {
++    texture_size_location_ = locations[index++];
++  }
+ }
+ 
+ std::string VertexShader::GetShaderString() const {
+@@ -353,16 +369,40 @@ std::string VertexShader::GetShaderString() const {
+         SRC("texCoord = (texMatrix * vec4(texCoord.xy, 0.0, 1.0)).xy;");
+         break;
+     }
++
++    if (has_bounding_box_) {
++      HDR("uniform vec4 v_bounding_box;");
++
++      if (has_texture_size_) {
++        HDR("uniform vec2 v_texture_size;");
++        SRC("vec2 offset = v_bounding_box.xy * v_texture_size;");
++      } else {
++        SRC("vec2 offset = v_bounding_box.xy;");
++      }
++
++      SRC("float zoom = max(v_bounding_box.z, v_bounding_box.w);");
++      SRC("vec2 scale = vec2(zoom, zoom);");
++    }
++
+     // Write the output texture coordinates.
+     if (is_ya_uv_) {
+       HDR("uniform TexCoordPrecision vec2 uvTexOffset;");
+       HDR("uniform TexCoordPrecision vec2 uvTexScale;");
+       HDR("uniform TexCoordPrecision vec2 yaTexOffset;");
+       HDR("uniform TexCoordPrecision vec2 yaTexScale;");
+-      SRC("v_yaTexCoord = texCoord * yaTexScale + yaTexOffset;");
+-      SRC("v_uvTexCoord = texCoord * uvTexScale + uvTexOffset;");
++      if (has_bounding_box_) {
++        SRC("v_yaTexCoord = (texCoord * scale + offset) * yaTexScale + yaTexOffset;");
++        SRC("v_uvTexCoord = (texCoord * scale + offset) * uvTexScale + uvTexOffset;");
++      } else {
++        SRC("v_yaTexCoord = texCoord * yaTexScale + yaTexOffset;");
++        SRC("v_uvTexCoord = texCoord * uvTexScale + uvTexOffset;");
++      }
+     } else {
+-      SRC("v_texCoord = texCoord;");
++      if (has_bounding_box_) {
++        SRC("v_texCoord = texCoord * scale + offset;");
++      } else {
++        SRC("v_texCoord = texCoord;");
++      }
+     }
+   }
+ 
+@@ -464,6 +504,18 @@ void FragmentShader::Init(GLES2Interface* context,
+     uniforms.emplace_back("roundedCornerRadius");
+   }
+ 
++  if (has_bounding_box_) {
++    uniforms.emplace_back("bounding_box");
++  }
++
++  if (has_texture_size_) {
++    uniforms.push_back("texture_size");
++  }
++
++  if (has_scale_factor_) {
++    uniforms.push_back("scale_factor");
++  }
++
+   locations.resize(uniforms.size());
+ 
+   GetProgramUniformLocations(context, program, uniforms.size(), uniforms.data(),
+@@ -527,6 +579,18 @@ void FragmentShader::Init(GLES2Interface* context,
+     rounded_corner_radius_location_ = locations[index++];
+   }
+ 
++  if (has_bounding_box_) {
++    bounding_box_location_ = locations[index++];
++  }
++
++  if (has_texture_size_) {
++    texture_size_location_ = locations[index++];
++  }
++
++  if (has_scale_factor_) {
++    scale_factor_location_ = locations[index++];
++  }
++
+   DCHECK_EQ(index, locations.size());
+ }
+ 
+@@ -547,30 +611,25 @@ void FragmentShader::SetRoundedCornerFunctions(
+     // The component ordering is:
+     //     [Top left, Top right, Bottom right, Bottom left]
+     vec4 IsCorner(vec2 rcCoord) {
+-      // Top left corner
+       if (rcCoord.x < roundedCornerRadius.x &&
+           rcCoord.y < roundedCornerRadius.x) {
++        // Top left corner
+         return vec4(1.0, 0.0, 0.0, 0.0);
+-      }
+-
+-      // Top right corner
+-      if (rcCoord.x > roundedCornerRect.z - roundedCornerRadius.y &&
+-          rcCoord.y < roundedCornerRadius.y) {
++      } else if (rcCoord.x > roundedCornerRect.z - roundedCornerRadius.y &&
++                 rcCoord.y < roundedCornerRadius.y) {
++        // Top right corner
+         return vec4(0.0, 1.0, 0.0, 0.0);
+-      }
+-
+-      // Bottom right corner
+-      if (rcCoord.x > roundedCornerRect.z - roundedCornerRadius.z &&
+-          rcCoord.y > roundedCornerRect.w - roundedCornerRadius.z) {
++      } else if (rcCoord.x > roundedCornerRect.z - roundedCornerRadius.z &&
++                 rcCoord.y > roundedCornerRect.w - roundedCornerRadius.z) {
++        // Bottom right corner
+         return vec4(0.0, 0.0, 1.0, 0.0);
+-      }
+-
+-      // Bottom left corner
+-      if (rcCoord.x < roundedCornerRadius.w &&
+-          rcCoord.y > roundedCornerRect.w - roundedCornerRadius.w) {
++      } else if (rcCoord.x < roundedCornerRadius.w &&
++                 rcCoord.y > roundedCornerRect.w - roundedCornerRadius.w) {
++        // Bottom left corner
+         return vec4(0.0, 0.0, 0.0, 1.0);
++      } else {
++        return vec4(0.0, 0.0, 0.0, 0.0);
+       }
+-      return vec4(0.0, 0.0, 0.0, 0.0);
+     }
+ 
+     // Returns the center of the rounded corner. |corner| holds the info on
+@@ -1105,6 +1164,251 @@ std::string FragmentShader::GetShaderSource() const {
+     SRC("texColor = tint_color_matrix * texColor;");
+   }
+ 
++  if (filter_id_ > 0 && input_color_type_ != INPUT_COLOR_SOURCE_UNIFORM) {
++    if (has_texture_size_) {
++      HDR("uniform vec2 texture_size;");
++      SRC("vec2 uvTexture = v_texCoord / texture_size;");
++    } else {
++      SRC("vec2 uvTexture = v_uvTexCoord;");
++    }
++
++    if (has_bounding_box_) {
++      HDR("uniform vec4 bounding_box;");
++      SRC("vec2 uv = (uvTexture - bounding_box.xy) / bounding_box.zw;");
++    } else {
++      SRC("vec2 uv = uvTexture;");
++    }
++
++  // @AROUND: Only use scale factor correction for dithering filters on macOS.
++  // This is because the scale factor info on Windows represent content scaling
++  // while we need DPI scale info in this case like we get on macOS.
++#if defined(OS_APPLE)
++    if (has_scale_factor_) {
++      HDR("uniform float scale_factor;");
++    } else {
++      SRC("float scale_factor = 1.0;");
++    }
++#else
++    SRC("float scale_factor = 2.0;");
++#endif
++
++    HDR("const vec4 color_yellow = vec4(1.0, 255.0 / 255.0, 104.0 / 255.0, 1.0);");
++    HDR("const vec4 color_purple = vec4(190.0 / 255.0, 0.0 / 255.0, 190.0 / 200.0, 1.0);");
++    HDR("const vec4 color_bluepurple = vec4(94.0 / 255.0, 65.0 / 255.0, 193.0 / 255.0, 1.0);");
++    HDR("const vec4 color_darkpurple = vec4(21.0 / 255.0, 0.0 / 255.0, 85.0 / 255.0, 1.0);");
++    HDR("const vec4 color_magenta = vec4(246.0 / 255.0, 60.0 / 255.0, 127.0 / 255.0, 1.0);");
++    HDR("const vec4 color_coldblue = vec4(0.0, 137.0 / 255.0, 187.0 / 255.0, 1.0);");
++    HDR("const vec4 color_green = vec4(115.0 / 255.0, 232.0 / 255.0, 139.0 / 255.0, 1.0);");
++    HDR("const vec4 color_darkblue = vec4(18.0 / 255.0, 25.0 / 255.0, 56.0 / 255.0, 1.0);");
++    HDR("const vec4 color_displaygreen = vec4(100.0 / 255.0, 158.0 / 255.0, 12.0 / 255.0, 1.0);");
++    HDR("const vec4 color_purple1990 = vec4(70.0 / 255.0, 10.0 / 255.0, 190.0 / 255.0, 1.0);");
++    HDR("const vec4 color_pinkhotel = vec4(240.0 / 255.0, 160.0 / 255.0, 200.0 / 255.0, 1.0);");
++    HDR("const vec3 luminance = vec3(0.52, 0.587, 0.114);");
++
++    HDR("float dither4x4(vec2 pixelPos, float grey) {");
++    HDR("  int x = int(mod(pixelPos.x, 4.0));");
++    HDR("  int y = int(mod(pixelPos.y, 4.0));");
++    HDR("  int index = x + y * 4;");
++    HDR("  float limit = 0.0;");
++    HDR("  if (x < 8) {");
++    HDR("    if (index == 0) limit = 0.0625;");
++    HDR("    if (index == 1) limit = 0.5625;");
++    HDR("    if (index == 2) limit = 0.1875;");
++    HDR("    if (index == 3) limit = 0.6875;");
++    HDR("    if (index == 4) limit = 0.8125;");
++    HDR("    if (index == 5) limit = 0.3125;");
++    HDR("    if (index == 6) limit = 0.9375;");
++    HDR("    if (index == 7) limit = 0.4375;");
++    HDR("    if (index == 8) limit = 0.25;");
++    HDR("    if (index == 9) limit = 0.75;");
++    HDR("    if (index == 10) limit = 0.125;");
++    HDR("    if (index == 11) limit = 0.625;");
++    HDR("    if (index == 12) limit = 1.0;");
++    HDR("    if (index == 13) limit = 0.5;");
++    HDR("    if (index == 14) limit = 0.875;");
++    HDR("    if (index == 15) limit = 0.375;");
++    HDR("  }");
++    HDR("  return grey < limit ? 0.0 : 1.0;");
++    HDR("}");
++
++    HDR("vec3 gammaCorrect(vec3 color, float gamma) {");
++    HDR("    return pow(color, vec3(1.0/gamma));");
++    HDR("}");
++
++    HDR("vec3 levelRange(vec3 color, float minInput, float maxInput) {");
++    HDR("    return min(max(color - vec3(minInput), vec3(0.0)) / (vec3(maxInput) - vec3(minInput)), vec3(1.0));");
++    HDR("}");
++
++    HDR("vec3 levels(vec3 color, float minInput, float gamma, float maxInput) {");
++    HDR("    return gammaCorrect(levelRange(color, minInput, maxInput), gamma);");
++    HDR("}");
++
++    HDR("mat4 brightnessMatrix( float brightness ) {");
++    HDR("    return mat4( 1, 0, 0, 0,");
++    HDR("                 0, 1, 0, 0,");
++    HDR("                 0, 0, 1, 0,");
++    HDR("                 brightness, brightness, brightness, 1 );");
++    HDR("}");
++
++    HDR("mat4 contrastMatrix( float contrast ) {");
++    HDR("    float t = ( 1.0 - contrast ) / 2.0;");
++    HDR("    return mat4( contrast, 0, 0, 0,");
++    HDR("                0, contrast, 0, 0,");
++    HDR("                0, 0, contrast, 0,");
++    HDR("                t, t, t, 1 );");
++    HDR("}");
++
++    HDR("mat4 saturationMatrix(float saturation) {");
++    HDR("    float saturationFlipped = 1.0 - saturation;");
++    HDR("    vec3 saturationX = vec3(luminance.x * saturationFlipped);");
++    HDR("    vec3 saturationY = vec3(luminance.y * saturationFlipped);");
++    HDR("    vec3 saturationZ = vec3(luminance.z * saturationFlipped);");
++    HDR("    saturationX += vec3( saturation, 0, 0 );");
++    HDR("    saturationY += vec3( 0, saturation, 0 );");
++    HDR("    saturationZ += vec3( 0, 0, saturation );");
++
++    HDR("    return mat4(saturationX, 0,");
++    HDR("                saturationY, 0,");
++    HDR("                saturationZ, 0,");
++    HDR("                    0, 0, 0, 1);");
++    HDR("}");
++
++    HDR("float diag(float a, float b) {");
++    HDR("  return sqrt((a + b) * (a + b)) / 2.5;");
++    HDR("}");
++
++    HDR("vec4 gradient2Colors(vec4 a, vec4 b, float w) {");
++    HDR("  return vec4(mix(a.r, b.r, w), mix(a.g, b.g, w), mix(a.b, b.b, w), mix(a.a, b.a, w));");
++    HDR("}");
++
++    // fthis code is copied from kFunctionSoftLightComponentPosDstAlpha in this same file
++    HDR("float softlight(float srcc, float srca, float dstc,");
++    HDR("                            float dsta) {");
++    HDR("  if (2.0 * srcc <= srca) {");
++    HDR("    return (dstc * dstc * (srca - 2.0 * srcc)) / dsta +");
++    HDR("            (1.0 - dsta) * srcc + dstc * (-srca + 2.0 * srcc + 1.0);");
++    HDR("  } else if (4.0 * dstc <= dsta) {");
++    HDR("    float DSqd = dstc * dstc;");
++    HDR("    float DCub = DSqd * dstc;");
++    HDR("    float DaSqd = dsta * dsta;");
++    HDR("    float DaCub = DaSqd * dsta;");
++    HDR("    return (-DaCub * srcc +");
++    HDR("            DaSqd * (srcc - dstc * (3.0 * srca - 6.0 * srcc - 1.0)) +");
++    HDR("            12.0 * dsta * DSqd * (srca - 2.0 * srcc) -");
++    HDR("            16.0 * DCub * (srca - 2.0 * srcc)) /");
++    HDR("            DaSqd;");
++    HDR("  } else {");
++    HDR("    return -sqrt(dsta * dstc) * (srca - 2.0 * srcc) - dsta * srcc +");
++    HDR("            dstc * (srca - 2.0 * srcc + 1.0) + srcc;");
++    HDR("  }");
++    HDR("}");
++
++    HDR("float tri(in float x) {");
++    HDR("  float h = fract(x*.5)-.5;");
++    HDR("  return 1.-2.*abs(h);");
++    HDR("}");
++
++    SRC("float contrast = 1.0;");
++    SRC("float brightness = 0.0;");
++
++    SRC("vec4 grey = vec4(dot(texColor.rgb, vec3(0.52, 0.587, 0.114)));");
++
++    SRC("float diagonalTopRight = diag(uv.x, uv.y);");
++    SRC("float cubic = smoothstep(0.0, 1.0, clamp(0.0, 1.0, diagonalTopRight));");
++
++    SRC("vec4 base = brightnessMatrix(brightness) * contrastMatrix(contrast) * grey;");
++    SRC("vec4 filter;");
++
++    switch(filter_id_) {
++      case 1: // black and white
++        SRC("filter = base;");
++        break;
++      case 2: // single gradient
++        SRC("vec4 gradient = gradient2Colors(color_bluepurple, vec4(1.0, 1.0, 1.0, 0.0), cubic);");
++        SRC("filter = base * gradient;");
++        break;
++      case 3: // hacker mode
++        SRC("filter = mix(color_darkpurple, color_green, base);");
++        break;
++      case 4: // purple/blue LEDs
++        SRC("filter = vec4(base.r * uv.x, base.g * uv.y, base.b, 1.0);");
++        break;
++      case 5: // yellow magenta
++        SRC("filter = mix(color_purple, color_yellow, base);");
++        break;
++      case 6: // purple duo
++        SRC("filter = mix(color_darkpurple, color_magenta, base);");
++        break;
++      case 7: // enhanced brightness/constrast
++        SRC("filter = brightnessMatrix(brightness) * contrastMatrix(contrast) * saturationMatrix(0.85) * texColor;");
++        break;
++      case 8: // red green
++        SRC("filter = vec4(base.r * (1.2 - uv.x), base.g * (uv.y), base.b * uv.y * 0.7 + 0.25 , 1.0);");
++        break;
++      case 9: // pink sunset
++        SRC("base = brightnessMatrix(brightness) * contrastMatrix(contrast) * texColor;");
++        SRC("filter = gradient2Colors(vec4(base.r, base.g * uv.y * 0.1, base.b * 0.2, 1.0) * (1.0 - uv.y), mix(vec4(base.r, base.g * uv.y, base.b * 0.1, 1.0), vec4(1,1,0,1), base), uv.y);");
++        break;
++      case 10: // magenta green
++        SRC("filter = mix(vec4(0.0, 0.0, 0.0, 1.0), gradient2Colors(vec4(1.0,1.0,0.0,1.0), color_coldblue, uv.x), base);");
++        break;
++      case 11: // colorful mix
++        SRC("filter = vec4(base.r * (1.2 - uv.y), base.g * (uv.x), base.b * uv.y * 0.8 + 0.2, 1.0);");
++        break;
++      case 12: // gameboy
++        SRC("base = vec4(levels(grey.rgb, 55.0/255.0, 1.3, 235.0/255.0), 1.0);");
++        SRC("vec4 dithered = vec4(dither4x4(gl_FragCoord.xy * (1.0 / scale_factor) * 2.0, base.r));");
++        SRC("filter = mix(color_darkblue, color_displaygreen, dithered);");
++        break;
++      case 13: // pink pixels
++        SRC("base = vec4(levels(grey.rgb, 55.0/255.0, 1.3, 235.0/255.0), 1.0);");
++        SRC("vec4 dithered = vec4(dither4x4(gl_FragCoord.xy * (1.0 / scale_factor) * 2.0, base.r));");
++        SRC("filter = mix(color_purple1990, color_pinkhotel, dithered);");
++        break;
++      case 14: // sunrise
++        // colors
++        SRC("vec4 top = vec4(50.0, 197.0, 255.0, 255.0) / 255.0;");
++        SRC("vec4 bot = vec4(182.0, 32.0, 224.0, 255.0) / 255.0;");
++
++        // gradient
++        SRC("vec4 grad = mix(top, bot, uv.y);");
++
++        // soft light
++        SRC("float r = softlight(grad.r, grad.a, texColor.r, 1.0);");
++        SRC("float g = softlight(grad.g, grad.a, texColor.g, 1.0);");
++        SRC("float b = softlight(grad.b, grad.a, texColor.b, 1.0);");
++
++        SRC("filter = vec4(r, g, b, 1.0);");
++        break;
++      case 15: // sunset
++        // colors
++        SRC("vec4 tl = vec4(253.0, 194.0, 42.0, 255.0) / 255.0;");
++        SRC("vec4 tr = vec4(255.0, 61.0, 0.0, 255.0) / 255.0;");
++        SRC("vec4 bl = vec4(214.0, 125.0, 255.0, 255.0) / 255.0;");
++        SRC("vec4 br = vec4(214.0, 125.0, 255.0, 255.0) / 255.0;");
++
++        // gradient
++        SRC("vec4 tgrad = mix(tl, tr, uv.x);");
++        SRC("vec4 bgrad = mix(bl, br, uv.x);");
++        SRC("vec4 grad = mix(tgrad, bgrad, uv.y);");
++
++        // soft light
++        SRC("float r = softlight(grad.r, grad.a, texColor.r, 1.0);");
++        SRC("float g = softlight(grad.g, grad.a, texColor.g, 1.0);");
++        SRC("float b = softlight(grad.b, grad.a, texColor.b, 1.0);");
++
++        SRC("filter = vec4(r, g, b, 1.0);");
++        break;
++    }
++
++    SRC("texColor = filter;");
++
++    // AROUND: debug checkboard pattern for UV testing
++    // SRC("vec2 uvchecker = floor(8.0 * uv.xy);");
++    // SRC("vec4 checkerboard = vec4(vec3(mod(uvchecker.x + uvchecker.y, 2.)), 1);");
++    // SRC("texColor = filter * (1.0 - (checkerboard * 0.33));");
++  }
++
+   // Include header text for alpha.
+   if (has_uniform_alpha_) {
+     HDR("uniform float alpha;");
+@@ -1157,6 +1461,10 @@ std::string FragmentShader::GetShaderSource() const {
+       break;
+   }
+ 
++  if (filter_id_ > 0)
++    SRC("gl_FragColor = vec4(gl_FragColor.rgb, 1.0);");
++
++
+   if (has_rounded_corner_)
+     SRC("gl_FragColor = ApplyRoundedCorner(gl_FragColor);");
+ 
+diff --git a/components/viz/service/display/shader.h b/components/viz/service/display/shader.h
+index f64ae80494614b0dc8b2ff7ccb8d32730b6e689b..a7ec1d92a26f1e4a44e1bfe6aa339c54625f377b 100644
+--- a/components/viz/service/display/shader.h
++++ b/components/viz/service/display/shader.h
+@@ -209,6 +209,12 @@ class VIZ_SERVICE_EXPORT VertexShader {
+   AAMode aa_mode_ = NO_AA;
+   int viewport_location_ = -1;
+   int edge_location_ = -1;
++
++  bool has_bounding_box_ = false;
++  int bounding_box_location_ = -1;
++
++  bool has_texture_size_ = false;
++  int texture_size_location_ = -1;
+ };
+ 
+ class VIZ_SERVICE_EXPORT FragmentShader {
+@@ -303,6 +309,17 @@ class VIZ_SERVICE_EXPORT FragmentShader {
+   int rounded_corner_rect_location_ = -1;
+   int rounded_corner_radius_location_ = -1;
+ 
++  int filter_id_ = 0;
++
++  bool has_bounding_box_ = false;
++  int bounding_box_location_ = -1;
++
++  bool has_texture_size_ = false;
++  int texture_size_location_ = -1;
++
++  bool has_scale_factor_ = false;
++  int scale_factor_location_ = -1;
++
+   // The resource offset and multiplier to adjust for bit depth.
+   int resource_multiplier_location_ = -1;
+   int resource_offset_location_ = -1;
+diff --git a/components/viz/service/display/surface_aggregator.cc b/components/viz/service/display/surface_aggregator.cc
+index 7efd27ef6b701251d0ab93d055d598596d0dafed..f41eedc761abd88e278e3a0cdb71e85a17842622 100644
+--- a/components/viz/service/display/surface_aggregator.cc
++++ b/components/viz/service/display/surface_aggregator.cc
+@@ -202,7 +202,9 @@ SharedQuadState* CopyAndScaleSharedQuadState(
+       source_sqs->are_contents_opaque, source_sqs->opacity,
+       source_sqs->blend_mode, source_sqs->sorting_context_id);
+   shared_quad_state->is_fast_rounded_corner =
+-      mask_filter_info_ext.is_fast_rounded_corner,
++      mask_filter_info_ext.is_fast_rounded_corner;
++  shared_quad_state->filter_id = source_sqs->filter_id;
++  shared_quad_state->bounding_box = source_sqs->bounding_box;
+   shared_quad_state->de_jelly_delta_y = source_sqs->de_jelly_delta_y;
+   return shared_quad_state;
+ }
+diff --git a/media/base/video_frame.h b/media/base/video_frame.h
+index 82dc8ca69f91e46d8e6a20198aa3a216c8f1c558..1de2eb458e8c2f43f12a4b90d46d0fbc91964274 100644
+--- a/media/base/video_frame.h
++++ b/media/base/video_frame.h
+@@ -31,6 +31,7 @@
+ #include "third_party/abseil-cpp/absl/types/optional.h"
+ #include "ui/gfx/color_space.h"
+ #include "ui/gfx/geometry/rect.h"
++#include "ui/gfx/geometry/rect_f.h"
+ #include "ui/gfx/geometry/size.h"
+ #include "ui/gfx/hdr_metadata.h"
+ 
+@@ -615,6 +616,11 @@ class MEDIA_EXPORT VideoFrame : public base::RefCountedThreadSafe<VideoFrame> {
+     ycbcr_info_ = ycbcr_info;
+   }
+ 
++  bool circle_crop = false;
++
++  int filter_id = 0;
++  gfx::RectF bounding_box;
++
+  protected:
+   friend class base::RefCountedThreadSafe<VideoFrame>;
+ 
+diff --git a/media/renderers/video_resource_updater.cc b/media/renderers/video_resource_updater.cc
+index 9f0934ae584e338384597cd1c64e174bf789e21c..1294b5ea5be10cd98e6a07fd7977dd78ede5300c 100644
+--- a/media/renderers/video_resource_updater.cc
++++ b/media/renderers/video_resource_updater.cc
+@@ -550,7 +550,9 @@ void VideoResourceUpdater::AppendQuads(
+     absl::optional<gfx::Rect> clip_rect,
+     bool contents_opaque,
+     float draw_opacity,
+-    int sorting_context_id) {
++    int sorting_context_id,
++    int filter_id,
++    gfx::RectF bounding_box) {
+   DCHECK(frame.get());
+ 
+   viz::SharedQuadState* shared_quad_state =
+@@ -559,6 +561,9 @@ void VideoResourceUpdater::AppendQuads(
+       transform, quad_rect, visible_quad_rect, mask_filter_info, clip_rect,
+       contents_opaque, draw_opacity, SkBlendMode::kSrcOver, sorting_context_id);
+ 
++  shared_quad_state->filter_id = filter_id;
++  shared_quad_state->bounding_box = bounding_box;
++  shared_quad_state->is_fast_rounded_corner = true;
+   bool needs_blending = !contents_opaque;
+ 
+   gfx::Rect visible_rect = frame->visible_rect();
+diff --git a/media/renderers/video_resource_updater.h b/media/renderers/video_resource_updater.h
+index d2ad861f59a84ad215f27bb141e5b2902d08c701..f6ba9f9707427a03b7cf6b0bb09c88ffc61f24bc 100644
+--- a/media/renderers/video_resource_updater.h
++++ b/media/renderers/video_resource_updater.h
+@@ -24,6 +24,7 @@
+ #include "gpu/command_buffer/client/gles2_interface.h"
+ #include "media/base/media_export.h"
+ #include "ui/gfx/buffer_types.h"
++#include "ui/gfx/geometry/rect_f.h"
+ #include "ui/gfx/geometry/size.h"
+ 
+ namespace gfx {
+@@ -126,7 +127,9 @@ class MEDIA_EXPORT VideoResourceUpdater
+                    absl::optional<gfx::Rect> clip_rect,
+                    bool context_opaque,
+                    float draw_opacity,
+-                   int sorting_context_id);
++                   int sorting_context_id,
++                   int filter_id,
++                   gfx::RectF bounding_box);
+ 
+   // TODO(kylechar): This is only public for testing, make private.
+   VideoFrameExternalResources CreateExternalResourcesFromVideoFrame(
+diff --git a/services/viz/public/cpp/compositing/shared_quad_state_mojom_traits.h b/services/viz/public/cpp/compositing/shared_quad_state_mojom_traits.h
+index 0ddd869b1e2f25f813a08653a4b800c7c8e76356..17d4f13b28c92c03bce7afd56651fe2d717e18f3 100644
+--- a/services/viz/public/cpp/compositing/shared_quad_state_mojom_traits.h
++++ b/services/viz/public/cpp/compositing/shared_quad_state_mojom_traits.h
+@@ -70,6 +70,14 @@ struct StructTraits<viz::mojom::SharedQuadStateDataView, OptSharedQuadState> {
+   static float de_jelly_delta_y(const OptSharedQuadState& input) {
+     return input.sqs->de_jelly_delta_y;
+   }
++
++  static int filter_id(const OptSharedQuadState& input) {
++    return input.sqs->filter_id;
++  }
++
++  static gfx::RectF bounding_box(const OptSharedQuadState& input) {
++    return input.sqs->bounding_box;
++  }
+ };
+ 
+ template <>
+@@ -120,13 +128,22 @@ struct StructTraits<viz::mojom::SharedQuadStateDataView, viz::SharedQuadState> {
+     return sqs.de_jelly_delta_y;
+   }
+ 
++  static int filter_id(const viz::SharedQuadState& sqs) {
++    return sqs.filter_id;
++  }
++
++  static gfx::RectF bounding_box(const viz::SharedQuadState& sqs) {
++    return sqs.bounding_box;
++  }
++
+   static bool Read(viz::mojom::SharedQuadStateDataView data,
+                    viz::SharedQuadState* out) {
+     if (!data.ReadQuadToTargetTransform(&out->quad_to_target_transform) ||
+         !data.ReadQuadLayerRect(&out->quad_layer_rect) ||
+         !data.ReadVisibleQuadLayerRect(&out->visible_quad_layer_rect) ||
+         !data.ReadMaskFilterInfo(&out->mask_filter_info) ||
+-        !data.ReadClipRect(&out->clip_rect)) {
++        !data.ReadClipRect(&out->clip_rect) ||
++        !data.ReadBoundingBox(&out->bounding_box)) {
+       return false;
+     }
+ 
+@@ -138,6 +155,7 @@ struct StructTraits<viz::mojom::SharedQuadStateDataView, viz::SharedQuadState> {
+     out->sorting_context_id = data.sorting_context_id();
+     out->is_fast_rounded_corner = data.is_fast_rounded_corner();
+     out->de_jelly_delta_y = data.de_jelly_delta_y();
++    out->filter_id = data.filter_id();
+ 
+     return true;
+   }
+diff --git a/services/viz/public/mojom/compositing/shared_quad_state.mojom b/services/viz/public/mojom/compositing/shared_quad_state.mojom
+index 88435f1eeba56219a6cb593c42550cf5f53b7d96..12af3e472722b7da93833d9e8d6f7133d76529f1 100644
+--- a/services/viz/public/mojom/compositing/shared_quad_state.mojom
++++ b/services/viz/public/mojom/compositing/shared_quad_state.mojom
+@@ -44,4 +44,7 @@ struct SharedQuadState {
+   // de-jelly effect.
+   float de_jelly_delta_y;
+ 
++  int32 filter_id;
++  gfx.mojom.RectF bounding_box;
++
+ };
+diff --git a/third_party/blink/public/platform/media/web_media_player_impl.h b/third_party/blink/public/platform/media/web_media_player_impl.h
+index 7d99b7f4aef7a2fb1c2bb80b117b4b265d4d1109..ad885230a88cf78603bbb5b5123d03fb5f0675fd 100644
+--- a/third_party/blink/public/platform/media/web_media_player_impl.h
++++ b/third_party/blink/public/platform/media/web_media_player_impl.h
+@@ -126,7 +126,10 @@ class BLINK_PLATFORM_EXPORT WebMediaPlayerImpl
+   WebMediaPlayer::LoadTiming Load(LoadType load_type,
+                                   const WebMediaPlayerSource& source,
+                                   CorsMode cors_mode,
+-                                  bool is_cache_disabled) override;
++                                  bool is_cache_disabled,
++                                  bool circle_crop,
++                                  int filter_id,
++                                  gfx::RectF bounding_box) override;
+ 
+   // Playback controls.
+   void Play() override;
+diff --git a/third_party/blink/public/platform/web_media_player.h b/third_party/blink/public/platform/web_media_player.h
+index 306f13ae8af00091ce12ef1175443cf105e11b17..62e5ff1e4ca2518d962627cf604df0ed1a563668 100644
+--- a/third_party/blink/public/platform/web_media_player.h
++++ b/third_party/blink/public/platform/web_media_player.h
+@@ -44,6 +44,7 @@
+ #include "third_party/blink/public/platform/web_string.h"
+ #include "third_party/blink/public/platform/webaudiosourceprovider_impl.h"
+ #include "ui/gfx/geometry/rect.h"
++#include "ui/gfx/geometry/rect_f.h"
+ #include "ui/gfx/geometry/size.h"
+ #include "url/gurl.h"
+ 
+@@ -147,7 +148,14 @@ class WebMediaPlayer {
+   virtual LoadTiming Load(LoadType,
+                           const WebMediaPlayerSource&,
+                           CorsMode,
+-                          bool is_cache_disabled) = 0;
++                          bool is_cache_disabled,
++                          bool circle_crop,
++                          int filter_id,
++                          gfx::RectF bounding_box) = 0;
++
++  virtual void SetCircleCrop(bool flag) {}
++  virtual void SetFilterId(int filter_id) {}
++  virtual void SetBoundingBox(gfx::RectF rect) {}
+ 
+   // Playback controls.
+   virtual void Play() = 0;
+diff --git a/third_party/blink/public/web/modules/mediastream/webmediaplayer_ms.h b/third_party/blink/public/web/modules/mediastream/webmediaplayer_ms.h
+index 53782ddd9d74d3fb59b400dedbffd53daefb9cee..7d1316060b089e4c70eecea0ceb551a5af0e7aa4 100644
+--- a/third_party/blink/public/web/modules/mediastream/webmediaplayer_ms.h
++++ b/third_party/blink/public/web/modules/mediastream/webmediaplayer_ms.h
+@@ -97,7 +97,10 @@ class BLINK_MODULES_EXPORT WebMediaPlayerMS
+   WebMediaPlayer::LoadTiming Load(LoadType load_type,
+                                   const WebMediaPlayerSource& source,
+                                   CorsMode cors_mode,
+-                                  bool is_cache_disabled) override;
++                                  bool is_cache_disabled,
++                                  bool circle_crop,
++                                  int filter_id,
++                                  gfx::RectF bounding_box) override;
+ 
+   // WebSurfaceLayerBridgeObserver implementation.
+   void OnWebLayerUpdated() override;
+@@ -196,6 +199,10 @@ class BLINK_MODULES_EXPORT WebMediaPlayerMS
+   std::unique_ptr<WebMediaPlayer::VideoFramePresentationMetadata>
+   GetVideoFramePresentationMetadata() override;
+ 
++  void SetCircleCrop(bool flag) override;
++  void SetFilterId(int filter_id) override;
++  void SetBoundingBox(gfx::RectF rect) override;
++
+  private:
+   friend class WebMediaPlayerMSTest;
+ 
+diff --git a/third_party/blink/renderer/core/html/media/html_media_element.cc b/third_party/blink/renderer/core/html/media/html_media_element.cc
+index 169a05eab25696ed5dd2b641288e9457646e78d2..bbd6f11df9b35b307c24b8a1a22a4852a1cdd8e2 100644
+--- a/third_party/blink/renderer/core/html/media/html_media_element.cc
++++ b/third_party/blink/renderer/core/html/media/html_media_element.cc
+@@ -702,6 +702,57 @@ bool HTMLMediaElement::IsMouseFocusable() const {
+ void HTMLMediaElement::ParseAttribute(
+     const AttributeModificationParams& params) {
+   const QualifiedName& name = params.name;
++
++  if (name.LocalName().Ascii() == "data-circle-crop") {
++    bool old_value = params.old_value.Ascii() == "true";
++    bool new_value = params.new_value.Ascii() == "true";
++    if (old_value != new_value) {
++      circle_crop = new_value;
++      if (web_media_player_) {
++        web_media_player_->SetCircleCrop(new_value);
++      }
++    }
++  }
++
++  if (name.LocalName().Ascii() == "data-filter-id") {
++    int old_value = 0;
++    int new_value = 0;
++    if (params.old_value.Ascii() != "") {
++      old_value = std::stoi(params.old_value.Ascii());
++    }
++    if (params.new_value.Ascii() != "") {
++      new_value = std::stoi(params.new_value.Ascii());
++    }
++    if (old_value != new_value) {
++      filter_id = new_value;
++      if (web_media_player_) {
++        web_media_player_->SetFilterId(new_value);
++      }
++    }
++  }
++
++  if (name.LocalName().Ascii() == "data-bounding-box") {
++    std::string old_value = params.old_value.Ascii();
++    std::string new_value = params.new_value.Ascii();
++    if (old_value != new_value) {
++      Vector<String> bounding_box_parts;
++      params.new_value.GetString().Split(",", bounding_box_parts);
++
++      if (bounding_box_parts.size() == 4) {
++        bounding_box_rect = gfx::RectF(
++          bounding_box_parts[0].ToFloat(),
++          bounding_box_parts[1].ToFloat(),
++          bounding_box_parts[2].ToFloat(),
++          bounding_box_parts[3].ToFloat()
++        );
++
++        if (web_media_player_) {
++          web_media_player_->SetBoundingBox(bounding_box_rect);
++        }
++      }
++    }
++  }
++
+   if (name == html_names::kSrcAttr) {
+     DVLOG(2) << "parseAttribute(" << *this
+              << ", kSrcAttr, old=" << params.old_value
+@@ -1424,7 +1475,8 @@ void HTMLMediaElement::StartPlayerLoad() {
+   probe::IsCacheDisabled(GetDocument().GetExecutionContext(),
+                          &is_cache_disabled);
+   auto load_timing = web_media_player_->Load(GetLoadType(), source, CorsMode(),
+-                                             is_cache_disabled);
++                                             is_cache_disabled, circle_crop,
++                                             filter_id, bounding_box_rect);
+   if (load_timing == WebMediaPlayer::LoadTiming::kDeferred) {
+     // Deferred media loading is not part of the spec, but intuition is that
+     // this should not hold up the Window's "load" event (similar to user
+diff --git a/third_party/blink/renderer/core/html/media/html_media_element.h b/third_party/blink/renderer/core/html/media/html_media_element.h
+index 8d14815d6ffd69cb4233718a78ad6301209b5efc..96eaa5a142bd1a0cd817e031eb19740f13f6c5c1 100644
+--- a/third_party/blink/renderer/core/html/media/html_media_element.h
++++ b/third_party/blink/renderer/core/html/media/html_media_element.h
+@@ -753,6 +753,12 @@ class CORE_EXPORT HTMLMediaElement
+ 
+   bool was_always_muted_ : 1;
+ 
++  bool circle_crop = false;
++
++  int filter_id = 0;
++
++  gfx::RectF bounding_box_rect;
++
+   // Set if the user has used the context menu to set the visibility of the
+   // controls.
+   absl::optional<bool> user_wants_controls_visible_;
+diff --git a/third_party/blink/renderer/modules/mediastream/webmediaplayer_ms.cc b/third_party/blink/renderer/modules/mediastream/webmediaplayer_ms.cc
+index f1a5b76c1d0f3de445b3c796749795487d664def..49e5fdef36ba4bef9b604ae8524e3f8a4092ec28 100644
+--- a/third_party/blink/renderer/modules/mediastream/webmediaplayer_ms.cc
++++ b/third_party/blink/renderer/modules/mediastream/webmediaplayer_ms.cc
+@@ -409,11 +409,32 @@ void WebMediaPlayerMS::OnAudioRenderErrorCallback() {
+   }
+ }
+ 
++void WebMediaPlayerMS::SetCircleCrop(bool flag) {
++  if (compositor_) {
++    compositor_->circle_crop_ = flag;
++  }
++}
++
++void WebMediaPlayerMS::SetFilterId(int filter_id) {
++  if (compositor_) {
++    compositor_->filter_id_ = filter_id;
++  }
++}
++
++void WebMediaPlayerMS::SetBoundingBox(gfx::RectF rect) {
++  if (compositor_) {
++    compositor_->bounding_box_ = rect;
++  }
++}
++
+ WebMediaPlayer::LoadTiming WebMediaPlayerMS::Load(
+     LoadType load_type,
+     const WebMediaPlayerSource& source,
+     CorsMode /*cors_mode*/,
+-    bool is_cache_disabled) {
++    bool is_cache_disabled,
++    bool circle_crop,
++    int filter_id,
++    gfx::RectF bounding_box) {
+   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+   SendLogMessage(String::Format("%s({load_type=%s})", __func__,
+                                 LoadTypeToString(load_type)));
+@@ -431,6 +452,10 @@ WebMediaPlayer::LoadTiming WebMediaPlayerMS::Load(
+       compositor_task_runner_, io_task_runner_, web_stream_,
+       std::move(submitter_), surface_layer_mode_, weak_this_);
+ 
++  compositor_->circle_crop_ = circle_crop;
++  compositor_->filter_id_ = filter_id;
++  compositor_->bounding_box_ = bounding_box;
++
+   // We can receive a call to RequestVideoFrameCallback() before |compositor_|
+   // is created. In that case, we suspend the request, and wait until now to
+   // reiniate it.
+diff --git a/third_party/blink/renderer/modules/mediastream/webmediaplayer_ms_compositor.cc b/third_party/blink/renderer/modules/mediastream/webmediaplayer_ms_compositor.cc
+index 9d4046378998104e11b19ee504a13ff764fea23f..634333251c1e177faebac656e61fb51592b8ef32 100644
+--- a/third_party/blink/renderer/modules/mediastream/webmediaplayer_ms_compositor.cc
++++ b/third_party/blink/renderer/modules/mediastream/webmediaplayer_ms_compositor.cc
+@@ -342,6 +342,10 @@ void WebMediaPlayerMSCompositor::EnqueueFrame(
+                        frame->timestamp().InMicroseconds());
+   ++total_frame_count_;
+ 
++  frame->circle_crop = circle_crop_;
++  frame->filter_id = filter_id_;
++  frame->bounding_box = bounding_box_;
++
+   // With algorithm off, just let |current_frame_| hold the incoming |frame|.
+   if (!rendering_frame_buffer_) {
+     RenderWithoutAlgorithm(std::move(frame), is_copy);
+diff --git a/third_party/blink/renderer/modules/mediastream/webmediaplayer_ms_compositor.h b/third_party/blink/renderer/modules/mediastream/webmediaplayer_ms_compositor.h
+index 5267862f11b3de3c234980ae81955c4336e44526..0b6fc3ce97092b0860f1581e0de2376fb044869d 100644
+--- a/third_party/blink/renderer/modules/mediastream/webmediaplayer_ms_compositor.h
++++ b/third_party/blink/renderer/modules/mediastream/webmediaplayer_ms_compositor.h
+@@ -135,6 +135,11 @@ class MODULES_EXPORT WebMediaPlayerMSCompositor
+   // requestVideoFrameCallback() API when the video is offscreen.
+   void SetForceBeginFrames(bool enable);
+ 
++  bool circle_crop_;
++
++  int filter_id_;
++  gfx::RectF bounding_box_;
++
+  private:
+   friend class WTF::ThreadSafeRefCounted<WebMediaPlayerMSCompositor,
+                                          WebMediaPlayerMSCompositorTraits>;
+diff --git a/third_party/blink/renderer/platform/graphics/video_frame_resource_provider.cc b/third_party/blink/renderer/platform/graphics/video_frame_resource_provider.cc
+index 7fff6982941a10272e671e182d4a3ddbbd1731da..3b8a51f2988870fa6442b248e2860fcb39245ea4 100644
+--- a/third_party/blink/renderer/platform/graphics/video_frame_resource_provider.cc
++++ b/third_party/blink/renderer/platform/graphics/video_frame_resource_provider.cc
+@@ -119,10 +119,67 @@ void VideoFrameResourceProvider::AppendQuads(
+   float draw_opacity = 1.0f;
+   int sorting_context_id = 0;
+ 
++  if (frame->circle_crop) {
++    gfx::RectF bounds(quad_rect);
++    if (bounds.width() > bounds.height()) {
++      bounds.set_x((bounds.width() - bounds.height()) / 2);
++      bounds.set_width(bounds.height());
++    } else {
++      bounds.set_y((bounds.height() - bounds.width()) / 2);
++      bounds.set_height(bounds.width());
++    }
++
++    mask_filter_info = gfx::MaskFilterInfo(gfx::RRectF(bounds, bounds.width() / 2));
++  }
++
++  int filter_id = frame->filter_id;
++  gfx::RectF bounding_box = frame->bounding_box;
++
++  if (bounding_box_ != bounding_box || previous_bounding_box_.IsEmpty()) {
++    bounding_box_ = bounding_box;
++  }
++
++  if (previous_bounding_box_.IsEmpty()) {
++    previous_bounding_box_ = bounding_box_;
++  } else {
++    base::TimeTicks now = base::TimeTicks::Now();
++    float dt = fmin((now - last_timestamp_).InSecondsF(), 0.05);
++    last_timestamp_ = now;
++
++    float m = 7.5f;
++    float k = 25.0f;
++    float zeta = 1.0f;
++    float c_crit = 2.0f * sqrt(k * m);
++    float c = zeta * c_crit;
++
++    float euler_steps = 100.0;
++    dt = dt / euler_steps;
++
++    for (int i = 0; i < euler_steps; ++i) {
++      gfx::RectF previous = previous_bounding_box_;
++      gfx::RectF target = bounding_box_;
++
++      vx_ += ((target.x() - previous.x()) * k - c * vx_) / m * dt;
++      vy_ += ((target.y() - previous.y()) * k - c * vy_) / m * dt;
++      vw_ += ((target.width() - previous.width()) * k - c * vw_) / m * dt;
++      vh_ += ((target.height() - previous.height()) * k - c * vh_) / m * dt;
++
++      gfx::RectF current = gfx::RectF(
++        previous.x() + vx_ * dt,
++        previous.y() + vy_ * dt,
++        previous.width() + vw_ * dt,
++        previous.height() + vh_ * dt
++      );
++
++      previous_bounding_box_ = current;
++    }
++  }
++
+   resource_updater_->AppendQuads(render_pass, std::move(frame), transform,
+                                  quad_rect, visible_quad_rect, mask_filter_info,
+                                  /*clip_rect=*/absl::nullopt, is_opaque,
+-                                 draw_opacity, sorting_context_id);
++                                 draw_opacity, sorting_context_id, filter_id,
++                                 previous_bounding_box_);
+ }
+ 
+ void VideoFrameResourceProvider::ReleaseFrameResources() {
+diff --git a/third_party/blink/renderer/platform/graphics/video_frame_resource_provider.h b/third_party/blink/renderer/platform/graphics/video_frame_resource_provider.h
+index efaa452d2722ef18c67e7025b97f879b4520c74e..5e48e8d5fb21a07c3c6fa2100e8eef9d2cae56c1 100644
+--- a/third_party/blink/renderer/platform/graphics/video_frame_resource_provider.h
++++ b/third_party/blink/renderer/platform/graphics/video_frame_resource_provider.h
+@@ -6,6 +6,7 @@
+ #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_VIDEO_FRAME_RESOURCE_PROVIDER_H_
+ 
+ #include "base/memory/weak_ptr.h"
++#include "base/time/time.h"
+ #include "cc/trees/layer_tree_settings.h"
+ #include "components/viz/client/client_resource_provider.h"
+ #include "components/viz/client/shared_bitmap_reporter.h"
+@@ -67,6 +68,14 @@ class PLATFORM_EXPORT VideoFrameResourceProvider {
+   std::unique_ptr<viz::ClientResourceProvider> resource_provider_;
+   std::unique_ptr<media::VideoResourceUpdater> resource_updater_;
+   bool use_sync_primitives_ = false;
++
++  gfx::RectF bounding_box_;
++  gfx::RectF previous_bounding_box_;
++  float vx_ = 0.0f;
++  float vy_ = 0.0f;
++  float vw_ = 0.0f;
++  float vh_ = 0.0f;
++  base::TimeTicks last_timestamp_ = base::TimeTicks::Now();
+ };
+ 
+ }  // namespace blink
+diff --git a/third_party/blink/renderer/platform/media/web_media_player_impl.cc b/third_party/blink/renderer/platform/media/web_media_player_impl.cc
+index ee4eab97faeb1456c2ee48af0d44bc1802169972..1fb51a5e857abbea5e8021dd5669ecb24242d854 100644
+--- a/third_party/blink/renderer/platform/media/web_media_player_impl.cc
++++ b/third_party/blink/renderer/platform/media/web_media_player_impl.cc
+@@ -566,7 +566,10 @@ WebMediaPlayer::LoadTiming WebMediaPlayerImpl::Load(
+     LoadType load_type,
+     const WebMediaPlayerSource& source,
+     CorsMode cors_mode,
+-    bool is_cache_disabled) {
++    bool is_cache_disabled,
++    bool circle_crop,
++    int filter_id,
++    gfx::RectF bounding_box) {
+   // Only URL or MSE blob URL is supported.
+   DCHECK(source.IsURL());
+   WebURL url = source.GetAsURL();

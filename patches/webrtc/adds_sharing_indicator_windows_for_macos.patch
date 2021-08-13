@@ -1,0 +1,325 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: gellert <gellert.hegyi@around.co>
+Date: Tue, 7 Jul 2020 20:05:01 +0200
+Subject: adds sharing indicator windows for macos
+
+This patch adds green rectangles around the screen or window shared area on the screen for macOS.
+
+Signed-off-by: gellert <gellert.hegyi@around.co>
+
+diff --git a/modules/desktop_capture/mac/screen_capturer_mac.h b/modules/desktop_capture/mac/screen_capturer_mac.h
+index 95d2deb058c2315e9c940290943c86e48ccb35c3..70148b66bb3374db84d06b5c818228af35385988 100644
+--- a/modules/desktop_capture/mac/screen_capturer_mac.h
++++ b/modules/desktop_capture/mac/screen_capturer_mac.h
+@@ -11,6 +11,7 @@
+ #ifndef MODULES_DESKTOP_CAPTURE_MAC_SCREEN_CAPTURER_MAC_H_
+ #define MODULES_DESKTOP_CAPTURE_MAC_SCREEN_CAPTURER_MAC_H_
+ 
++#include <Cocoa/Cocoa.h>
+ #include <CoreGraphics/CoreGraphics.h>
+ 
+ #include <memory>
+diff --git a/modules/desktop_capture/mac/screen_capturer_mac.mm b/modules/desktop_capture/mac/screen_capturer_mac.mm
+index a6876f5b98fe642c9d168a79854cc82def07a31e..5921702b40afb29a01d24c25befbee973cc848bb 100644
+--- a/modules/desktop_capture/mac/screen_capturer_mac.mm
++++ b/modules/desktop_capture/mac/screen_capturer_mac.mm
+@@ -12,6 +12,7 @@
+ 
+ #include "modules/desktop_capture/mac/screen_capturer_mac.h"
+ 
++#include "modules/desktop_capture/cropped_desktop_frame.h"
+ #include "modules/desktop_capture/mac/desktop_frame_provider.h"
+ #include "modules/desktop_capture/mac/window_list_utils.h"
+ #include "rtc_base/checks.h"
+@@ -21,6 +22,7 @@
+ #include "rtc_base/trace_event.h"
+ #include "sdk/objc/helpers/scoped_cftyperef.h"
+ 
++#define INDICATOR_BORDER_WIDTH 2
+ namespace webrtc {
+ 
+ namespace {
+@@ -93,6 +95,11 @@ CFArrayRef CreateWindowListWithExclusion(std::vector<CGWindowID>* windows_to_exc
+     int layer;
+     if (!CFNumberGetValue(layer_ref, kCFNumberIntType, &layer)) continue;
+ 
++    CFNumberRef window_id_ref = static_cast<CFNumberRef>(
++      CFDictionaryGetValue(window, kCGWindowNumber));
++    CGWindowID window_id;
++    if (!CFNumberGetValue(window_id_ref, kCGWindowIDCFNumberType, &window_id)) continue;
++
+     if (pid == own_pid) {
+       if (
+         layer == floating_layer || // screen share overlay
+@@ -117,6 +124,7 @@ CFArrayRef CreateWindowListWithExclusion(std::vector<CGWindowID>* windows_to_exc
+   return returned_array;
+ }
+ 
++
+ // Returns the bounds of |window| in physical pixels, enlarged by a small amount
+ // on four edges to take account of the border/shadow effects.
+ DesktopRect GetExcludedWindowPixelBounds(CGWindowID window, float dip_to_pixel_scale) {
+@@ -293,7 +301,18 @@ DesktopRect GetExcludedWindowPixelBounds(CGWindowID window, float dip_to_pixel_s
+ 
+   new_frame->set_capture_time_ms((rtc::TimeNanos() - capture_start_time_nanos) /
+                                  rtc::kNumNanosecsPerMillisec);
+-  callback_->OnCaptureResult(Result::SUCCESS, std::move(new_frame));
++
++  const float scale = new_frame->scale_factor();
++  const float border_width = scale * INDICATOR_BORDER_WIDTH;
++  DesktopRect rect = new_frame->rect();
++  DesktopRect new_rect = DesktopRect::MakeXYWH(
++    border_width,
++    border_width,
++    std::max(rect.width() * scale - 2 * border_width, 0.0f),
++    std::max(rect.height() * scale - 2 * border_width, 0.0f)
++  );
++  callback_->OnCaptureResult(Result::SUCCESS, CreateCroppedDesktopFrame(
++    std::move(new_frame), new_rect));
+ }
+ 
+ void ScreenCapturerMac::SetExcludedWindow(WindowId window) {
+diff --git a/modules/desktop_capture/window_capturer_mac.mm b/modules/desktop_capture/window_capturer_mac.mm
+index cbbc500613636ebaca432aa3b645ab4b382786db..7a1e634701cfbc6f88457c4bac780d02e2f6d889 100644
+--- a/modules/desktop_capture/window_capturer_mac.mm
++++ b/modules/desktop_capture/window_capturer_mac.mm
+@@ -26,8 +26,92 @@
+ #include "modules/desktop_capture/window_finder_mac.h"
+ #include "rtc_base/constructor_magic.h"
+ #include "rtc_base/logging.h"
++#include "rtc_base/time_utils.h"
+ #include "rtc_base/trace_event.h"
+ 
++#define INDICATOR_BORDER_WIDTH 2
++#define INDICATOR_CORNER_RADIUS 6
++
++@interface AroundWindowSharingIndicatorContainer : NSObject {
++ @private
++  NSWindow *window_;
++  NSRect rect_;
++}
++
++- (id)initWithContentRect:(NSRect)contentRect;
++- (void)positionBelow:(NSNumber *)value;
++- (void)createWindow:(NSObject *)ignored;
++- (void)close:(NSObject *)ignored;
++- (NSWindow*)getWindow;
++@end
++
++@interface AroundWindowSharingIndicator : NSWindow
++@end
++
++@implementation AroundWindowSharingIndicatorContainer
++
++- (id)initWithContentRect:(NSRect)contentRect {
++  self = [super init];
++  rect_ = contentRect;
++  return self;
++}
++
++- (void)createWindow:(NSObject *)ignored {
++  window_ = [[AroundWindowSharingIndicator alloc] initWithContentRect:rect_
++                                        styleMask:NSWindowStyleMaskBorderless
++                                          backing:NSBackingStoreBuffered
++                                            defer:NO];
++}
++
++- (void)close:(NSObject *)ignored {
++  if (window_) {
++    [window_ orderOut:nil];
++  }
++}
++
++- (void)positionBelow:(NSNumber *)value {
++  [window_ orderWindow:NSWindowAbove relativeTo:value.integerValue];
++}
++
++- (NSWindow*)getWindow {
++  return window_;
++}
++
++@end
++
++@implementation AroundWindowSharingIndicator
++
++- (id)initWithContentRect:(NSRect)contentRect
++                styleMask:(NSUInteger)styleMask
++                  backing:(NSBackingStoreType)bufferingType
++                    defer:(BOOL)flag {
++  if (self = [super initWithContentRect:contentRect styleMask:styleMask backing:bufferingType defer:flag]) {
++    [self setBackgroundColor: [NSColor clearColor]];
++    [self setIgnoresMouseEvents: YES];
++    [self setLevel: NSNormalWindowLevel];
++    [self setCollectionBehavior: NSWindowCollectionBehaviorTransient];
++
++    NSBox *box = [[NSBox alloc] initWithFrame:contentRect];
++    [box setBoxType: NSBoxCustom];
++    [box setBorderColor: [NSColor greenColor]];
++    [box setBorderWidth: INDICATOR_BORDER_WIDTH];
++    [box setCornerRadius: INDICATOR_CORNER_RADIUS];
++
++    [self setContentView: box];
++    [self orderFront:nil];
++
++    return self;
++  }
++
++  return nil;
++}
++
++- (NSRect)constrainFrameRect:(NSRect)frameRect toScreen:(NSScreen *)screen {
++  return frameRect;
++}
++
++@end
++
+ namespace webrtc {
+ 
+ namespace {
+@@ -66,6 +150,10 @@ explicit WindowCapturerMac(
+   // The window being captured.
+   CGWindowID window_id_ = 0;
+ 
++  AroundWindowSharingIndicatorContainer *indicator_window_ = nullptr;
++  DesktopRect last_window_bounds_;
++  int64_t last_indicator_draw_ms_ = 0;
++
+   rtc::scoped_refptr<FullScreenWindowDetector> full_screen_window_detector_;
+ 
+   const rtc::scoped_refptr<DesktopConfigurationMonitor> configuration_monitor_;
+@@ -82,7 +170,13 @@ explicit WindowCapturerMac(
+       configuration_monitor_(std::move(configuration_monitor)),
+       window_finder_(configuration_monitor_) {}
+ 
+-WindowCapturerMac::~WindowCapturerMac() {}
++WindowCapturerMac::~WindowCapturerMac() {
++  if (indicator_window_ != nullptr) {
++    [indicator_window_ performSelectorOnMainThread:@selector(close:)
++                          withObject:nil
++                          waitUntilDone:NO];
++  }
++}
+ 
+ bool WindowCapturerMac::GetSourceList(SourceList* sources) {
+   return webrtc::GetWindowList(sources, true, true);
+@@ -138,7 +232,15 @@ explicit WindowCapturerMac(
+     auto configuration = configuration_monitor_->desktop_configuration();
+     sys_pos = pos.add(configuration.bounds.top_left());
+   }
+-  return window_finder_.GetWindowUnderPoint(sys_pos) != window_id_;
++
++  CGWindowID under_point_window_id = window_finder_.GetWindowUnderPoint(sys_pos);
++
++  if (indicator_window_ == nullptr) {
++    return under_point_window_id != window_id_;
++  }
++
++  CGWindowID indicator_window_id = (CGWindowID)[[indicator_window_ getWindow] windowNumber];
++  return (under_point_window_id != window_id_ && under_point_window_id != indicator_window_id);
+ }
+ 
+ void WindowCapturerMac::Start(Callback* callback) {
+@@ -188,13 +290,102 @@ explicit WindowCapturerMac(
+     return;
+   }
+ 
++  DesktopRect window_bounds = GetWindowBounds(on_screen_window);
++
+   frame->mutable_updated_region()->SetRect(
+       DesktopRect::MakeSize(frame->size()));
+-  frame->set_top_left(GetWindowBounds(on_screen_window).top_left());
++  frame->set_top_left(window_bounds.top_left());
+ 
+   float scale_factor = GetWindowScaleFactor(window_id_, frame->size());
+   frame->set_dpi(DesktopVector(kStandardDPI * scale_factor, kStandardDPI * scale_factor));
+ 
++  if (should_exclude_ && configuration_monitor_) {
++    MacDesktopConfiguration desktop_config = configuration_monitor_->desktop_configuration();
++
++    if (!window_bounds.equals(last_window_bounds_)) {
++      last_indicator_draw_ms_ = rtc::SystemTimeMillis();
++      last_window_bounds_ = window_bounds;
++    }
++
++    float delta = 200.0f;
++    bool should_draw_window = rtc::TimeSince(last_indicator_draw_ms_) > delta;
++
++    if (!should_draw_window && indicator_window_ != nullptr) {
++      [indicator_window_ performSelectorOnMainThread:@selector(close:)
++                          withObject:nil
++                          waitUntilDone:YES];
++      indicator_window_ = nullptr;
++    }
++
++    if (should_draw_window && indicator_window_ == nullptr) {
++      MacDisplayConfigurations displays = desktop_config.displays;
++      for (MacDisplayConfigurations::iterator it = displays.begin(); it != displays.end(); ++it) {
++        MacDisplayConfiguration display_config = *it;
++
++        DesktopVector top_left = window_bounds.top_left();
++        DesktopVector top_right = DesktopVector(window_bounds.left() + window_bounds.width(), window_bounds.top());
++        if (display_config.bounds.Contains(top_left) || display_config.bounds.Contains(top_right)) {
++          NSArray<NSScreen *> *screens = [NSScreen screens];
++          NSScreen *current_screen = NULL;
++
++          for (NSScreen *screen in screens) {
++            NSNumber *screen_id = screen.deviceDescription[@"NSScreenNumber"];
++            CGDirectDisplayID display_id = [screen_id unsignedIntValue];
++            if (display_id == display_config.id) {
++              current_screen = screen;
++              break;
++            }
++          }
++
++          NSRect current_bounds = [current_screen frame];
++          int screen_x = current_bounds.origin.x;
++          int screen_y = current_bounds.origin.y;
++          int screen_width = current_bounds.size.width;
++          int screen_height = current_bounds.size.height;
++          int screen_right = screen_x + screen_width;
++
++          NSRect new_bounds = NSMakeRect(
++            window_bounds.left(),
++            screen_y + screen_height - window_bounds.top() + display_config.bounds.top() -
++              window_bounds.height(),
++            window_bounds.width(),
++            window_bounds.height()
++          );
++
++          int window_top = new_bounds.origin.y + new_bounds.size.height;
++          if ((new_bounds.origin.y < screen_y) && (window_top > screen_y)) {
++            new_bounds.origin.y = screen_y - INDICATOR_CORNER_RADIUS;
++            new_bounds.size.height = window_top - screen_y + INDICATOR_CORNER_RADIUS;
++          }
++
++          int window_right = new_bounds.origin.x + new_bounds.size.width;
++          if ((new_bounds.origin.x < screen_x) && (window_right > screen_x)) {
++            if ((window_right - screen_x) > (screen_right- new_bounds.origin.x)) {
++              new_bounds.origin.x = screen_x - INDICATOR_CORNER_RADIUS;
++              new_bounds.size.width = new_bounds.size.width - screen_x + new_bounds.origin.x + INDICATOR_CORNER_RADIUS;
++            }
++          }
++          if ((new_bounds.origin.x < screen_right) && (window_right > screen_right)) {
++            if ((screen_right - new_bounds.origin.x) > (window_right - screen_right)) {
++              new_bounds.size.width = screen_right - new_bounds.origin.x + INDICATOR_CORNER_RADIUS;
++            }
++          }
++
++          indicator_window_ = [[AroundWindowSharingIndicatorContainer alloc] initWithContentRect: new_bounds];
++          [indicator_window_ performSelectorOnMainThread:@selector(createWindow:)
++                              withObject:nil
++                              waitUntilDone:NO];
++        }
++      }
++    }
++
++    if (indicator_window_ != nullptr) {
++      [indicator_window_ performSelectorOnMainThread:@selector(positionBelow:)
++                          withObject:[NSNumber numberWithInteger:(NSInteger)window_id_]
++                          waitUntilDone:NO];
++    }
++  }
++
+   callback_->OnCaptureResult(Result::SUCCESS, std::move(frame));
+ }
+ 

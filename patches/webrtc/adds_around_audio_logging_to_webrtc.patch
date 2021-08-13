@@ -1,0 +1,797 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Kevin Venalainen <kevin.venalainen@around.co>
+Date: Wed, 17 Feb 2021 12:17:48 -0800
+Subject: Adds Around audio logging to webrtc
+
+Signed-off-by: gellert <gellert.hegyi@around.co>
+
+diff --git a/modules/audio_processing/BUILD.gn b/modules/audio_processing/BUILD.gn
+index bf0cf0d2bca25b8de457b1f822e0542018b29629..814e2831ab7bbc8a057ddc6a75cc7bf6a5a55eda 100644
+--- a/modules/audio_processing/BUILD.gn
++++ b/modules/audio_processing/BUILD.gn
+@@ -203,6 +203,7 @@ rtc_library("audio_processing") {
+     "around_biquad:around_biquad",
+     "around_biquad:mask_compensation_coefficients",
+     "around_agc:around_agc",
++    "around_common:around_common",
+   ]
+   absl_deps = [ "//third_party/abseil-cpp/absl/types:optional" ]
+ 
+diff --git a/modules/audio_processing/around_common/BUILD.gn b/modules/audio_processing/around_common/BUILD.gn
+new file mode 100644
+index 0000000000000000000000000000000000000000..98d9a83981843ca4f73edf0e03128cd43643c470
+--- /dev/null
++++ b/modules/audio_processing/around_common/BUILD.gn
+@@ -0,0 +1,13 @@
++import("../../../webrtc.gni")
++
++rtc_source_set("around_common") {
++  visibility = [ "../*" ]
++  sources = [
++    "around_log.h",
++    "around_log.cc",
++    "performance_stats.h",
++    "performance_stats.cc",
++    "timer_context.h",
++  ]
++  deps = []
++}
+diff --git a/modules/audio_processing/around_common/around_log.cc b/modules/audio_processing/around_common/around_log.cc
+new file mode 100644
+index 0000000000000000000000000000000000000000..c537348befe594e905dc415a300286106c652568
+--- /dev/null
++++ b/modules/audio_processing/around_common/around_log.cc
+@@ -0,0 +1,29 @@
++#include "around_log.h"
++#include "pc/data_channel_controller.h"
++
++namespace webrtc {
++
++static constexpr char LOG_PREFIX[] = "around-log;message=";
++
++void LogToDataChannel(const std::string& message) {
++  DataChannelController* data_channel_controller = DataChannelController::GetSharedDataChannelController();
++  if (data_channel_controller != nullptr) {
++    data_channel_controller->SafeSendAroundMessage(message);
++  }
++}
++
++LogBuilder::LogBuilder()
++  : stream_(LOG_PREFIX, std::ostringstream::ate) {
++}
++
++void LogBuilder::Flush() {
++  LogToDataChannel(stream_.str());
++  stream_.str(LOG_PREFIX);
++}
++
++LogBuilder& LogBuilder::endl(LogBuilder& lb) {
++    lb.Flush();
++    return lb;
++}
++
++}
+diff --git a/modules/audio_processing/around_common/around_log.h b/modules/audio_processing/around_common/around_log.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..c792330b975ef72b1625323536b9e0c82bc840d6
+--- /dev/null
++++ b/modules/audio_processing/around_common/around_log.h
+@@ -0,0 +1,74 @@
++#ifndef MODULES_AUDIO_PROCESSING_AROUND_LOG_H_
++#define MODULES_AUDIO_PROCESSING_AROUND_LOG_H_
++
++#include <chrono>
++#include <ostream>
++#include <sstream>
++#include <type_traits>
++#include "timer_context.h"
++#include "rtc_base/logging.h"
++
++namespace webrtc {
++
++  // Returns true if tc.Elapsed() is greater than the provided period.
++  inline bool CheckShouldLog(const int timeoutMs, TimerContext& tc) {
++    bool ret = false;
++    if (tc.Elapsed() > std::chrono::milliseconds(timeoutMs))
++    {
++      ret = true;
++      tc.Reset();
++    }
++    return ret;
++  }
++
++  class LogBuilder {
++  public:
++    LogBuilder();
++    LogBuilder(const LogBuilder&) = delete;
++    LogBuilder(LogBuilder&&) = delete;
++
++    // Override operator<< to return references to this class type.
++    template <typename T>
++    LogBuilder& operator<< (T t) {
++      stream_ << t;
++      return *this;
++    }
++
++    // Specialization to enable stream manipulators like LogBuilder::endl
++    template <>
++    LogBuilder& operator<< (LogBuilder& (*func)(LogBuilder&)) {
++      return func(*this);
++    }
++
++    // Behaves like std::endl, transmitting the current log and clearing
++    // the log string when inserted to the stream.
++    static LogBuilder& endl(LogBuilder& st);
++
++  protected:
++    // Immediately transmits the current string and clears for a new log.
++    void Flush();
++
++    std::ostringstream stream_;
++  };
++
++  // Macro preprocessor magic that expands call like UNIQUENAME(myVar) to myVar321.
++  #define CONCAT_II(null, cat) cat
++  #define CONCAT_I(a, b) CONCAT_II(~, a ## b)
++  #define CONCAT(a, b) CONCAT_I(a, b)
++  #define UNIQUENAME(prefix) CONCAT(prefix, __LINE__)
++
++  #define LOG_THROTTLE_IMPL(TIMEOUT_MS, CTX) \
++    static TimerContext CTX; \
++    if (CheckShouldLog(TIMEOUT_MS, CTX)) LogBuilder()
++
++  // Logging macro. Emits at most one log every TIMEOUT_MS, and drops all other logs in between.
++  #define LOG_THROTTLE(TIMEOUT_MS) LOG_THROTTLE_IMPL(TIMEOUT_MS, UNIQUENAME(tc_))
++
++  // Emits a log each time it's called, does not throttle.
++  #define LOG_NOW() LogBuilder()
++
++  // Terminates the log expression and causes the log to be emitted.
++  #define LOG_ENDL LogBuilder::endl
++}
++
++#endif
+diff --git a/modules/audio_processing/around_common/performance_stats.cc b/modules/audio_processing/around_common/performance_stats.cc
+new file mode 100644
+index 0000000000000000000000000000000000000000..fd169c46d23721e88930e33f83bdcda075db54bc
+--- /dev/null
++++ b/modules/audio_processing/around_common/performance_stats.cc
+@@ -0,0 +1,53 @@
++#include "performance_stats.h"
++#include <algorithm>
++
++namespace webrtc {
++
++  PerformanceStats::PerformanceStats() : mCategories() {
++  }
++
++  void PerformanceStats::AddCategory(const std::string& categoryName) {
++    mCategories.emplace(std::make_pair(std::string(categoryName), StatsEntry()));
++  }
++
++  void PerformanceStats::AddMeasurement(const std::string& categoryName, const float& x, const bool incrementCount) {
++    auto& stats = mCategories.at(categoryName);
++    stats.max = std::max(stats.max, x);
++    stats.min = std::min(stats.min, x);
++    stats.total += x;
++    if (incrementCount)
++    {
++      ++stats.count;
++    }
++  }
++
++  void PerformanceStats::ResetCategory(const std::string& categoryName) {
++    mCategories.at(categoryName).Reset();
++  }
++
++  void PerformanceStats::ResetAll()
++  {
++    for (auto& c : mCategories)
++    {
++      c.second.Reset();
++    }
++  }
++
++  std::string PerformanceStats::ToString(const bool resetStats)
++  {
++    std::string s;
++    s.reserve(mCategories.size() * 50);
++    for (auto& c : mCategories)
++    {
++      s.append(c.first).append(": { ").append(c.second.ToString()).append(" }, ");
++      if (resetStats)
++      {
++        c.second.Reset();
++      }
++    }
++    s.pop_back(); // pop ' '
++    s.pop_back(); // pop ','
++    return s;
++  }
++
++}
+diff --git a/modules/audio_processing/around_common/performance_stats.h b/modules/audio_processing/around_common/performance_stats.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..75c85ef50cda95348d94d9fd2cf186eb72717aeb
+--- /dev/null
++++ b/modules/audio_processing/around_common/performance_stats.h
+@@ -0,0 +1,81 @@
++#ifndef MODULES_AUDIO_PROCESSING_LOG_THROTTLE_H_
++#define MODULES_AUDIO_PROCESSING_LOG_THROTTLE_H_
++
++#include <string>
++#include <unordered_map>
++#include <limits>
++#include "timer_context.h"
++#include "around_log.h"
++
++namespace webrtc {
++
++  // Helper class that provides ability to measure statistics for arbitrary named categories.
++  class PerformanceStats {
++  public:
++
++    // Statistics entry for a category. T must be a fundamental type that can be converted
++    // to string using std::to_string.
++    struct StatsEntry {
++      StatsEntry() noexcept :
++        min(std::numeric_limits<float>::max()),
++        max(std::numeric_limits<float>::lowest()),
++        total(0.0f),
++        count(0U) {
++      }
++
++      // Resets the object stats.
++      inline void Reset() noexcept {
++        min = std::numeric_limits<float>::max();
++        max = std::numeric_limits<float>::lowest();
++        total = 0.0f;
++        count = 0U;
++      }
++
++      // Prints a JSON-like string representing the current stats.
++      inline std::string ToString() {
++        float mean = count > 0U ? (total / count) : 0.0f;
++        std::string s;
++        s.append("min: ").append(std::to_string(min))
++          .append(", mean: ").append(std::to_string(mean))
++          .append(", max: ").append(std::to_string(max))
++          .append(", total: ").append(std::to_string(total))
++          .append(", count: ").append(std::to_string(count));
++          return s;
++      }
++
++      float min;
++      float max;
++      float total;
++      size_t count;
++    };
++
++    // Constructs an instance of performance stats with no initial categories.
++    PerformanceStats();
++
++    // Registers a new category with the PerformanceStats instance, creating a StatsEntry
++    // to hold future stats entries. Propagates any exceptions from std::unordered_map.
++    void AddCategory(const std::string& categoryName);
++
++    // Adds a new measurement for an existing category. Category must exist.
++    // Propagates any exceptions from std::unordered_map. If `incrementCount` is false,
++    // then the count is not increased on each measurement.
++    void AddMeasurement(const std::string& categoryName, const float& x,
++      const bool incrementCount = true);
++
++    // Resets all measurements for the given category. Category must exist.
++    // Propagates any exceptions from std::unordered_map.
++    void ResetCategory(const std::string& categoryName);
++
++    // Resets all stats in all categories.
++    void ResetAll();
++
++    // Prints all of the current stats to JSON-like string and optionally resets counters.
++    std::string ToString(const bool resetStats = false);
++
++  private:
++    std::unordered_map<std::string, StatsEntry> mCategories;
++  };
++
++}
++
++#endif
+diff --git a/modules/audio_processing/around_common/timer_context.h b/modules/audio_processing/around_common/timer_context.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..0b0741c7262d0fe0c986e108099f8e8d1216d4eb
+--- /dev/null
++++ b/modules/audio_processing/around_common/timer_context.h
+@@ -0,0 +1,55 @@
++#ifndef MODULES_AUDIO_PROCESSING_TIMER_CONTEXT_H_
++#define MODULES_AUDIO_PROCESSING_TIMER_CONTEXT_H_
++
++#include <chrono>
++#include "rtc_base/constructor_magic.h"
++
++namespace webrtc {
++
++  typedef std::chrono::high_resolution_clock hrclock;
++  typedef hrclock::time_point hrtime;
++  typedef std::chrono::duration<int64_t, std::micro> durationUs;
++
++  // Simple helper class that maintains a resetable timer interval using the high_resolution_clock.
++  class TimerContext {
++    public:
++
++      // Creates and initializes the TimerContext.
++      TimerContext() :
++        mLastTime()
++      {
++      }
++
++      RTC_DISALLOW_COPY_AND_ASSIGN(TimerContext);
++
++      // Returns the elapsed duration since last reset in us (or construction)
++      // and optionally resets the context.
++      inline durationUs Elapsed(const bool reset = false) noexcept
++      {
++        const auto now = hrclock::now();
++        const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(hrclock::now() - mLastTime);
++        if (reset) {
++          mLastTime = now;
++        }
++        return elapsed;
++      }
++
++      // Returns the elapsed duration since last reset in us without resetting
++      // context.
++      inline durationUs Elapsed() const noexcept
++      {
++        return std::chrono::duration_cast<std::chrono::microseconds>(hrclock::now() - mLastTime);
++      }
++
++      // Resets the timer context, updating elapsed time to zero.
++      inline void Reset() noexcept
++      {
++        mLastTime = hrclock::now();
++      }
++
++    private:
++      hrtime mLastTime;
++  };
++}
++
++#endif
+diff --git a/modules/audio_processing/audio_processing_impl.cc b/modules/audio_processing/audio_processing_impl.cc
+index b322d2016440742df3157d6547a5628e26e647f1..0c54c32aeabc8f30c68a1d9f849ac12015a454b7 100644
+--- a/modules/audio_processing/audio_processing_impl.cc
++++ b/modules/audio_processing/audio_processing_impl.cc
+@@ -271,6 +271,8 @@ AudioProcessingImpl::AudioProcessingImpl(
+                   std::move(render_pre_processor),
+                   std::move(echo_detector),
+                   std::move(capture_analyzer)),
++      processing_time_stats_(),
++      pipeline_stats_(),
+       constants_(!field_trial::IsEnabled(
+                      "WebRTC-ApmExperimentalMultiChannelRenderKillSwitch"),
+                  !field_trial::IsEnabled(
+@@ -290,6 +292,33 @@ AudioProcessingImpl::AudioProcessingImpl(
+                    << "\nRender pre processor: "
+                    << !!submodules_.render_pre_processor;
+ 
++  // Create Around performance stats categories
++  processing_time_stats_.AddCategory("HPF");
++  processing_time_stats_.AddCategory("PreAmplifier");
++  processing_time_stats_.AddCategory("AEC");
++  processing_time_stats_.AddCategory("AgcManager");
++  processing_time_stats_.AddCategory("BandSplit");
++  processing_time_stats_.AddCategory("AGC1");
++  processing_time_stats_.AddCategory("AGC2");
++  processing_time_stats_.AddCategory("NS");
++  processing_time_stats_.AddCategory("VAD");
++  processing_time_stats_.AddCategory("BandMerge");
++  processing_time_stats_.AddCategory("AroundNS");
++  processing_time_stats_.AddCategory("AroundAGC");
++  processing_time_stats_.AddCategory("Other");
++
++  // Create categories for pipeline stats
++  pipeline_stats_.AddCategory("ERL");
++  pipeline_stats_.AddCategory("ERLE");
++  pipeline_stats_.AddCategory("AECDelayMs");
++  pipeline_stats_.AddCategory("StreamDelay");
++  pipeline_stats_.AddCategory("InputDbfsAvg");
++  pipeline_stats_.AddCategory("InputDbfsPeak");
++  pipeline_stats_.AddCategory("OutputDbfsAvg");
++  pipeline_stats_.AddCategory("OutputDbfsPeak");
++  pipeline_stats_.AddCategory("AroundVadProb");
++  pipeline_stats_.AddCategory("AroundRms");
++
+   // Mark Echo Controller enabled if a factory is injected.
+   capture_nonlocked_.echo_controller_enabled =
+       static_cast<bool>(echo_control_factory_);
+@@ -441,6 +470,7 @@ void AudioProcessingImpl::InitializeLocked() {
+ 
+   if (config_.around_audio_processing.enabled) {
+     SetupDataChannelObserver();
++    LOG_NOW() << "AudioProcessing::Initialize: " << config_.ToString() << LOG_ENDL;
+   }
+ 
+   if (aec_dump_) {
+@@ -562,6 +592,7 @@ int AudioProcessingImpl::InitializeLocked(const ProcessingConfig& config) {
+ 
+ void AudioProcessingImpl::ApplyConfig(const AudioProcessing::Config& config) {
+   RTC_LOG(LS_INFO) << "AudioProcessing::ApplyConfig: " << config.ToString();
++  LOG_NOW() << "AudioProcessing::ApplyConfig: " << config.ToString() << LOG_ENDL;
+ 
+   // Run in a single-threaded manner when applying the settings.
+   MutexLock lock_render(&mutex_render_);
+@@ -1150,6 +1181,10 @@ int AudioProcessingImpl::ProcessCaptureStreamLocked() {
+   AudioBuffer* capture_buffer = capture_.capture_audio.get();  // For brevity.
+   AudioBuffer* linear_aec_buffer = capture_.linear_aec_output.get();
+ 
++  // Set timer context for timing the audio processing
++  TimerContext tc;
++  tc.Reset();
++
+   if (submodules_.high_pass_filter &&
+       config_.high_pass_filter.apply_in_full_band &&
+       !constants_.enforce_split_band_hpf) {
+@@ -1157,6 +1192,8 @@ int AudioProcessingImpl::ProcessCaptureStreamLocked() {
+                                           /*use_split_band_data=*/false);
+   }
+ 
++  processing_time_stats_.AddMeasurement("HPF", tc.Elapsed(true).count());
++
+   if (submodules_.capture_levels_adjuster) {
+     // If the analog mic gain emulation is active, get the emulated analog mic
+     // gain and pass it to the analog gain control functionality.
+@@ -1187,6 +1224,15 @@ int AudioProcessingImpl::ProcessCaptureStreamLocked() {
+                                 levels.peak, 1, RmsLevel::kMinLevelDb, 64);
+   }
+ 
++  // Negating the values for true dBFS
++  {
++    RmsLevel::Levels levels = capture_input_rms_.AverageAndPeak();
++    pipeline_stats_.AddMeasurement("InputDbfsAvg", -levels.average);
++    pipeline_stats_.AddMeasurement("InputDbfsPeak", -levels.peak);
++  }
++
++  processing_time_stats_.AddMeasurement("Other", tc.Elapsed(true).count()); // Input metering.
++
+   if (submodules_.echo_controller) {
+     // Detect and flag any change in the analog gain.
+     int analog_mic_level = recommended_stream_analog_level_locked();
+@@ -1214,18 +1260,32 @@ int AudioProcessingImpl::ProcessCaptureStreamLocked() {
+     capture_.prev_playout_volume = capture_.playout_volume;
+ 
+     submodules_.echo_controller->AnalyzeCapture(capture_buffer);
++
++    // Print immediately if changed.
++    if (capture_.echo_path_gain_change)
++    {
++      LOG_THROTTLE(100) << "EchoPathGainChange: " << capture_.echo_path_gain_change
++        << " PrevAnalogMicLevel: " << capture_.prev_analog_mic_level
++        << " PrevPlayoutVolume: " << capture_.prev_playout_volume << LOG_ENDL;
++    }
+   }
+ 
++  processing_time_stats_.AddMeasurement("AEC", tc.Elapsed(true).count());
++
+   if (submodules_.agc_manager) {
+     submodules_.agc_manager->AnalyzePreProcess(capture_buffer);
+   }
+ 
++  processing_time_stats_.AddMeasurement("AgcManager", tc.Elapsed(true).count());
++
+   if (submodule_states_.CaptureMultiBandSubModulesActive() &&
+       SampleRateSupportsMultiBand(
+           capture_nonlocked_.capture_processing_format.sample_rate_hz())) {
+     capture_buffer->SplitIntoFrequencyBands();
+   }
+ 
++  processing_time_stats_.AddMeasurement("BandSplit", tc.Elapsed(true).count());
++
+   const bool multi_channel_capture = config_.pipeline.multi_channel_capture &&
+                                      constants_.multi_channel_capture_support;
+   if (submodules_.echo_controller && !multi_channel_capture) {
+@@ -1245,17 +1305,23 @@ int AudioProcessingImpl::ProcessCaptureStreamLocked() {
+                                           /*use_split_band_data=*/true);
+   }
+ 
++  processing_time_stats_.AddMeasurement("HPF", tc.Elapsed(true).count(), false);
++
+   if (submodules_.gain_control) {
+     RETURN_ON_ERR(
+         submodules_.gain_control->AnalyzeCaptureAudio(*capture_buffer));
+   }
+ 
++  processing_time_stats_.AddMeasurement("AGC1", tc.Elapsed(true).count());
++
+   if ((!config_.noise_suppression.analyze_linear_aec_output_when_available ||
+        !linear_aec_buffer || submodules_.echo_control_mobile) &&
+       submodules_.noise_suppressor) {
+     submodules_.noise_suppressor->Analyze(*capture_buffer);
+   }
+ 
++  processing_time_stats_.AddMeasurement("NS", tc.Elapsed(true).count());
++
+   if (submodules_.echo_control_mobile) {
+     // Ensure that the stream delay was set before the call to the
+     // AECM ProcessCaptureAudio function.
+@@ -1267,6 +1333,8 @@ int AudioProcessingImpl::ProcessCaptureStreamLocked() {
+       submodules_.noise_suppressor->Process(capture_buffer);
+     }
+ 
++    processing_time_stats_.AddMeasurement("NS", tc.Elapsed(true).count(), false);
++
+     RETURN_ON_ERR(submodules_.echo_control_mobile->ProcessCaptureAudio(
+         capture_buffer, stream_delay_ms()));
+   } else {
+@@ -1279,8 +1347,12 @@ int AudioProcessingImpl::ProcessCaptureStreamLocked() {
+ 
+       submodules_.echo_controller->ProcessCapture(
+           capture_buffer, linear_aec_buffer, capture_.echo_path_gain_change);
++
++      pipeline_stats_.AddMeasurement("StreamDelay", stream_delay_ms(), true);
+     }
+ 
++    processing_time_stats_.AddMeasurement("AEC", tc.Elapsed(true).count(), false);
++
+     if (config_.noise_suppression.analyze_linear_aec_output_when_available &&
+         linear_aec_buffer && submodules_.noise_suppressor) {
+       submodules_.noise_suppressor->Analyze(*linear_aec_buffer);
+@@ -1289,6 +1361,8 @@ int AudioProcessingImpl::ProcessCaptureStreamLocked() {
+     if (submodules_.noise_suppressor) {
+       submodules_.noise_suppressor->Process(capture_buffer);
+     }
++
++    processing_time_stats_.AddMeasurement("NS", tc.Elapsed(true).count(), false);
+   }
+ 
+   if (config_.voice_detection.enabled) {
+@@ -1298,6 +1372,8 @@ int AudioProcessingImpl::ProcessCaptureStreamLocked() {
+     capture_.stats.voice_detected = absl::nullopt;
+   }
+ 
++  processing_time_stats_.AddMeasurement("VAD", tc.Elapsed(true).count());
++
+   if (submodules_.agc_manager) {
+     submodules_.agc_manager->Process(capture_buffer);
+ 
+@@ -1308,22 +1384,30 @@ int AudioProcessingImpl::ProcessCaptureStreamLocked() {
+     }
+   }
+ 
++  processing_time_stats_.AddMeasurement("AGC1", tc.Elapsed(true).count(), false);
++
+   if (config_.around_audio_processing.enabled) {
+     submodules_.around_denoiser->CalculateRMS(capture_buffer);
+   }
+ 
++  processing_time_stats_.AddMeasurement("AroundNS", tc.Elapsed(true).count());
++
+   if (submodules_.gain_control) {
+     // TODO(peah): Add reporting from AEC3 whether there is echo.
+     RETURN_ON_ERR(submodules_.gain_control->ProcessCaptureAudio(
+         capture_buffer, /*stream_has_echo*/ false));
+   }
+ 
++  processing_time_stats_.AddMeasurement("AGC1", tc.Elapsed(true).count(), false);
++
+   if (submodule_states_.CaptureMultiBandProcessingPresent() &&
+       SampleRateSupportsMultiBand(
+           capture_nonlocked_.capture_processing_format.sample_rate_hz())) {
+     capture_buffer->MergeFrequencyBands();
+   }
+ 
++  processing_time_stats_.AddMeasurement("BandMerge", tc.Elapsed(true).count());
++
+   capture_.stats.output_rms_dbfs = absl::nullopt;
+   if (capture_.capture_output_used) {
+     if (capture_.capture_fullband_audio) {
+@@ -1337,6 +1421,8 @@ int AudioProcessingImpl::ProcessCaptureStreamLocked() {
+       capture_buffer = capture_.capture_fullband_audio.get();
+     }
+ 
++    processing_time_stats_.AddMeasurement("Other", tc.Elapsed(true).count(), false);
++
+     if (config_.residual_echo_detector.enabled) {
+       RTC_DCHECK(submodules_.echo_detector);
+       submodules_.echo_detector->AnalyzeCaptureAudio(
+@@ -1344,6 +1430,8 @@ int AudioProcessingImpl::ProcessCaptureStreamLocked() {
+                                       capture_buffer->num_frames()));
+     }
+ 
++    processing_time_stats_.AddMeasurement("Other", tc.Elapsed(true).count(), false);
++
+     // TODO(aluebs): Investigate if the transient suppression placement should
+     // be before or after the AGC.
+     if (submodules_.transient_suppressor) {
+@@ -1362,21 +1450,29 @@ int AudioProcessingImpl::ProcessCaptureStreamLocked() {
+           capture_.key_pressed);
+     }
+ 
++    processing_time_stats_.AddMeasurement("Other", tc.Elapsed(true).count(), false); // Transient Suppressor
++
+     // Experimental APM sub-module that analyzes |capture_buffer|.
+     if (submodules_.capture_analyzer) {
+       submodules_.capture_analyzer->Analyze(capture_buffer);
+     }
+ 
++    processing_time_stats_.AddMeasurement("Other", tc.Elapsed(true).count(), false); // Capture Analyzer
++
+     if (submodules_.gain_controller2) {
+       submodules_.gain_controller2->NotifyAnalogLevel(
+           recommended_stream_analog_level_locked());
+       submodules_.gain_controller2->Process(capture_buffer);
+     }
+ 
++    processing_time_stats_.AddMeasurement("AGC2", tc.Elapsed(true).count());
++
+     if (submodules_.capture_post_processor) {
+       submodules_.capture_post_processor->Process(capture_buffer);
+     }
+ 
++    processing_time_stats_.AddMeasurement("Other", tc.Elapsed(true).count(), false); // Post Processor
++
+     // The level estimator operates on the recombined data.
+     if (config_.level_estimation.enabled) {
+       submodules_.output_level_estimator->ProcessStream(*capture_buffer);
+@@ -1384,6 +1480,8 @@ int AudioProcessingImpl::ProcessCaptureStreamLocked() {
+           submodules_.output_level_estimator->RMS();
+     }
+ 
++    processing_time_stats_.AddMeasurement("Other", tc.Elapsed(true).count(), false); // Level Estimator
++
+     capture_output_rms_.Analyze(rtc::ArrayView<const float>(
+         capture_buffer->channels_const()[0],
+         capture_nonlocked_.capture_processing_format.num_frames()));
+@@ -1396,12 +1494,16 @@ int AudioProcessingImpl::ProcessCaptureStreamLocked() {
+                                   levels.peak, 1, RmsLevel::kMinLevelDb, 64);
+     }
+ 
++    processing_time_stats_.AddMeasurement("Other", tc.Elapsed(true).count(), false); // Output Level Estimator
++
+     if (submodules_.agc_manager) {
+       int level = recommended_stream_analog_level_locked();
+       data_dumper_->DumpRaw("experimental_gain_control_stream_analog_level", 1,
+                             &level);
+     }
+ 
++    processing_time_stats_.AddMeasurement("AgcManager", tc.Elapsed(true).count(), false);
++
+     // Compute echo-detector stats.
+     if (config_.residual_echo_detector.enabled) {
+       RTC_DCHECK(submodules_.echo_detector);
+@@ -1419,11 +1521,19 @@ int AudioProcessingImpl::ProcessCaptureStreamLocked() {
+     capture_.stats.echo_return_loss_enhancement =
+         ec_metrics.echo_return_loss_enhancement;
+     capture_.stats.delay_ms = ec_metrics.delay_ms;
++
++    pipeline_stats_.AddMeasurement("ERL", ec_metrics.echo_return_loss);
++    pipeline_stats_.AddMeasurement("ERLE", ec_metrics.echo_return_loss_enhancement);
++    pipeline_stats_.AddMeasurement("AECDelayMs", ec_metrics.delay_ms);
+   }
+ 
++  processing_time_stats_.AddMeasurement("Other", tc.Elapsed(true).count(), false); // Output Level Estimator
++
+   // Pass stats for reporting.
+   stats_reporter_.UpdateStatistics(capture_.stats);
+ 
++  processing_time_stats_.AddMeasurement("Other", tc.Elapsed(true).count(), false);
++
+   if (submodules_.capture_levels_adjuster) {
+     submodules_.capture_levels_adjuster->ApplyPostLevelAdjustment(
+         *capture_buffer);
+@@ -1465,13 +1575,21 @@ int AudioProcessingImpl::ProcessCaptureStreamLocked() {
+     // Always call this since user-VAD is computed within.
+     submodules_.around_denoiser->Denoise(capture_buffer, config_.around_audio_processing.noise_suppression_db);
+ 
++    processing_time_stats_.AddMeasurement("AroundNS", tc.Elapsed(true).count(), false);
++
+     auto features = submodules_.around_denoiser->getCurrentFeatures();
++    pipeline_stats_.AddMeasurement("AroundVadProb", submodules_.around_denoiser->getCurrentFeatures()->vad_probability);
++    pipeline_stats_.AddMeasurement("AroundRms", submodules_.around_denoiser->getCurrentFeatures()->rms);
+ 
+     // Apply final digital AGC
+     submodules_.around_agc->Process(capture_buffer, features->vad_probability);
+ 
++    processing_time_stats_.AddMeasurement("AroundAGC", tc.Elapsed(true).count(), false);
++
+     submodules_.around_denoiser->EncodeFeaturesToSignal(capture_buffer);
+ 
++    processing_time_stats_.AddMeasurement("AroundNS", tc.Elapsed(true).count(), false);
++
+     AroundDenoiser::VADState vad_state = submodules_.around_denoiser->GetCurrentVADState();
+     if (vad_state != previous_vad_state_) {
+       DataChannelController* data_channel_controller = DataChannelController::GetSharedDataChannelController();
+@@ -1488,7 +1606,26 @@ int AudioProcessingImpl::ProcessCaptureStreamLocked() {
+     }
+   }
+ 
++  // Negating the values for true dBFS
++  {
++    RmsLevel::Levels levels = capture_output_rms_.AverageAndPeak();
++    pipeline_stats_.AddMeasurement("OutputDbfsAvg", -levels.average);
++    pipeline_stats_.AddMeasurement("OutputDbfsPeak", -levels.peak);
++  }
++
++  processing_time_stats_.AddMeasurement("Other", tc.Elapsed(true).count(), false);
++
+   capture_.was_stream_delay_set = false;
++
++  if (around_log_control_.processing_time_stats) {
++    LOG_THROTTLE(around_log_control_.stats_log_period)
++      << processing_time_stats_.ToString(true) << LOG_ENDL;
++  }
++  if (around_log_control_.pipeline_stats) {
++    LOG_THROTTLE(around_log_control_.stats_log_period)
++      << pipeline_stats_.ToString(true) << LOG_ENDL;
++  }
++
+   return kNoError;
+ }
+ 
+@@ -2309,17 +2446,34 @@ void AudioProcessingImpl::OnCommandReceived(std::string command, std::map<std::s
+   if (command == "noise_suppression") {
+     absl::optional<float> value = rtc::StringToNumber<float>(params["level"]);
+     if (!value.has_value()) {
+-      RTC_LOG(LS_ERROR) << "AROUND ERROR: Invalid noise suppression level: " << params["level"];
++      LOG_NOW() << "AROUND ERROR: Invalid noise suppression level: " << params["level"] << LOG_ENDL;
+       return;
+     }
+ 
+     config_.around_audio_processing.noise_suppression_db = value.value();
+-  }
++    LOG_NOW() << "Around NS level changed: " << config_.around_audio_processing.noise_suppression_db << LOG_ENDL;
++  }
++
++  if (command == "log_control") {
++    around_log_control_.processing_time_stats =
++      rtc::StringToNumber<unsigned int>(params["processing_time_stats"])
++      .value_or(around_log_control_.processing_time_stats);
++    around_log_control_.pipeline_stats =
++      rtc::StringToNumber<unsigned int>(params["pipeline_stats"])
++      .value_or(around_log_control_.pipeline_stats);
++    around_log_control_.stats_log_period =
++      rtc::StringToNumber<unsigned int>(params["stats_log_period"])
++      .value_or(around_log_control_.stats_log_period);
++    LOG_NOW() << "processing_time_stats: " << around_log_control_.processing_time_stats << LOG_ENDL;
++    LOG_NOW() << "pipeline_stats: " << around_log_control_.pipeline_stats << LOG_ENDL;
++    LOG_NOW() << "stats_log_period: " << around_log_control_.stats_log_period << LOG_ENDL;
++   }
+ 
+   if (command == "mask_compensation") {
+     config_.around_audio_processing.mask_compensation =
+       rtc::StringToNumber<unsigned int>(params["enabled"])
+       .value_or(config_.around_audio_processing.mask_compensation);
++    LOG_NOW() << "mask_compensation: " << config_.around_audio_processing.mask_compensation << LOG_ENDL;
+ 
+     // If we just disabled, reset.
+     if (submodules_.around_mask_compensation &&
+diff --git a/modules/audio_processing/audio_processing_impl.h b/modules/audio_processing/audio_processing_impl.h
+index 671cc71f4719610f60e3bad54e05103b7fa297da..ed9cac9b8c03ac0c3d7ed38da18d3fc8b7d733b6 100644
+--- a/modules/audio_processing/audio_processing_impl.h
++++ b/modules/audio_processing/audio_processing_impl.h
+@@ -49,6 +49,8 @@
+ #include "rtc_base/swap_queue.h"
+ #include "rtc_base/synchronization/mutex.h"
+ #include "rtc_base/thread_annotations.h"
++#include "around_common/around_log.h"
++#include "around_common/performance_stats.h"
+ 
+ namespace webrtc {
+ 
+@@ -414,6 +416,16 @@ class AudioProcessingImpl : public AudioProcessing,
+     std::unique_ptr<AroundAgc> around_agc;
+   } submodules_;
+ 
++  PerformanceStats processing_time_stats_; // Profiling of processing time per module
++  PerformanceStats pipeline_stats_; // Profiling pipeline state over time
++
++  // Controls summary statistics being printed to the log.
++  struct AroundLogControl {
++    bool processing_time_stats = false; // true to print, stats are always collected
++    bool pipeline_stats = false; // true to print, stats are always collected
++    unsigned int stats_log_period = 5000; // milliseconds
++  } around_log_control_;
++
+   // State that is written to while holding both the render and capture locks
+   // but can be read without any lock being held.
+   // As this is only accessed internally of APM, and all internal methods in APM

@@ -1,0 +1,726 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: gellert <gellert.hegyi@around.co>
+Date: Sat, 13 Mar 2021 19:23:54 +0100
+Subject: adds rnnoise based audio processing
+
+This patch adds a custom trained rnnoise model as separate dependency and integrates it to chromiums audio processing through getusermedia flags.
+
+Signed-off-by: gellert <gellert.hegyi@around.co>
+
+diff --git a/media/base/audio_processing.cc b/media/base/audio_processing.cc
+index ce32fd2370c9a425c9856bbfd7f0d342ab9265f1..f0d28d0c833844f010b5dec4a601954f34dfe0fb 100644
+--- a/media/base/audio_processing.cc
++++ b/media/base/audio_processing.cc
+@@ -44,12 +44,22 @@ std::string AudioProcessingSettings::ToString() const {
+     }
+   };
+ 
++  auto aap_to_string = [](AroundAudioProcessingType type) -> const char* {
++    switch (type) {
++      case AroundAudioProcessingType::kDisabled:
++        return "disabled";
++      case AroundAudioProcessingType::kDefault:
++        return "default";
++    }
++  };
++
+   auto bool_to_yes_no = [](bool b) -> const char* { return b ? "yes" : "no"; };
+ 
+   return base::StrCat(
+       {"agc: ", agc_to_string(automatic_gain_control),
+        ", aec: ", aec_to_string(echo_cancellation),
+        ", ns: ", ns_to_string(noise_suppression),
++       ", aap: ", aap_to_string(around_audio_processing),
+        ", high pass filter: ", bool_to_yes_no(high_pass_filter),
+        ", typing detection: ", bool_to_yes_no(typing_detection),
+        ", stereo mirroring: ", bool_to_yes_no(stereo_mirroring)});
+diff --git a/media/base/audio_processing.h b/media/base/audio_processing.h
+index 52f32fbc6ef18b1d34475f2c84956e447f7af8e6..2238fc4b6b7f6299a90522767ac96fa7fa635421 100644
+--- a/media/base/audio_processing.h
++++ b/media/base/audio_processing.h
+@@ -21,10 +21,12 @@ enum class AutomaticGainControlType {
+ };
+ enum class EchoCancellationType { kDisabled, kAec3, kSystemAec };
+ enum class NoiseSuppressionType { kDisabled, kDefault, kExperimental };
++enum class AroundAudioProcessingType { kDisabled, kDefault };
+ 
+ struct MEDIA_EXPORT AudioProcessingSettings {
+   EchoCancellationType echo_cancellation = EchoCancellationType::kDisabled;
+   NoiseSuppressionType noise_suppression = NoiseSuppressionType::kDisabled;
++  AroundAudioProcessingType around_audio_processing = AroundAudioProcessingType::kDisabled;
+   AutomaticGainControlType automatic_gain_control =
+       AutomaticGainControlType::kDisabled;
+   bool high_pass_filter = false;
+@@ -34,6 +36,7 @@ struct MEDIA_EXPORT AudioProcessingSettings {
+   bool operator==(const AudioProcessingSettings& b) const {
+     return echo_cancellation == b.echo_cancellation &&
+            noise_suppression == b.noise_suppression &&
++           around_audio_processing == b.around_audio_processing &&
+            automatic_gain_control == b.automatic_gain_control &&
+            high_pass_filter == b.high_pass_filter &&
+            typing_detection == b.typing_detection &&
+@@ -44,6 +47,7 @@ struct MEDIA_EXPORT AudioProcessingSettings {
+   bool requires_apm() const {
+     return echo_cancellation == EchoCancellationType::kAec3 ||
+            noise_suppression != NoiseSuppressionType::kDisabled ||
++           around_audio_processing != AroundAudioProcessingType::kDisabled ||
+            automatic_gain_control != AutomaticGainControlType::kDisabled ||
+            high_pass_filter || typing_detection || stereo_mirroring;
+   }
+diff --git a/third_party/blink/public/mojom/web_feature/web_feature.mojom b/third_party/blink/public/mojom/web_feature/web_feature.mojom
+index 378e4878a0133364bf3719a903ab66c3988eb38a..f7c78ac198c51fd8d8980c5471ea7fd678111256 100644
+--- a/third_party/blink/public/mojom/web_feature/web_feature.mojom
++++ b/third_party/blink/public/mojom/web_feature/web_feature.mojom
+@@ -3275,6 +3275,7 @@ enum WebFeature {
+   kV8URLPattern_Test_Method = 3960,
+   kV8URLPattern_Exec_Method = 3961,
+   kSameSiteCookieInclusionChangedByCrossSiteRedirect = 3962,
++  kMediaStreamConstraintsAroundAudioProcessing = 3963,
+ 
+   // Add new features immediately above this line. Don't change assigned
+   // numbers of any item, and don't reuse removed slots.
+diff --git a/third_party/blink/renderer/modules/mediacapturefromelement/html_media_element_capture.cc b/third_party/blink/renderer/modules/mediacapturefromelement/html_media_element_capture.cc
+index 46f9ad4c433d985c94115d2b6f930dca9dbc9711..6291af7423f71556d7e9cb53e28f162bbe4aa886 100644
+--- a/third_party/blink/renderer/modules/mediacapturefromelement/html_media_element_capture.cc
++++ b/third_party/blink/renderer/modules/mediacapturefromelement/html_media_element_capture.cc
+@@ -121,6 +121,7 @@ void CreateHTMLAudioElementCapturer(
+   capabilities.echo_cancellation.emplace_back(false);
+   capabilities.auto_gain_control.emplace_back(false);
+   capabilities.noise_suppression.emplace_back(false);
++  capabilities.around_audio_processing.emplace_back(false);
+   capabilities.sample_size = {
+       media::SampleFormatToBitsPerChannel(media::kSampleFormatS16),  // min
+       media::SampleFormatToBitsPerChannel(media::kSampleFormatS16)   // max
+diff --git a/third_party/blink/renderer/modules/mediastream/apply_constraints_processor.cc b/third_party/blink/renderer/modules/mediastream/apply_constraints_processor.cc
+index c5a4d77a65284275b0d307eaf9dc54c2955fc2d0..7e59fad663c1d6634f81a233df21748167ee15c2 100644
+--- a/third_party/blink/renderer/modules/mediastream/apply_constraints_processor.cc
++++ b/third_party/blink/renderer/modules/mediastream/apply_constraints_processor.cc
+@@ -16,6 +16,7 @@
+ #include "third_party/blink/renderer/modules/mediastream/media_stream_constraints_util_video_content.h"
+ #include "third_party/blink/renderer/modules/mediastream/media_stream_constraints_util_video_device.h"
+ #include "third_party/blink/renderer/modules/mediastream/media_stream_video_track.h"
++#include "third_party/blink/renderer/modules/mediastream/processed_local_audio_source.h"
+ #include "third_party/blink/renderer/platform/mediastream/media_stream_audio_source.h"
+ #include "third_party/blink/renderer/platform/mediastream/media_stream_source.h"
+ #include "third_party/blink/renderer/platform/wtf/functional.h"
+diff --git a/third_party/blink/renderer/modules/mediastream/media_constraints_impl.cc b/third_party/blink/renderer/modules/mediastream/media_constraints_impl.cc
+index 5edaf3804f8cdf2f79485d1f1816feb548441a7f..8ff67efc220de1844ecc6eee46c4e02f161b201f 100644
+--- a/third_party/blink/renderer/modules/mediastream/media_constraints_impl.cc
++++ b/third_party/blink/renderer/modules/mediastream/media_constraints_impl.cc
+@@ -102,6 +102,7 @@ const char kGoogExperimentalEchoCancellation[] = "googEchoCancellation2";
+ const char kGoogAutoGainControl[] = "googAutoGainControl";
+ const char kGoogExperimentalAutoGainControl[] = "googAutoGainControl2";
+ const char kGoogNoiseSuppression[] = "googNoiseSuppression";
++const char kAroundAudioProcessing[] = "aroundAudioProcessing";
+ const char kGoogExperimentalNoiseSuppression[] = "googNoiseSuppression2";
+ const char kGoogBeamforming[] = "googBeamforming";
+ const char kGoogArrayGeometry[] = "googArrayGeometry";
+@@ -330,6 +331,8 @@ static void ParseOldStyleNames(
+           ToBoolean(constraint.value_));
+     } else if (constraint.name_.Equals(kGoogNoiseSuppression)) {
+       result.goog_noise_suppression.SetExact(ToBoolean(constraint.value_));
++    } else if (constraint.name_.Equals(kAroundAudioProcessing)) {
++      result.around_audio_processing.SetExact(ToBoolean(constraint.value_));
+     } else if (constraint.name_.Equals(kGoogExperimentalNoiseSuppression)) {
+       result.goog_experimental_noise_suppression.SetExact(
+           ToBoolean(constraint.value_));
+@@ -719,6 +722,10 @@ void CopyConstraintSet(const MediaTrackConstraintSet* constraints_in,
+     CopyBooleanConstraint(constraints_in->noiseSuppression(), naked_treatment,
+                           constraint_buffer.goog_noise_suppression);
+   }
++  if (constraints_in->hasAroundAudioProcessing()) {
++    CopyBooleanConstraint(constraints_in->aroundAudioProcessing(), naked_treatment,
++                          constraint_buffer.around_audio_processing);
++  }
+   if (constraints_in->hasLatency()) {
+     CopyDoubleConstraint(constraints_in->latency(), naked_treatment,
+                          constraint_buffer.latency);
+diff --git a/third_party/blink/renderer/modules/mediastream/media_stream_audio_processor.cc b/third_party/blink/renderer/modules/mediastream/media_stream_audio_processor.cc
+index 3f1506e0c948491785aebaba8d777dd2db080643..f5747e7b987f6a22f349fc477a5b5d685fb7f1a8 100644
+--- a/third_party/blink/renderer/modules/mediastream/media_stream_audio_processor.cc
++++ b/third_party/blink/renderer/modules/mediastream/media_stream_audio_processor.cc
+@@ -121,9 +121,10 @@ class MediaStreamAudioFifo {
+         destination_(
+             new MediaStreamAudioBus(destination_channels, destination_frames)),
+         data_available_(false) {
+-    DCHECK_GE(source_channels, destination_channels);
++    // @AROUND: we disable this dcheck as we may get a mono source and stereo dest.
++    // DCHECK_GE(source_channels, destination_channels);
+ 
+-    if (source_channels > destination_channels) {
++    if (source_channels != destination_channels) {
+       audio_source_intermediate_ =
+           media::AudioBus::CreateWrapper(destination_channels);
+     }
+@@ -155,9 +156,16 @@ class MediaStreamAudioFifo {
+     const media::AudioBus* source_to_push = &source;
+ 
+     if (audio_source_intermediate_) {
+-      for (int i = 0; i < destination_->bus()->channels(); ++i) {
+-        audio_source_intermediate_->SetChannelData(
+-            i, const_cast<float*>(source.channel(i)));
++      for (int i = 0; i < audio_source_intermediate_->channels(); ++i) {
++        if (i < (source.channels() - 1)) {
++          audio_source_intermediate_->SetChannelData(
++             i, const_cast<float*>(source.channel(i)));
++        } else {
++          // @AROUND: we don't have this channel in the source
++          // so just use the last source channel
++          audio_source_intermediate_->SetChannelData(
++            i, const_cast<float*>(source.channel(source.channels() - 1)));
++        }
+       }
+       audio_source_intermediate_->set_frames(source.frames());
+       source_to_push = audio_source_intermediate_.get();
+@@ -309,7 +317,9 @@ bool MediaStreamAudioProcessor::ProcessAndConsumeData(
+   if (audio_mirroring_ &&
+       output_format_.channel_layout() == media::CHANNEL_LAYOUT_STEREO) {
+     // Swap the first and second channels.
+-    output_bus->bus()->SwapChannels(0, 1);
++    // @AROUND: we want the channels to remain in place
++    // because the 2nd one contains VAD data
++    // output_bus->bus()->SwapChannels(0, 1);
+   }
+ 
+   *processed_data = output_bus->bus();
+@@ -330,6 +340,8 @@ void MediaStreamAudioProcessor::Stop() {
+   if (!audio_processing_.get())
+     return;
+ 
++  audio_processing_->Stop();
++
+   StopEchoCancellationDump(audio_processing_.get());
+   worker_queue_.reset(nullptr);
+ 
+@@ -414,6 +426,7 @@ bool MediaStreamAudioProcessor::WouldModifyAudio(
+ #endif
+ 
+   if (properties.goog_noise_suppression ||
++      properties.around_audio_processing ||
+       properties.goog_experimental_noise_suppression ||
+       properties.goog_highpass_filter) {
+     return true;
+@@ -508,6 +521,7 @@ void MediaStreamAudioProcessor::InitializeAudioProcessingModule(
+   // webrtc::AudioProcessing are enabled.
+   if (!properties.EchoCancellationIsWebRtcProvided() &&
+       !goog_experimental_aec && !properties.goog_noise_suppression &&
++      !properties.around_audio_processing &&
+       !properties.goog_highpass_filter && !properties.goog_auto_gain_control &&
+       !properties.goog_experimental_noise_suppression) {
+     // Sanity-check: WouldModifyAudio() should return true iff
+@@ -562,6 +576,8 @@ void MediaStreamAudioProcessor::InitializeCaptureFifo(
+   // The output channels from the fifo is normally the same as input.
+   int fifo_output_channels = input_format.channels();
+ 
++  bool aroundAudioProcessingEnabled = audio_processing_->GetConfig().around_audio_processing.enabled;
++
+   media::ChannelLayout output_channel_layout;
+   if (!audio_processing_) {
+     if (input_format.channel_layout() ==
+@@ -591,11 +607,19 @@ void MediaStreamAudioProcessor::InitializeCaptureFifo(
+     if (input_format.channel_layout() ==
+         media::CHANNEL_LAYOUT_STEREO_AND_KEYBOARD_MIC) {
+       output_channel_layout = media::CHANNEL_LAYOUT_STEREO;
++    } else if (aroundAudioProcessingEnabled) {
++      output_channel_layout = media::CHANNEL_LAYOUT_STEREO;
++      fifo_output_channels = ChannelLayoutToChannelCount(output_channel_layout);
+     } else {
+       output_channel_layout = input_format.channel_layout();
+     }
+   } else {
+-    output_channel_layout = media::CHANNEL_LAYOUT_MONO;
++    if (aroundAudioProcessingEnabled) {
++      output_channel_layout = media::CHANNEL_LAYOUT_STEREO;
++      fifo_output_channels = ChannelLayoutToChannelCount(output_channel_layout);
++    } else {
++      output_channel_layout = media::CHANNEL_LAYOUT_MONO;
++    }
+   }
+ 
+   // webrtc::AudioProcessing requires a 10 ms chunk size. We use this native
+@@ -695,11 +719,24 @@ int MediaStreamAudioProcessor::ProcessData(const float* const* process_ptrs,
+   // discrete channel mapping.
+   num_apm_output_channels = std::min(num_apm_output_channels, 2);
+ 
++  auto input_format = input_format_;
++  // @AROUND: we have to send stereo to the WebRTC AudioProcessor
++  if (audio_processing_->GetConfig().around_audio_processing.enabled) {
++    input_format.Reset(
++      input_format.format(),
++      media::CHANNEL_LAYOUT_STEREO,
++      input_format.sample_rate(),
++      input_format.frames_per_buffer()
++    );
++
++    num_apm_output_channels = output_format_.channels();
++  }
++
+   CHECK_GE(num_apm_output_channels, 1);
+   const webrtc::StreamConfig apm_output_config = webrtc::StreamConfig(
+       output_format_.sample_rate(), num_apm_output_channels, false);
+ 
+-  int err = ap->ProcessStream(process_ptrs, CreateStreamConfig(input_format_),
++  int err = ap->ProcessStream(process_ptrs, CreateStreamConfig(input_format),
+                               apm_output_config, output_ptrs);
+   DCHECK_EQ(err, 0) << "ProcessStream() error: " << err;
+ 
+diff --git a/third_party/blink/renderer/modules/mediastream/media_stream_constraints_util_audio.cc b/third_party/blink/renderer/modules/mediastream/media_stream_constraints_util_audio.cc
+index bb569b6f757cf09b064dab342daee1182317d078..4af3812f4af9335a025f0727afd4b09110f7bb76 100644
+--- a/third_party/blink/renderer/modules/mediastream/media_stream_constraints_util_audio.cc
++++ b/third_party/blink/renderer/modules/mediastream/media_stream_constraints_util_audio.cc
+@@ -482,6 +482,7 @@ class EchoCancellationContainer {
+     properties->goog_experimental_echo_cancellation &=
+         default_audio_processing_value;
+     properties->goog_noise_suppression &= default_audio_processing_value;
++    properties->around_audio_processing &= default_audio_processing_value;
+     properties->goog_experimental_noise_suppression &=
+         default_audio_processing_value;
+     properties->goog_highpass_filter &= default_audio_processing_value;
+@@ -739,6 +740,7 @@ class ProcessingBasedContainer {
+         BoolSet(), /* goog_audio_mirroring_set */
+         BoolSet(), /* goog_experimental_echo_cancellation_set */
+         BoolSet(), /* goog_noise_suppression_set */
++        BoolSet(), /* around_audio_processing_set */
+         BoolSet(), /* goog_experimental_noise_suppression_set */
+         BoolSet(), /* goog_highpass_filter_set */
+         IntRangeSet::FromValue(GetSampleSize()),    /* sample_size_range */
+@@ -766,6 +768,7 @@ class ProcessingBasedContainer {
+         BoolSet(),        /* goog_audio_mirroring_set */
+         BoolSet({false}), /* goog_experimental_echo_cancellation_set */
+         BoolSet({false}), /* goog_noise_suppression_set */
++        BoolSet({false}), /* around_audio_processing_set */
+         BoolSet({false}), /* goog_experimental_noise_suppression_set */
+         BoolSet({false}), /* goog_highpass_filter_set */
+         IntRangeSet::FromValue(GetSampleSize()), /* sample_size_range */
+@@ -792,6 +795,7 @@ class ProcessingBasedContainer {
+         BoolSet({false}), /* goog_audio_mirroring_set */
+         BoolSet({false}), /* goog_experimental_echo_cancellation_set */
+         BoolSet({false}), /* goog_noise_suppression_set */
++        BoolSet({false}), /* around_audio_processing_set */
+         BoolSet({false}), /* goog_experimental_noise_suppression_set */
+         BoolSet({false}), /* goog_highpass_filter_set */
+         IntRangeSet::FromValue(GetSampleSize()), /* sample_size_range */
+@@ -956,6 +960,7 @@ class ProcessingBasedContainer {
+     kGoogAudioMirroring,
+     kGoogExperimentalEchoCancellation,
+     kGoogNoiseSuppression,
++    kAroundAudioProcessing,
+     kGoogExperimentalNoiseSuppression,
+     kGoogHighpassFilter,
+     kNumBooleanContainerIds
+@@ -980,6 +985,8 @@ class ProcessingBasedContainer {
+            &AudioProcessingProperties::goog_experimental_echo_cancellation},
+           {kGoogNoiseSuppression, &ConstraintSet::goog_noise_suppression,
+            &AudioProcessingProperties::goog_noise_suppression},
++          {kAroundAudioProcessing, &ConstraintSet::around_audio_processing,
++           &AudioProcessingProperties::around_audio_processing},
+           {kGoogExperimentalNoiseSuppression,
+            &ConstraintSet::goog_experimental_noise_suppression,
+            &AudioProcessingProperties::goog_experimental_noise_suppression},
+@@ -998,6 +1005,7 @@ class ProcessingBasedContainer {
+                            BoolSet goog_audio_mirroring_set,
+                            BoolSet goog_experimental_echo_cancellation_set,
+                            BoolSet goog_noise_suppression_set,
++                           BoolSet around_audio_processing_set,
+                            BoolSet goog_experimental_noise_suppression_set,
+                            BoolSet goog_highpass_filter_set,
+                            IntRangeSet sample_size_range,
+@@ -1035,6 +1043,8 @@ class ProcessingBasedContainer {
+         BooleanContainer(goog_experimental_echo_cancellation_set);
+     boolean_containers_[kGoogNoiseSuppression] =
+         BooleanContainer(goog_noise_suppression_set);
++    boolean_containers_[kAroundAudioProcessing] =
++        BooleanContainer(around_audio_processing_set);
+     boolean_containers_[kGoogExperimentalNoiseSuppression] =
+         BooleanContainer(goog_experimental_noise_suppression_set);
+     boolean_containers_[kGoogHighpassFilter] =
+@@ -1300,6 +1310,10 @@ class DeviceContainer {
+         best_properties.echo_cancellation_type ==
+             EchoCancellationType::kEchoCancellationDisabled;
+ 
++    // @AROUND: we resolve the flag manually
++    best_properties.around_audio_processing =
++        !!constraint_set.around_audio_processing.Ideal();
++
+     // The score at this point can be considered complete only when the settings
+     // are compared against the default device id, which is used as arbitrator
+     // in case multiple candidates are available.
+diff --git a/third_party/blink/renderer/modules/mediastream/media_stream_track.cc b/third_party/blink/renderer/modules/mediastream/media_stream_track.cc
+index fee493c07ecc0b8f95db95847eb9ff0d4d0059c6..cab6dea9790df62780ebaddabfdbb43b144dbb6f 100644
+--- a/third_party/blink/renderer/modules/mediastream/media_stream_track.cc
++++ b/third_party/blink/renderer/modules/mediastream/media_stream_track.cc
+@@ -104,6 +104,7 @@ bool ConstraintSetHasNonImageCapture(
+          constraint_set->hasChannelCount() || constraint_set->hasDeviceId() ||
+          constraint_set->hasEchoCancellation() ||
+          constraint_set->hasNoiseSuppression() ||
++         constraint_set->hasAroundAudioProcessing() ||
+          constraint_set->hasAutoGainControl() ||
+          constraint_set->hasFacingMode() || constraint_set->hasResizeMode() ||
+          constraint_set->hasFrameRate() || constraint_set->hasGroupId() ||
+@@ -482,7 +483,7 @@ MediaTrackCapabilities* MediaStreamTrack::getCapabilities() const {
+     capabilities->setGroupId(platform_capabilities.group_id);
+ 
+   if (component_->Source()->GetType() == MediaStreamSource::kTypeAudio) {
+-    Vector<bool> echo_cancellation, auto_gain_control, noise_suppression;
++    Vector<bool> echo_cancellation, auto_gain_control, noise_suppression, around_audio_processing;
+     for (bool value : platform_capabilities.echo_cancellation)
+       echo_cancellation.push_back(value);
+     capabilities->setEchoCancellation(echo_cancellation);
+@@ -492,6 +493,9 @@ MediaTrackCapabilities* MediaStreamTrack::getCapabilities() const {
+     for (bool value : platform_capabilities.noise_suppression)
+       noise_suppression.push_back(value);
+     capabilities->setNoiseSuppression(noise_suppression);
++    for (bool value : platform_capabilities.around_audio_processing)
++      around_audio_processing.push_back(value);
++    capabilities->setAroundAudioProcessing(around_audio_processing);
+     Vector<String> echo_cancellation_type;
+     for (String value : platform_capabilities.echo_cancellation_type)
+       echo_cancellation_type.push_back(value);
+@@ -642,6 +646,8 @@ MediaTrackSettings* MediaStreamTrack::getSettings() const {
+     settings->setAutoGainControl(*platform_settings.auto_gain_control);
+   if (platform_settings.noise_supression)
+     settings->setNoiseSuppression(*platform_settings.noise_supression);
++  if (platform_settings.around_audio_processing)
++    settings->setAroundAudioProcessing(*platform_settings.around_audio_processing);
+ 
+   if (platform_settings.HasSampleRate())
+     settings->setSampleRate(platform_settings.sample_rate);
+diff --git a/third_party/blink/renderer/modules/mediastream/media_stream_utils.cc b/third_party/blink/renderer/modules/mediastream/media_stream_utils.cc
+index bd555715017834bbe83b9bab99198f707d13dbf3..589c84353a9e5e65d1d0185a140c1e15fd5c1a31 100644
+--- a/third_party/blink/renderer/modules/mediastream/media_stream_utils.cc
++++ b/third_party/blink/renderer/modules/mediastream/media_stream_utils.cc
+@@ -57,6 +57,7 @@ void MediaStreamUtils::CreateNativeAudioMediaStreamTrack(
+     capabilities.echo_cancellation = Vector<bool>({false});
+     capabilities.auto_gain_control = Vector<bool>({false});
+     capabilities.noise_suppression = Vector<bool>({false});
++    capabilities.around_audio_processing = Vector<bool>({false});
+     capabilities.sample_size = {
+         media::SampleFormatToBitsPerChannel(media::kSampleFormatS16),  // min
+         media::SampleFormatToBitsPerChannel(media::kSampleFormatS16)   // max
+diff --git a/third_party/blink/renderer/modules/mediastream/media_track_capabilities.idl b/third_party/blink/renderer/modules/mediastream/media_track_capabilities.idl
+index a84b70d7ce78f2082430df185ad03ba9fde4a7d2..e4e57dc245ba1202a23d6a5c20818967b3e08d33 100644
+--- a/third_party/blink/renderer/modules/mediastream/media_track_capabilities.idl
++++ b/third_party/blink/renderer/modules/mediastream/media_track_capabilities.idl
+@@ -12,6 +12,7 @@ dictionary MediaTrackCapabilities {
+     sequence<boolean> echoCancellation;
+     sequence<boolean> autoGainControl;
+     sequence<boolean> noiseSuppression;
++    sequence<boolean> aroundAudioProcessing;
+     LongRange sampleSize;
+     LongRange channelCount;
+     LongRange sampleRate;
+diff --git a/third_party/blink/renderer/modules/mediastream/media_track_constraint_set.idl b/third_party/blink/renderer/modules/mediastream/media_track_constraint_set.idl
+index 84de1cb4c2e815a37eeba38cb141a459d0a50eea..3cb4f4670df847ba29dbadf990578631a0960860 100644
+--- a/third_party/blink/renderer/modules/mediastream/media_track_constraint_set.idl
++++ b/third_party/blink/renderer/modules/mediastream/media_track_constraint_set.idl
+@@ -22,6 +22,7 @@ dictionary MediaTrackConstraintSet {
+     ConstrainBoolean echoCancellation;
+     ConstrainBoolean autoGainControl;
+     ConstrainBoolean noiseSuppression;
++    ConstrainBoolean aroundAudioProcessing;
+     ConstrainDouble latency;
+     ConstrainLong channelCount;
+     ConstrainDOMString deviceId;
+diff --git a/third_party/blink/renderer/modules/mediastream/media_track_settings.idl b/third_party/blink/renderer/modules/mediastream/media_track_settings.idl
+index eb71681b3a5df75bf85fcc3ae69b2798505de44d..891b9359ad1cc0a81c722d3edb2b5edbcafd0d12 100644
+--- a/third_party/blink/renderer/modules/mediastream/media_track_settings.idl
++++ b/third_party/blink/renderer/modules/mediastream/media_track_settings.idl
+@@ -16,6 +16,7 @@ dictionary MediaTrackSettings {
+     boolean echoCancellation;
+     boolean autoGainControl;
+     boolean noiseSuppression;
++    boolean aroundAudioProcessing;
+     double latency;
+     long channelCount;
+     DOMString deviceId;
+diff --git a/third_party/blink/renderer/modules/mediastream/media_track_supported_constraints.idl b/third_party/blink/renderer/modules/mediastream/media_track_supported_constraints.idl
+index c62076245f6b00442164acbe136dbe3a479d1dcf..22966e6af699198bf88b99ffe766a9b661beeef9 100644
+--- a/third_party/blink/renderer/modules/mediastream/media_track_supported_constraints.idl
++++ b/third_party/blink/renderer/modules/mediastream/media_track_supported_constraints.idl
+@@ -19,6 +19,7 @@ dictionary MediaTrackSupportedConstraints {
+     boolean echoCancellation = true;
+     boolean autoGainControl = true;
+     boolean noiseSuppression = true;
++    boolean aroundAudioProcessing = true;
+     boolean latency = true;
+     boolean channelCount = true;
+     boolean deviceId = true;
+diff --git a/third_party/blink/renderer/modules/mediastream/mock_constraint_factory.cc b/third_party/blink/renderer/modules/mediastream/mock_constraint_factory.cc
+index 62de962d5819fafaf4371890a7d0397a867b6e01..4db448bba30ec61120dd71c024729638a0bcab89 100644
+--- a/third_party/blink/renderer/modules/mediastream/mock_constraint_factory.cc
++++ b/third_party/blink/renderer/modules/mediastream/mock_constraint_factory.cc
+@@ -32,6 +32,7 @@ void MockConstraintFactory::DisableDefaultAudioConstraints() {
+   basic_.goog_experimental_auto_gain_control.SetExact(false);
+   basic_.goog_noise_suppression.SetExact(false);
+   basic_.goog_noise_suppression.SetExact(false);
++  basic_.around_audio_processing.SetExact(false);
+   basic_.goog_highpass_filter.SetExact(false);
+   basic_.goog_experimental_noise_suppression.SetExact(false);
+ }
+diff --git a/third_party/blink/renderer/modules/mediastream/processed_local_audio_source.cc b/third_party/blink/renderer/modules/mediastream/processed_local_audio_source.cc
+index 4f83509eb183c33b65883cc2a68c40c6eb5d7ee8..b0b277e9813d52e5b32cf9904dc53487008af3b7 100644
+--- a/third_party/blink/renderer/modules/mediastream/processed_local_audio_source.cc
++++ b/third_party/blink/renderer/modules/mediastream/processed_local_audio_source.cc
+@@ -82,6 +82,7 @@ std::string GetAudioProcesingPropertiesLogString(
+       "goog_auto_gain_control: %s, "
+       "goog_experimental_echo_cancellation: %s, "
+       "goog_noise_suppression: %s, "
++      "around_audio_processing=%s, "
+       "goog_experimental_noise_suppression: %s, "
+       "goog_highpass_filter: %s, "
+       "goog_experimental_agc: %s, "
+@@ -93,6 +94,7 @@ std::string GetAudioProcesingPropertiesLogString(
+       bool_to_string(properties.goog_auto_gain_control),
+       bool_to_string(properties.goog_experimental_echo_cancellation),
+       bool_to_string(properties.goog_noise_suppression),
++      bool_to_string(properties.around_audio_processing),
+       bool_to_string(properties.goog_experimental_noise_suppression),
+       bool_to_string(properties.goog_highpass_filter),
+       bool_to_string(properties.goog_experimental_auto_gain_control),
+diff --git a/third_party/blink/renderer/modules/mediastream/remote_media_stream_track_adapter.cc b/third_party/blink/renderer/modules/mediastream/remote_media_stream_track_adapter.cc
+index e45fb4de2dae535835916c0248fe2bce5a99d29f..09ab2cd7fa7d58d724bc38b6f652afa2d53e1f79 100644
+--- a/third_party/blink/renderer/modules/mediastream/remote_media_stream_track_adapter.cc
++++ b/third_party/blink/renderer/modules/mediastream/remote_media_stream_track_adapter.cc
+@@ -105,6 +105,7 @@ void RemoteAudioTrackAdapter::InitializeWebAudioTrack(
+   capabilities.echo_cancellation = Vector<bool>({false});
+   capabilities.auto_gain_control = Vector<bool>({false});
+   capabilities.noise_suppression = Vector<bool>({false});
++  capabilities.around_audio_processing = Vector<bool>({false});
+   capabilities.sample_size = {
+       media::SampleFormatToBitsPerChannel(media::kSampleFormatS16),  // min
+       media::SampleFormatToBitsPerChannel(media::kSampleFormatS16)   // max
+diff --git a/third_party/blink/renderer/modules/mediastream/user_media_processor.cc b/third_party/blink/renderer/modules/mediastream/user_media_processor.cc
+index 1cf8c6d5bdb49b6f23574de9460198dba13f75ff..8ed45db8e06974c048f76c2e6e4fa91c47a8e60e 100644
+--- a/third_party/blink/renderer/modules/mediastream/user_media_processor.cc
++++ b/third_party/blink/renderer/modules/mediastream/user_media_processor.cc
+@@ -272,7 +272,8 @@ void SurfaceAudioProcessingSettings(MediaStreamSource* source) {
+ 
+     source->SetAudioProcessingProperties(echo_cancellation_mode,
+                                          properties.goog_auto_gain_control,
+-                                         properties.goog_noise_suppression);
++                                         properties.goog_noise_suppression,
++                                         properties.around_audio_processing);
+   } else {
+     // If the source is not a processed source, it could still support system
+     // echo cancellation. Surface that if it does.
+@@ -283,7 +284,7 @@ void SurfaceAudioProcessingSettings(MediaStreamSource* source) {
+             ? MediaStreamSource::EchoCancellationMode::kSystem
+             : MediaStreamSource::EchoCancellationMode::kDisabled;
+ 
+-    source->SetAudioProcessingProperties(echo_cancellation_mode, false, false);
++    source->SetAudioProcessingProperties(echo_cancellation_mode, false, false, false);
+   }
+ }
+ 
+@@ -1378,6 +1379,7 @@ MediaStreamSource* UserMediaProcessor::InitializeAudioSourceObject(
+   }
+   capabilities.auto_gain_control = {true, false};
+   capabilities.noise_suppression = {true, false};
++  capabilities.around_audio_processing = {true, false};
+   capabilities.sample_size = {
+       media::SampleFormatToBitsPerChannel(media::kSampleFormatS16),  // min
+       media::SampleFormatToBitsPerChannel(media::kSampleFormatS16)   // max
+diff --git a/third_party/blink/renderer/modules/mediastream/user_media_request.cc b/third_party/blink/renderer/modules/mediastream/user_media_request.cc
+index 837b694bafc476994a61ebd4dbd3ed5ff5aa877a..03973de698d121600c66420f6307f86b85ae8216 100644
+--- a/third_party/blink/renderer/modules/mediastream/user_media_request.cc
++++ b/third_party/blink/renderer/modules/mediastream/user_media_request.cc
+@@ -200,6 +200,10 @@ void CountAudioConstraintUses(ExecutionContext* context,
+           &MediaTrackConstraintSetPlatform::goog_noise_suppression)) {
+     counter.Count(WebFeature::kMediaStreamConstraintsGoogNoiseSuppression);
+   }
++  if (RequestUsesDiscreteConstraint(
++          constraints, &MediaTrackConstraintSetPlatform::around_audio_processing)) {
++    counter.Count(WebFeature::kMediaStreamConstraintsAroundAudioProcessing);
++  }
+   if (RequestUsesDiscreteConstraint(
+           constraints,
+           &MediaTrackConstraintSetPlatform::goog_highpass_filter)) {
+diff --git a/third_party/blink/renderer/platform/mediastream/media_constraints.cc b/third_party/blink/renderer/platform/mediastream/media_constraints.cc
+index e9642a5a8221cc3432ca2ed35028c41abe548a31..66a5d2e687c9ed5c826d8bf92c8e6b1103062562 100644
+--- a/third_party/blink/renderer/platform/mediastream/media_constraints.cc
++++ b/third_party/blink/renderer/platform/mediastream/media_constraints.cc
+@@ -362,6 +362,7 @@ MediaTrackConstraintSetPlatform::MediaTrackConstraintSetPlatform()
+       goog_auto_gain_control("autoGainControl"),
+       goog_experimental_auto_gain_control("googExperimentalAutoGainControl"),
+       goog_noise_suppression("noiseSuppression"),
++      around_audio_processing("aroundAudioProcessing"),
+       goog_highpass_filter("googHighpassFilter"),
+       goog_experimental_noise_suppression("googExperimentalNoiseSuppression"),
+       goog_audio_mirroring("googAudioMirroring"),
+@@ -415,6 +416,7 @@ Vector<const BaseConstraint*> MediaTrackConstraintSetPlatform::AllConstraints()
+           &goog_auto_gain_control,
+           &goog_experimental_auto_gain_control,
+           &goog_noise_suppression,
++          &around_audio_processing,
+           &goog_highpass_filter,
+           &goog_experimental_noise_suppression,
+           &goog_audio_mirroring,
+diff --git a/third_party/blink/renderer/platform/mediastream/media_constraints.h b/third_party/blink/renderer/platform/mediastream/media_constraints.h
+index 34f3d0f888e65fe612490a37937927a297a8396c..82bb80d6717211048d9058cf0cae846f8f08e1b0 100644
+--- a/third_party/blink/renderer/platform/mediastream/media_constraints.h
++++ b/third_party/blink/renderer/platform/mediastream/media_constraints.h
+@@ -259,6 +259,7 @@ struct MediaTrackConstraintSetPlatform {
+   BooleanConstraint goog_auto_gain_control;
+   BooleanConstraint goog_experimental_auto_gain_control;
+   BooleanConstraint goog_noise_suppression;
++  BooleanConstraint around_audio_processing;
+   BooleanConstraint goog_highpass_filter;
+   BooleanConstraint goog_experimental_noise_suppression;
+   BooleanConstraint goog_audio_mirroring;
+diff --git a/third_party/blink/renderer/platform/mediastream/media_stream_audio_processor_options.cc b/third_party/blink/renderer/platform/mediastream/media_stream_audio_processor_options.cc
+index c97573b357bb7c17e668a57af9cedccd9badd446..146ab1f1443f1e9ce253c44f3eaf731b1d9ce4dd 100644
+--- a/third_party/blink/renderer/platform/mediastream/media_stream_audio_processor_options.cc
++++ b/third_party/blink/renderer/platform/mediastream/media_stream_audio_processor_options.cc
+@@ -168,6 +168,7 @@ void AudioProcessingProperties::DisableDefaultProperties() {
+   goog_auto_gain_control = false;
+   goog_experimental_echo_cancellation = false;
+   goog_noise_suppression = false;
++  around_audio_processing = false;
+   goog_experimental_noise_suppression = false;
+   goog_highpass_filter = false;
+   goog_experimental_auto_gain_control = false;
+@@ -184,7 +185,8 @@ bool AudioProcessingProperties::EchoCancellationIsWebRtcProvided() const {
+ 
+ bool AudioProcessingProperties::HasSameReconfigurableSettings(
+     const AudioProcessingProperties& other) const {
+-  return echo_cancellation_type == other.echo_cancellation_type;
++  return echo_cancellation_type == other.echo_cancellation_type &&
++         around_audio_processing == other.around_audio_processing;
+ }
+ 
+ bool AudioProcessingProperties::HasSameNonReconfigurableSettings(
+@@ -223,6 +225,9 @@ AudioProcessingProperties::ToAudioProcessingSettings() const {
+                                     ? media::NoiseSuppressionType::kExperimental
+                                     : media::NoiseSuppressionType::kDefault)
+                              : media::NoiseSuppressionType::kDisabled;
++  out.around_audio_processing = around_audio_processing
++                             ? media::AroundAudioProcessingType::kDefault
++                             : media::AroundAudioProcessingType::kDisabled;
+   out.automatic_gain_control =
+       goog_auto_gain_control
+           ? (goog_experimental_auto_gain_control
+@@ -402,6 +407,8 @@ void PopulateApmConfig(
+         pre_amplifier_fixed_gain_factor.value();
+   }
+ 
++  apm_config->around_audio_processing.enabled = properties.around_audio_processing;
++
+   DCHECK(!(!properties.goog_noise_suppression &&
+            properties.system_noise_suppression_activated));
+   if (properties.goog_noise_suppression &&
+diff --git a/third_party/blink/renderer/platform/mediastream/media_stream_audio_processor_options.h b/third_party/blink/renderer/platform/mediastream/media_stream_audio_processor_options.h
+index 1ea1ee13fa2d673a2b05e69ba931adf81a44a844..31887e12b2ae3c4260b29af1696c441717d31d64 100644
+--- a/third_party/blink/renderer/platform/mediastream/media_stream_audio_processor_options.h
++++ b/third_party/blink/renderer/platform/mediastream/media_stream_audio_processor_options.h
+@@ -83,9 +83,10 @@ struct PLATFORM_EXPORT AudioProcessingProperties {
+       true;
+ #endif
+   bool goog_noise_suppression = true;
++  bool around_audio_processing = true;
+   bool goog_experimental_noise_suppression = true;
+   bool goog_highpass_filter = true;
+-  bool goog_experimental_auto_gain_control = true;
++  bool goog_experimental_auto_gain_control = false;
+ };
+ 
+ // Creates and configures a webrtc::AudioProcessing audio processing module
+diff --git a/third_party/blink/renderer/platform/mediastream/media_stream_source.cc b/third_party/blink/renderer/platform/mediastream/media_stream_source.cc
+index 10f18aa9885cb29a1705c855f97c351adad4d142..8bda639a89df7c729ad18f9277b9b40b57ea85cb 100644
+--- a/third_party/blink/renderer/platform/mediastream/media_stream_source.cc
++++ b/third_party/blink/renderer/platform/mediastream/media_stream_source.cc
+@@ -211,7 +211,8 @@ void MediaStreamSource::SetPlatformSource(
+ void MediaStreamSource::SetAudioProcessingProperties(
+     EchoCancellationMode echo_cancellation_mode,
+     bool auto_gain_control,
+-    bool noise_supression) {
++    bool noise_supression,
++    bool around_audio_processing) {
+   SendLogMessage(
+       String::Format("%s({echo_cancellation_mode=%s}, {auto_gain_control=%d}, "
+                      "{noise_supression=%d})",
+@@ -222,6 +223,7 @@ void MediaStreamSource::SetAudioProcessingProperties(
+   echo_cancellation_mode_ = echo_cancellation_mode;
+   auto_gain_control_ = auto_gain_control;
+   noise_supression_ = noise_supression;
++  around_audio_processing_ = around_audio_processing;
+ }
+ 
+ void MediaStreamSource::AddAudioConsumer(
+diff --git a/third_party/blink/renderer/platform/mediastream/media_stream_source.h b/third_party/blink/renderer/platform/mediastream/media_stream_source.h
+index 949924c70c798c7fd0b95926e674445cfbb34395..26240318423d09592478b2315eeeb210b517db9e 100644
+--- a/third_party/blink/renderer/platform/mediastream/media_stream_source.h
++++ b/third_party/blink/renderer/platform/mediastream/media_stream_source.h
+@@ -102,7 +102,8 @@ class PLATFORM_EXPORT MediaStreamSource final
+ 
+   void SetAudioProcessingProperties(EchoCancellationMode echo_cancellation_mode,
+                                     bool auto_gain_control,
+-                                    bool noise_supression);
++                                    bool noise_supression,
++                                    bool around_audio_processing);
+ 
+   void GetSettings(MediaStreamTrackPlatform::Settings&);
+ 
+@@ -117,6 +118,7 @@ class PLATFORM_EXPORT MediaStreamSource final
+     Vector<String> echo_cancellation_type;
+     Vector<bool> auto_gain_control;
+     Vector<bool> noise_suppression;
++    Vector<bool> around_audio_processing;
+     Vector<int32_t> sample_size;
+     Vector<int32_t> channel_count;
+     Vector<int32_t> sample_rate;
+@@ -184,6 +186,7 @@ class PLATFORM_EXPORT MediaStreamSource final
+   absl::optional<EchoCancellationMode> echo_cancellation_mode_;
+   absl::optional<bool> auto_gain_control_;
+   absl::optional<bool> noise_supression_;
++  absl::optional<bool> around_audio_processing_;
+ };
+ 
+ typedef HeapVector<Member<MediaStreamSource>> MediaStreamSourceVector;
+diff --git a/third_party/blink/renderer/platform/mediastream/media_stream_track_platform.h b/third_party/blink/renderer/platform/mediastream/media_stream_track_platform.h
+index e849fed1559cdfcc984e9a68eabfcd80a8b6929e..6981b1c1b9387902c434e16488759758b146ea7c 100644
+--- a/third_party/blink/renderer/platform/mediastream/media_stream_track_platform.h
++++ b/third_party/blink/renderer/platform/mediastream/media_stream_track_platform.h
+@@ -43,6 +43,7 @@ class PLATFORM_EXPORT MediaStreamTrackPlatform {
+     absl::optional<bool> echo_cancellation;
+     absl::optional<bool> auto_gain_control;
+     absl::optional<bool> noise_supression;
++    absl::optional<bool> around_audio_processing;
+     String echo_cancellation_type;
+     int32_t sample_rate = -1;
+     int32_t sample_size = -1;
+diff --git a/third_party/blink/web_tests/external/wpt/interfaces/mediacapture-streams.idl b/third_party/blink/web_tests/external/wpt/interfaces/mediacapture-streams.idl
+index 7d51a2af8077c4430423701dc5c58fb8dd9847d8..dd14ccc68f553c6208c7ad022ea3ed2bbbffb964 100644
+--- a/third_party/blink/web_tests/external/wpt/interfaces/mediacapture-streams.idl
++++ b/third_party/blink/web_tests/external/wpt/interfaces/mediacapture-streams.idl
+@@ -57,6 +57,7 @@ dictionary MediaTrackSupportedConstraints {
+   boolean echoCancellation = true;
+   boolean autoGainControl = true;
+   boolean noiseSuppression = true;
++  boolean aroundAudioProcessing = true;
+   boolean latency = true;
+   boolean channelCount = true;
+   boolean deviceId = true;
+@@ -75,6 +76,7 @@ dictionary MediaTrackCapabilities {
+   sequence<boolean> echoCancellation;
+   sequence<boolean> autoGainControl;
+   sequence<boolean> noiseSuppression;
++  sequence<boolean> aroundAudioProcessing;
+   DoubleRange latency;
+   ULongRange channelCount;
+   DOMString deviceId;
+@@ -97,6 +99,7 @@ dictionary MediaTrackConstraintSet {
+   ConstrainBoolean echoCancellation;
+   ConstrainBoolean autoGainControl;
+   ConstrainBoolean noiseSuppression;
++  ConstrainBoolean aroundAudioProcessing;
+   ConstrainDouble latency;
+   ConstrainULong channelCount;
+   ConstrainDOMString deviceId;
+@@ -115,6 +118,7 @@ dictionary MediaTrackSettings {
+   boolean echoCancellation;
+   boolean autoGainControl;
+   boolean noiseSuppression;
++  boolean aroundAudioProcessing;
+   double latency;
+   long channelCount;
+   DOMString deviceId;
