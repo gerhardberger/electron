@@ -155,7 +155,7 @@ void Initialize(v8::Local<v8::Object> exports,
   dict.SetMethod("getSystemIdleTime", base::BindRepeating(&GetSystemIdleTime));
   dict.SetMethod("isOnBatteryPower", base::BindRepeating(&IsOnBatteryPower));
 
-#if defined(OS_MACOSX)
+#if defined(OS_MAC)
   dict.SetMethod("getCPUPowerSpeedLimit",
                  base::BindRepeating(&PowerMonitor::GetCPUPowerSpeedLimit));
 #endif

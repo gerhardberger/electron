@@ -6,6 +6,7 @@ const {
   getSystemIdleState,
   getSystemIdleTime,
   isOnBatteryPower,
+  // @ts-ignore
   getCPUPowerSpeedLimit,
 } = process._linkedBinding('electron_browser_power_monitor')
 
