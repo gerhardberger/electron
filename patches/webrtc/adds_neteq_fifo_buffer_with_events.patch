@@ -118,6 +118,19 @@ index 61ebc2719f589200de43213527a437c70b8b12db..fdd1e3b36816783b8facc644b829abf9
   private:
    AudioState* audio_state() const;
  
+diff --git a/audio/audio_send_stream.cc b/audio/audio_send_stream.cc
+index 62dd53d33788c8beabfc3bbea9bf61b24fc338c3..a625a218d217a634f190b779e72d773dd77ed37f 100644
+--- a/audio/audio_send_stream.cc
++++ b/audio/audio_send_stream.cc
+@@ -833,7 +833,7 @@ void AudioSendStream::ConfigureBitrateObserver() {
+   // This either updates the current observer or adds a new observer.
+   // TODO(srte): Add overhead compensation here.
+   auto constraints = GetMinMaxBitrateConstraints();
+-  RTC_DCHECK(constraints.has_value());
++  // RTC_DCHECK(constraints.has_value());
+ 
+   DataRate priority_bitrate = allocation_settings_.priority_bitrate;
+   if (send_side_bwe_with_overhead_) {
 diff --git a/audio/channel_receive.cc b/audio/channel_receive.cc
 index 57269cd19363ccc49ee24f8c794abc274444c079..bd07046aa0328f2f8605784e978cf202e925ea45 100644
 --- a/audio/channel_receive.cc
@@ -292,10 +305,10 @@ index 487450fe0fb0f5995837b4f106cbc292a0fc9eba..d1e0b8bfdc299f4764f4241f3f202a5c
                                        controller_factory_));
 diff --git a/modules/audio_coding/neteq/neteq_fifo.cc b/modules/audio_coding/neteq/neteq_fifo.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..22392b3877d98237545ac7646e1b96acd6585109
+index 0000000000000000000000000000000000000000..62b5e880fd63b1157b4242ccc968c3fba5fb74b4
 --- /dev/null
 +++ b/modules/audio_coding/neteq/neteq_fifo.cc
-@@ -0,0 +1,1013 @@
+@@ -0,0 +1,1018 @@
 +/*
 + *  Copyright (c) 2012 The WebRTC project authors. All Rights Reserved.
 + *
@@ -422,6 +435,11 @@ index 0000000000000000000000000000000000000000..22392b3877d98237545ac7646e1b96ac
 +             last_output_sample_rate_hz_ == 32000 ||
 +             last_output_sample_rate_hz_ == 48000)
 +      << "Unexpected sample rate " << last_output_sample_rate_hz_;
++
++  if (current_sample_rate_hz) {
++    *current_sample_rate_hz = last_output_sample_rate_hz_;
++  }
++
 +  return kOK;
 +}
 +
