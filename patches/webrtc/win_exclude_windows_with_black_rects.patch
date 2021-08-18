@@ -72,10 +72,10 @@ index be6d8a5275c9a1960f8026909921d4c4283c45f9..e8c65b069359034829107a5b9600a463
  
 diff --git a/modules/desktop_capture/win/around_desktop_capturer_wrapper.cc b/modules/desktop_capture/win/around_desktop_capturer_wrapper.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..63d4b50fe09149f836128b3734bd5b600e946d7f
+index 0000000000000000000000000000000000000000..ef5a68c18de090db87e86ce444da12554d7fa70d
 --- /dev/null
 +++ b/modules/desktop_capture/win/around_desktop_capturer_wrapper.cc
-@@ -0,0 +1,179 @@
+@@ -0,0 +1,180 @@
 +#include "modules/desktop_capture/win/around_desktop_capturer_wrapper.h"
 +
 +#include <stdint.h>
@@ -87,6 +87,7 @@ index 0000000000000000000000000000000000000000..63d4b50fe09149f836128b3734bd5b60
 +#include "modules/desktop_capture/win/screen_capture_utils.h"
 +#include "modules/desktop_capture/win/window_capture_utils.h"
 +#include "rtc_base/checks.h"
++#include "rtc_base/string_utils.h"
 +#include "base/strings/string_util.h"
 +#include "rtc_base/time_utils.h"
 +#include "system_wrappers/include/metrics.h"
@@ -120,15 +121,15 @@ index 0000000000000000000000000000000000000000..63d4b50fe09149f836128b3734bd5b60
 +  }
 +}
 +
-+base::string16 GetWindowTitle(HWND hwnd) {
++std::string GetWindowTitle(HWND hwnd) {
 +  const size_t kTitleLength = 32;
 +  WCHAR window_title[kTitleLength];
 +  GetWindowTextW(hwnd, window_title, kTitleLength);
 +  int title_len = wcsnlen_s(window_title, kTitleLength);
 +  if (title_len == 0) {
-+    return base::string16();
++    return std::string();
 +  }
-+  return base::string16(&window_title[0], title_len);
++  return rtc::ToUtf8(&window_title[0], title_len);
 +}
 +
 +// Unicode zero-width space
@@ -152,8 +153,8 @@ index 0000000000000000000000000000000000000000..63d4b50fe09149f836128b3734bd5b60
 +  if (!is_chatheads_style)
 +    return false;
 +
-+  base::string16 win_title = GetWindowTitle(hwnd);
-+  auto prefix = base::string16(&FLOATING_WINDOW_PREFIX[0], 1);
++  std::string win_title = GetWindowTitle(hwnd);
++  auto prefix = rtc::ToUtf8(&FLOATING_WINDOW_PREFIX[0], 1);
 +
 +  // Floating window title is prefixed with a zero-width space to non-visibly identify it.
 +  bool is_floating_window_title = base::StartsWith(win_title, prefix, base::CompareCase::SENSITIVE);
