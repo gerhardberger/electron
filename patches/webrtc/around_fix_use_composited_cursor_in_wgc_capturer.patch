@@ -9,7 +9,7 @@ https://bugs.chromium.org/p/webrtc/issues/detail?id=9273
 Custom modifications are marked by an "AROUND EDIT" comment.
 
 diff --git a/modules/desktop_capture/win/wgc_capture_session.cc b/modules/desktop_capture/win/wgc_capture_session.cc
-index 48c56864b3eb1fb60f248f6b153a0b945c2a60cb..c643d337c68feac3dc801a4ae649fa9756bf55cb 100644
+index 48c56864b3eb1fb60f248f6b153a0b945c2a60cb..87838aedf709e695b34fe34b8f5803d9183988f7 100644
 --- a/modules/desktop_capture/win/wgc_capture_session.cc
 +++ b/modules/desktop_capture/win/wgc_capture_session.cc
 @@ -185,6 +185,16 @@ HRESULT WgcCaptureSession::StartCapture() {
@@ -41,7 +41,7 @@ index 48c56864b3eb1fb60f248f6b153a0b945c2a60cb..c643d337c68feac3dc801a4ae649fa97
  
    previous_size_ = new_size;
 diff --git a/modules/desktop_capture/win/wgc_capture_session.h b/modules/desktop_capture/win/wgc_capture_session.h
-index 9f08b7cf2dd2cbe36c6ac4cd20b02f1c92215e9c..b100f4a1897a180a1d1bacc560b8ea1f899f7782 100644
+index 9f08b7cf2dd2cbe36c6ac4cd20b02f1c92215e9c..1e067040da78004d8b37b195efc671e11065c257 100644
 --- a/modules/desktop_capture/win/wgc_capture_session.h
 +++ b/modules/desktop_capture/win/wgc_capture_session.h
 @@ -102,6 +102,10 @@ class WgcCaptureSession final {
