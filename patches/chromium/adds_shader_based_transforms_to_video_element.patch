@@ -1076,6 +1076,625 @@ index f64ae80494614b0dc8b2ff7ccb8d32730b6e689b..a7ec1d92a26f1e4a44e1bfe6aa339c54
    // The resource offset and multiplier to adjust for bit depth.
    int resource_multiplier_location_ = -1;
    int resource_offset_location_ = -1;
+diff --git a/components/viz/service/display/skia_renderer.cc b/components/viz/service/display/skia_renderer.cc
+index ba17de03682807102796036807a93e05992d6228..d2e8dcacc2300e5ddc108a175cad32688a9b1c10 100644
+--- a/components/viz/service/display/skia_renderer.cc
++++ b/components/viz/service/display/skia_renderer.cc
+@@ -83,6 +83,228 @@ namespace viz {
+ 
+ namespace {
+ 
++const char *kAroundShader = R"(
++  uniform shader input;
++
++  uniform int filter_id;
++  uniform half offset_x;
++  uniform half offset_y;
++  uniform half zoom;
++  uniform half width;
++  uniform half height;
++
++  const half4 color_yellow = half4(1.0, 255.0 / 255.0, 104.0 / 255.0, 1.0);
++  const half4 color_purple = half4(190.0 / 255.0, 0.0 / 255.0, 190.0 / 200.0, 1.0);
++  const half4 color_bluepurple = half4(94.0 / 255.0, 65.0 / 255.0, 193.0 / 255.0, 1.0);
++  const half4 color_darkpurple = half4(21.0 / 255.0, 0.0 / 255.0, 85.0 / 255.0, 1.0);
++  const half4 color_magenta = half4(246.0 / 255.0, 60.0 / 255.0, 127.0 / 255.0, 1.0);
++  const half4 color_coldblue = half4(0.0, 137.0 / 255.0, 187.0 / 255.0, 1.0);
++  const half4 color_green = half4(115.0 / 255.0, 232.0 / 255.0, 139.0 / 255.0, 1.0);
++  const half4 color_darkblue = half4(18.0 / 255.0, 25.0 / 255.0, 56.0 / 255.0, 1.0);
++  const half4 color_displaygreen = half4(100.0 / 255.0, 158.0 / 255.0, 12.0 / 255.0, 1.0);
++  const half4 color_purple1990 = half4(70.0 / 255.0, 10.0 / 255.0, 190.0 / 255.0, 1.0);
++  const half4 color_pinkhotel = half4(240.0 / 255.0, 160.0 / 255.0, 200.0 / 255.0, 1.0);
++  const half3 luminance = half3(0.52, 0.587, 0.114);
++
++  float dither4x4(float2 pixelPos, float grey) {
++    int x = int(mod(pixelPos.x, 4.0));
++    int y = int(mod(pixelPos.y, 4.0));
++    int index = x + y * 4;
++    float limit = 0.0;
++    if (x < 8) {
++      if (index == 0) limit = 0.0625;
++      if (index == 1) limit = 0.5625;
++      if (index == 2) limit = 0.1875;
++      if (index == 3) limit = 0.6875;
++      if (index == 4) limit = 0.8125;
++      if (index == 5) limit = 0.3125;
++      if (index == 6) limit = 0.9375;
++      if (index == 7) limit = 0.4375;
++      if (index == 8) limit = 0.25;
++      if (index == 9) limit = 0.75;
++      if (index == 10) limit = 0.125;
++      if (index == 11) limit = 0.625;
++      if (index == 12) limit = 1.0;
++      if (index == 13) limit = 0.5;
++      if (index == 14) limit = 0.875;
++      if (index == 15) limit = 0.375;
++    }
++    return grey < limit ? 0.0 : 1.0;
++  }
++
++  half3 gammaCorrect(half3 color, float gamma) {
++    return pow(color, half3(1.0 / gamma));
++  }
++
++  half3 levelRange(half3 color, float minInput, float maxInput) {
++      return min(max(color - half3(minInput), half3(0.0)) / (half3(maxInput) - half3(minInput)), half3(1.0));
++  }
++
++  half3 levels(half3 color, float minInput, float gamma, float maxInput) {
++      return gammaCorrect(levelRange(color, minInput, maxInput), gamma);
++  }
++
++  float4x4 brightnessMatrix(float brightness) {
++    return float4x4(1, 0, 0, 0,
++                    0, 1, 0, 0,
++                    0, 0, 1, 0,
++                    brightness, brightness, brightness, 1);
++  }
++
++  float4x4 contrastMatrix(float contrast) {
++    float t = (1.0 - contrast) / 2.0;
++    return float4x4(contrast, 0, 0, 0,
++                    0, contrast, 0, 0,
++                    0, 0, contrast, 0,
++                    t, t, t, 1);
++  }
++
++  float4x4 saturationMatrix(float saturation) {
++      float saturationFlipped = 1.0 - saturation;
++      float3 saturationX = float3(luminance.x * saturationFlipped);
++      float3 saturationY = float3(luminance.y * saturationFlipped);
++      float3 saturationZ = float3(luminance.z * saturationFlipped);
++      saturationX += float3( saturation, 0, 0 );
++      saturationY += float3( 0, saturation, 0 );
++      saturationZ += float3( 0, 0, saturation );
++
++      return float4x4(saturationX, 0,
++                      saturationY, 0,
++                      saturationZ, 0,
++                          0, 0, 0, 1);
++  }
++
++  float diag(float a, float b) {
++    return sqrt((a + b) * (a + b)) / 2.5;
++  }
++
++  float4 gradient2Colors(float4 a, float4 b, float w) {
++    return float4(mix(a.r, b.r, w), mix(a.g, b.g, w), mix(a.b, b.b, w), mix(a.a, b.a, w));
++  }
++
++  float softlight(float srcc, float srca, float dstc,
++                              float dsta) {
++    if (2.0 * srcc <= srca) {
++      return (dstc * dstc * (srca - 2.0 * srcc)) / dsta +
++              (1.0 - dsta) * srcc + dstc * (-srca + 2.0 * srcc + 1.0);
++    } else if (4.0 * dstc <= dsta) {
++      float DSqd = dstc * dstc;
++      float DCub = DSqd * dstc;
++      float DaSqd = dsta * dsta;
++      float DaCub = DaSqd * dsta;
++      return (-DaCub * srcc +
++              DaSqd * (srcc - dstc * (3.0 * srca - 6.0 * srcc - 1.0)) +
++              12.0 * dsta * DSqd * (srca - 2.0 * srcc) -
++              16.0 * DCub * (srca - 2.0 * srcc)) /
++              DaSqd;
++    } else {
++      return -sqrt(dsta * dstc) * (srca - 2.0 * srcc) - dsta * srcc +
++              dstc * (srca - 2.0 * srcc + 1.0) + srcc;
++    }
++  }
++
++  float tri(in float x) {
++    float h = fract(x*.5)-.5;
++    return 1.-2.*abs(h);
++  }
++
++  half4 main(float2 coord) {
++    float2 offset = float2(offset_x, offset_y);
++    float2 scale = float2(zoom, zoom);
++    float2 new_coord = coord * scale + offset;
++    half4 texelColor = sample(input, new_coord);
++    float2 uv = coord / float2(width, height);
++
++    float contrast = 1.0;
++    float brightness = 0.0;
++
++    half4 grey = half4(dot(texelColor.rgb, float3(0.52, 0.587, 0.114)));
++    float diagonalTopRight = diag(uv.x, uv.y);
++    float cubic = smoothstep(0.0, 1.0, clamp(0.0, 1.0, diagonalTopRight));
++
++    vec4 base = brightnessMatrix(brightness) * contrastMatrix(contrast) * grey;
++    half4 filter = texelColor;
++
++    if (filter_id == 1) {
++      filter = base;
++    } else if (filter_id == 2) {
++      float4 gradient = gradient2Colors(color_bluepurple, float4(1.0, 1.0, 1.0, 0.0), cubic);
++      filter = base * gradient;
++    } else if (filter_id == 3) { // hacker mode
++      filter = mix(color_darkpurple, color_green, base);
++    } else if (filter_id == 4) { // purple/blue LEDs
++      filter = float4(base.r * uv.x, base.g * uv.y, base.b, 1.0);
++    } else if (filter_id == 5) { // yellow magenta
++      filter = mix(color_purple, color_yellow, base);
++    } else if (filter_id == 6) { // purple duo
++      filter = mix(color_darkpurple, color_magenta, base);
++    } else if (filter_id == 7) { // enhanced brightness/constrast
++      filter = brightnessMatrix(brightness) * contrastMatrix(contrast) * saturationMatrix(0.85) * texelColor;
++    } else if (filter_id == 8) { // red green
++      filter = float4(base.r * (1.2 - uv.x), base.g * (uv.y), base.b * uv.y * 0.7 + 0.25 , 1.0);
++    } else if (filter_id == 9) { // pink sunset
++      base = brightnessMatrix(brightness) * contrastMatrix(contrast) * texelColor;
++      filter = gradient2Colors(float4(base.r, base.g * uv.y * 0.1, base.b * 0.2, 1.0) * (1.0 - uv.y), mix(float4(base.r, base.g * uv.y, base.b * 0.1, 1.0), float4(1,1,0,1), base), uv.y);
++    } else if (filter_id == 10) { // magenta green
++      filter = mix(float4(0.0, 0.0, 0.0, 1.0), gradient2Colors(float4(1.0,1.0,0.0,1.0), color_coldblue, uv.x), base);
++    } else if (filter_id == 11) { // colorful mix
++      filter = float4(base.r * (1.2 - uv.y), base.g * (uv.x), base.b * uv.y * 0.8 + 0.2, 1.0);
++    } else if (filter_id == 12) { // gameboy
++      base = float4(levels(grey.rgb, 55.0/255.0, 1.3, 235.0/255.0), 1.0);
++      float4 dithered = float4(dither4x4(coord * (1.0) * 2.0, base.r));
++      filter = mix(color_darkblue, color_displaygreen, dithered);
++    } else if (filter_id == 13) { // pink pixels
++      base = float4(levels(grey.rgb, 55.0/255.0, 1.3, 235.0/255.0), 1.0);
++      float4 dithered = float4(dither4x4(coord * (1.0) * 2.0, base.r));
++      filter = mix(color_purple1990, color_pinkhotel, dithered);
++    } else if (filter_id == 14) { // sunrise
++      // colors
++      half4 top = half4(50.0, 197.0, 255.0, 255.0) / 255.0;
++      half4 bot = half4(182.0, 32.0, 224.0, 255.0) / 255.0;
++
++      // gradient
++      half4 grad = mix(top, bot, uv.y);
++
++      // soft light
++      float r = softlight(grad.r, grad.a, texelColor.r, 1.0);
++      float g = softlight(grad.g, grad.a, texelColor.g, 1.0);
++      float b = softlight(grad.b, grad.a, texelColor.b, 1.0);
++
++      filter = half4(r, g, b, 1.0);
++    } else if (filter_id == 15) { // sunset
++      // colors
++      half4 tl = half4(253.0, 194.0, 42.0, 255.0) / 255.0;
++      half4 tr = half4(255.0, 61.0, 0.0, 255.0) / 255.0;
++      half4 bl = half4(214.0, 125.0, 255.0, 255.0) / 255.0;
++      half4 br = half4(214.0, 125.0, 255.0, 255.0) / 255.0;
++
++      // gradient
++      half4 tgrad = mix(tl, tr, uv.x);
++      half4 bgrad = mix(bl, br, uv.x);
++      half4 grad = mix(tgrad, bgrad, uv.y);
++
++      // soft light
++      float r = softlight(grad.r, grad.a, texelColor.r, 1.0);
++      float g = softlight(grad.g, grad.a, texelColor.g, 1.0);
++      float b = softlight(grad.b, grad.a, texelColor.b, 1.0);
++
++      filter = vec4(r, g, b, 1.0);
++    }
++
++    return half4(filter.r, filter.g, filter.b, 1.0);
++  }
++)";
++
++struct AroundShaderInput {
++  AroundShaderInput() { memset(this, 0, sizeof(*this)); }
++  int filter_id;
++  float offset_x;
++  float offset_y;
++  float zoom;
++  float width;
++  float height;
++};
++
+ // Smallest unit that impacts anti-aliasing output. We use this to determine
+ // when an exterior edge (with AA) has been clipped (no AA). The specific value
+ // was chosen to match that used by gl_renderer.
+@@ -1942,8 +2164,7 @@ void SkiaRenderer::DrawTextureQuad(const TextureDrawQuad* quad,
+                                    DrawQuadParams* params) {
+   const gfx::ColorSpace& src_color_space =
+       resource_provider()->GetColorSpace(quad->resource_id());
+-  const bool needs_color_conversion_filter =
+-      quad->is_video_frame && src_color_space.IsHDR();
++  bool needs_color_conversion_filter = quad->is_video_frame;
+ 
+   ScopedSkImageBuilder builder(
+       this, quad->resource_id(), /*maybe_concurrent_reads=*/true,
+@@ -2067,7 +2288,11 @@ void SkiaRenderer::DrawTextureQuad(const TextureDrawQuad* quad,
+     paint.setColorFilter(std::move(cf));
+   }
+ 
+-  if (needs_color_conversion_filter) {
++  if (quad->is_video_frame) {
++    SetAroundFilter(paint, image, quad->shared_quad_state->filter_id, quad->shared_quad_state->bounding_box, params->rect);
++  }
++
++  if (needs_color_conversion_filter && src_color_space.IsHDR()) {
+     // Skia won't perform color conversion.
+     const gfx::ColorSpace dst_color_space = CurrentRenderPassColorSpace();
+     DCHECK(SkColorSpace::Equals(image->colorSpace(),
+@@ -2086,6 +2311,35 @@ void SkiaRenderer::DrawTextureQuad(const TextureDrawQuad* quad,
+   DrawSingleImage(image, valid_texel_bounds, rpdq_params, &paint, params);
+ }
+ 
++void SkiaRenderer::SetAroundFilter(SkPaint& paint, const SkImage* image, int filter_id, gfx::RectF bounding_box, gfx::RectF rect) {
++  if (!around_shader_cache_) {
++    around_shader_cache_ = SkRuntimeEffect::MakeForShader(SkString(kAroundShader)).effect;
++  }
++
++  AroundShaderInput uniforms;
++  uniforms.filter_id = filter_id;
++  uniforms.offset_x = bounding_box.x() * rect.width() * device_scale_factor_;
++  uniforms.offset_y = bounding_box.y() * rect.height() * device_scale_factor_;
++  uniforms.zoom = fmax(
++    bounding_box.width() * device_scale_factor_,
++    bounding_box.height() * device_scale_factor_);
++  uniforms.width = rect.width();
++  uniforms.height = rect.height();
++
++  sk_sp<SkData> data = SkData::MakeWithCopy(&uniforms, sizeof(uniforms));
++  sk_sp<SkShader> imageShader = image->makeShader(SkSamplingOptions(SkFilterMode::kLinear));
++  sk_sp<SkShader> children[] = { imageShader };
++  sk_sp<SkShader> myShader = around_shader_cache_->makeShader(
++    /*uniforms=*/    std::move(data),
++    /*children=*/    children,
++    /*childCount=*/  1,
++    /*localMatrix=*/ nullptr,
++    /*isOpaque=*/    false);
++
++  sk_sp<SkImageFilter> image_filter = SkImageFilters::Shader(std::move(myShader));
++  paint.setImageFilter(image_filter);
++}
++
+ void SkiaRenderer::DrawTileDrawQuad(const TileDrawQuad* quad,
+                                     const DrawRPDQParams* rpdq_params,
+                                     DrawQuadParams* params) {
+diff --git a/components/viz/service/display/skia_renderer.h b/components/viz/service/display/skia_renderer.h
+index b94ffe0bae845928db4f3dc05d71fef72e4b3523..c19a2c2d7d9e2d1eb29ec2899a9bb03e0ce1d378 100644
+--- a/components/viz/service/display/skia_renderer.h
++++ b/components/viz/service/display/skia_renderer.h
+@@ -362,6 +362,9 @@ class VIZ_SERVICE_EXPORT SkiaRenderer : public DirectRenderer {
+   bool UsingSkiaForDelegatedInk() const;
+   uint32_t debug_tint_modulate_count_ = 0;
+ 
++  void SetAroundFilter(SkPaint& paint, const SkImage* image, int filter_id, gfx::RectF bounding_box, gfx::RectF rect);
++  sk_sp<SkRuntimeEffect> around_shader_cache_;
++
+   DISALLOW_COPY_AND_ASSIGN(SkiaRenderer);
+ };
+ 
+diff --git a/components/viz/service/display/software_renderer.cc b/components/viz/service/display/software_renderer.cc
+index 64c2f6bdef41216cf0cd8c332db3b809ede432e0..4896d9d8f82d9350db8257d8885501b679cb3472 100644
+--- a/components/viz/service/display/software_renderer.cc
++++ b/components/viz/service/display/software_renderer.cc
+@@ -39,6 +39,7 @@
+ #include "third_party/skia/include/core/SkPath.h"
+ #include "third_party/skia/include/core/SkPoint.h"
+ #include "third_party/skia/include/core/SkShader.h"
++#include "third_party/skia/include/effects/SkRuntimeEffect.h"
+ #include "third_party/skia/include/effects/SkShaderMaskFilter.h"
+ #include "ui/gfx/geometry/axis_transform2d.h"
+ #include "ui/gfx/geometry/rect_conversions.h"
+@@ -76,6 +77,229 @@ class AnimatedImagesProvider : public cc::ImageProvider {
+ 
+ }  // namespace
+ 
++
++const char *kAroundShader = R"(
++  uniform shader input;
++
++  uniform int filter_id;
++  uniform half offset_x;
++  uniform half offset_y;
++  uniform half zoom;
++  uniform half width;
++  uniform half height;
++
++  const half4 color_yellow = half4(1.0, 255.0 / 255.0, 104.0 / 255.0, 1.0);
++  const half4 color_purple = half4(190.0 / 255.0, 0.0 / 255.0, 190.0 / 200.0, 1.0);
++  const half4 color_bluepurple = half4(94.0 / 255.0, 65.0 / 255.0, 193.0 / 255.0, 1.0);
++  const half4 color_darkpurple = half4(21.0 / 255.0, 0.0 / 255.0, 85.0 / 255.0, 1.0);
++  const half4 color_magenta = half4(246.0 / 255.0, 60.0 / 255.0, 127.0 / 255.0, 1.0);
++  const half4 color_coldblue = half4(0.0, 137.0 / 255.0, 187.0 / 255.0, 1.0);
++  const half4 color_green = half4(115.0 / 255.0, 232.0 / 255.0, 139.0 / 255.0, 1.0);
++  const half4 color_darkblue = half4(18.0 / 255.0, 25.0 / 255.0, 56.0 / 255.0, 1.0);
++  const half4 color_displaygreen = half4(100.0 / 255.0, 158.0 / 255.0, 12.0 / 255.0, 1.0);
++  const half4 color_purple1990 = half4(70.0 / 255.0, 10.0 / 255.0, 190.0 / 255.0, 1.0);
++  const half4 color_pinkhotel = half4(240.0 / 255.0, 160.0 / 255.0, 200.0 / 255.0, 1.0);
++  const half3 luminance = half3(0.52, 0.587, 0.114);
++
++  float dither4x4(float2 pixelPos, float grey) {
++    int x = int(mod(pixelPos.x, 4.0));
++    int y = int(mod(pixelPos.y, 4.0));
++    int index = x + y * 4;
++    float limit = 0.0;
++    if (x < 8) {
++      if (index == 0) limit = 0.0625;
++      if (index == 1) limit = 0.5625;
++      if (index == 2) limit = 0.1875;
++      if (index == 3) limit = 0.6875;
++      if (index == 4) limit = 0.8125;
++      if (index == 5) limit = 0.3125;
++      if (index == 6) limit = 0.9375;
++      if (index == 7) limit = 0.4375;
++      if (index == 8) limit = 0.25;
++      if (index == 9) limit = 0.75;
++      if (index == 10) limit = 0.125;
++      if (index == 11) limit = 0.625;
++      if (index == 12) limit = 1.0;
++      if (index == 13) limit = 0.5;
++      if (index == 14) limit = 0.875;
++      if (index == 15) limit = 0.375;
++    }
++    return grey < limit ? 0.0 : 1.0;
++  }
++
++  half3 gammaCorrect(half3 color, float gamma) {
++    return pow(color, half3(1.0 / gamma));
++  }
++
++  half3 levelRange(half3 color, float minInput, float maxInput) {
++      return min(max(color - half3(minInput), half3(0.0)) / (half3(maxInput) - half3(minInput)), half3(1.0));
++  }
++
++  half3 levels(half3 color, float minInput, float gamma, float maxInput) {
++      return gammaCorrect(levelRange(color, minInput, maxInput), gamma);
++  }
++
++  float4x4 brightnessMatrix(float brightness) {
++    return float4x4(1, 0, 0, 0,
++                    0, 1, 0, 0,
++                    0, 0, 1, 0,
++                    brightness, brightness, brightness, 1);
++  }
++
++  float4x4 contrastMatrix(float contrast) {
++    float t = (1.0 - contrast) / 2.0;
++    return float4x4(contrast, 0, 0, 0,
++                    0, contrast, 0, 0,
++                    0, 0, contrast, 0,
++                    t, t, t, 1);
++  }
++
++  float4x4 saturationMatrix(float saturation) {
++      float saturationFlipped = 1.0 - saturation;
++      float3 saturationX = float3(luminance.x * saturationFlipped);
++      float3 saturationY = float3(luminance.y * saturationFlipped);
++      float3 saturationZ = float3(luminance.z * saturationFlipped);
++      saturationX += float3( saturation, 0, 0 );
++      saturationY += float3( 0, saturation, 0 );
++      saturationZ += float3( 0, 0, saturation );
++
++      return float4x4(saturationX, 0,
++                      saturationY, 0,
++                      saturationZ, 0,
++                          0, 0, 0, 1);
++  }
++
++  float diag(float a, float b) {
++    return sqrt((a + b) * (a + b)) / 2.5;
++  }
++
++  float4 gradient2Colors(float4 a, float4 b, float w) {
++    return float4(mix(a.r, b.r, w), mix(a.g, b.g, w), mix(a.b, b.b, w), mix(a.a, b.a, w));
++  }
++
++  float softlight(float srcc, float srca, float dstc,
++                              float dsta) {
++    if (2.0 * srcc <= srca) {
++      return (dstc * dstc * (srca - 2.0 * srcc)) / dsta +
++              (1.0 - dsta) * srcc + dstc * (-srca + 2.0 * srcc + 1.0);
++    } else if (4.0 * dstc <= dsta) {
++      float DSqd = dstc * dstc;
++      float DCub = DSqd * dstc;
++      float DaSqd = dsta * dsta;
++      float DaCub = DaSqd * dsta;
++      return (-DaCub * srcc +
++              DaSqd * (srcc - dstc * (3.0 * srca - 6.0 * srcc - 1.0)) +
++              12.0 * dsta * DSqd * (srca - 2.0 * srcc) -
++              16.0 * DCub * (srca - 2.0 * srcc)) /
++              DaSqd;
++    } else {
++      return -sqrt(dsta * dstc) * (srca - 2.0 * srcc) - dsta * srcc +
++              dstc * (srca - 2.0 * srcc + 1.0) + srcc;
++    }
++  }
++
++  float tri(in float x) {
++    float h = fract(x*.5)-.5;
++    return 1.-2.*abs(h);
++  }
++
++  half4 main(float2 coord) {
++    float2 offset = float2(offset_x, offset_y);
++    float2 scale = float2(zoom, zoom);
++    float2 new_coord = coord * scale + offset;
++    half4 texelColor = sample(input, new_coord);
++    float2 uv = coord / float2(width, height);
++
++    float contrast = 1.0;
++    float brightness = 0.0;
++
++    half4 grey = half4(dot(texelColor.rgb, float3(0.52, 0.587, 0.114)));
++    float diagonalTopRight = diag(uv.x, uv.y);
++    float cubic = smoothstep(0.0, 1.0, clamp(0.0, 1.0, diagonalTopRight));
++
++    vec4 base = brightnessMatrix(brightness) * contrastMatrix(contrast) * grey;
++    half4 filter = texelColor;
++
++    if (filter_id == 1) {
++      filter = base;
++    } else if (filter_id == 2) {
++      float4 gradient = gradient2Colors(color_bluepurple, float4(1.0, 1.0, 1.0, 0.0), cubic);
++      filter = base * gradient;
++    } else if (filter_id == 3) { // hacker mode
++      filter = mix(color_darkpurple, color_green, base);
++    } else if (filter_id == 4) { // purple/blue LEDs
++      filter = float4(base.r * uv.x, base.g * uv.y, base.b, 1.0);
++    } else if (filter_id == 5) { // yellow magenta
++      filter = mix(color_purple, color_yellow, base);
++    } else if (filter_id == 6) { // purple duo
++      filter = mix(color_darkpurple, color_magenta, base);
++    } else if (filter_id == 7) { // enhanced brightness/constrast
++      filter = brightnessMatrix(brightness) * contrastMatrix(contrast) * saturationMatrix(0.85) * texelColor;
++    } else if (filter_id == 8) { // red green
++      filter = float4(base.r * (1.2 - uv.x), base.g * (uv.y), base.b * uv.y * 0.7 + 0.25 , 1.0);
++    } else if (filter_id == 9) { // pink sunset
++      base = brightnessMatrix(brightness) * contrastMatrix(contrast) * texelColor;
++      filter = gradient2Colors(float4(base.r, base.g * uv.y * 0.1, base.b * 0.2, 1.0) * (1.0 - uv.y), mix(float4(base.r, base.g * uv.y, base.b * 0.1, 1.0), float4(1,1,0,1), base), uv.y);
++    } else if (filter_id == 10) { // magenta green
++      filter = mix(float4(0.0, 0.0, 0.0, 1.0), gradient2Colors(float4(1.0,1.0,0.0,1.0), color_coldblue, uv.x), base);
++    } else if (filter_id == 11) { // colorful mix
++      filter = float4(base.r * (1.2 - uv.y), base.g * (uv.x), base.b * uv.y * 0.8 + 0.2, 1.0);
++    } else if (filter_id == 12) { // gameboy
++      base = float4(levels(grey.rgb, 55.0/255.0, 1.3, 235.0/255.0), 1.0);
++      float4 dithered = float4(dither4x4(coord * (1.0) * 2.0, base.r));
++      filter = mix(color_darkblue, color_displaygreen, dithered);
++    } else if (filter_id == 13) { // pink pixels
++      base = float4(levels(grey.rgb, 55.0/255.0, 1.3, 235.0/255.0), 1.0);
++      float4 dithered = float4(dither4x4(coord * (1.0) * 2.0, base.r));
++      filter = mix(color_purple1990, color_pinkhotel, dithered);
++    } else if (filter_id == 14) { // sunrise
++      // colors
++      half4 top = half4(50.0, 197.0, 255.0, 255.0) / 255.0;
++      half4 bot = half4(182.0, 32.0, 224.0, 255.0) / 255.0;
++
++      // gradient
++      half4 grad = mix(top, bot, uv.y);
++
++      // soft light
++      float r = softlight(grad.r, grad.a, texelColor.r, 1.0);
++      float g = softlight(grad.g, grad.a, texelColor.g, 1.0);
++      float b = softlight(grad.b, grad.a, texelColor.b, 1.0);
++
++      filter = half4(r, g, b, 1.0);
++    } else if (filter_id == 15) { // sunset
++      // colors
++      half4 tl = half4(253.0, 194.0, 42.0, 255.0) / 255.0;
++      half4 tr = half4(255.0, 61.0, 0.0, 255.0) / 255.0;
++      half4 bl = half4(214.0, 125.0, 255.0, 255.0) / 255.0;
++      half4 br = half4(214.0, 125.0, 255.0, 255.0) / 255.0;
++
++      // gradient
++      half4 tgrad = mix(tl, tr, uv.x);
++      half4 bgrad = mix(bl, br, uv.x);
++      half4 grad = mix(tgrad, bgrad, uv.y);
++
++      // soft light
++      float r = softlight(grad.r, grad.a, texelColor.r, 1.0);
++      float g = softlight(grad.g, grad.a, texelColor.g, 1.0);
++      float b = softlight(grad.b, grad.a, texelColor.b, 1.0);
++
++      filter = vec4(r, g, b, 1.0);
++    }
++
++    return half4(filter.r, filter.g, filter.b, 1.0);
++  }
++)";
++
++struct AroundShaderInput {
++  AroundShaderInput() { memset(this, 0, sizeof(*this)); }
++  int filter_id;
++  float offset_x;
++  float offset_y;
++  float zoom;
++  float width;
++  float height;
++};
++
+ SoftwareRenderer::SoftwareRenderer(
+     const RendererSettings* settings,
+     const DebugRendererSettings* debug_settings,
+@@ -464,6 +688,11 @@ void SoftwareRenderer::DrawTextureQuad(const TextureDrawQuad* quad) {
+     current_canvas_->saveLayerAlpha(&quad_rect, current_paint_.getAlpha());
+     current_paint_.setAlpha(0xFF);
+   }
++
++  if (quad->is_video_frame) {
++    SetAroundFilter(current_paint_, image, quad->shared_quad_state->filter_id, quad->shared_quad_state->bounding_box, gfx::RectF(quad->rect));
++  }
++
+   if (blend_background) {
+     SkPaint background_paint;
+     background_paint.setColor(quad->background_color);
+@@ -478,6 +707,35 @@ void SoftwareRenderer::DrawTextureQuad(const TextureDrawQuad* quad) {
+     current_canvas_->restore();
+ }
+ 
++void SoftwareRenderer::SetAroundFilter(SkPaint& paint, const SkImage* image, int filter_id, gfx::RectF bounding_box, gfx::RectF rect) {
++  if (!around_shader_cache_) {
++    around_shader_cache_ = SkRuntimeEffect::MakeForShader(SkString(kAroundShader)).effect;
++  }
++
++  AroundShaderInput uniforms;
++  uniforms.filter_id = filter_id;
++  uniforms.offset_x = bounding_box.x() * rect.width() * device_scale_factor_;
++  uniforms.offset_y = bounding_box.y() * rect.height() * device_scale_factor_;
++  uniforms.zoom = fmax(
++    bounding_box.width() * device_scale_factor_,
++    bounding_box.height() * device_scale_factor_);
++  uniforms.width = rect.width();
++  uniforms.height = rect.height();
++
++  sk_sp<SkData> data = SkData::MakeWithCopy(&uniforms, sizeof(uniforms));
++  sk_sp<SkShader> imageShader = image->makeShader(SkSamplingOptions(SkFilterMode::kLinear));
++  sk_sp<SkShader> children[] = { imageShader };
++  sk_sp<SkShader> myShader = around_shader_cache_->makeShader(
++    /*uniforms=*/    std::move(data),
++    /*children=*/    children,
++    /*childCount=*/  1,
++    /*localMatrix=*/ nullptr,
++    /*isOpaque=*/    false);
++
++  sk_sp<SkImageFilter> image_filter = SkImageFilters::Shader(std::move(myShader));
++  paint.setImageFilter(image_filter);
++}
++
+ void SoftwareRenderer::DrawTileQuad(const TileDrawQuad* quad) {
+   // |resource_provider_| can be NULL in resourceless software draws, which
+   // should never produce tile quads in the first place.
+diff --git a/components/viz/service/display/software_renderer.h b/components/viz/service/display/software_renderer.h
+index 2cb89405c9983a45351132ef369e8622f85b29c6..6dac3141dac6d8ae577a6a9bd7d58ef75d3b7571 100644
+--- a/components/viz/service/display/software_renderer.h
++++ b/components/viz/service/display/software_renderer.h
+@@ -16,6 +16,8 @@
+ #include "components/viz/service/viz_service_export.h"
+ #include "ui/latency/latency_info.h"
+ 
++class SkRuntimeEffect;
++
+ namespace viz {
+ class DebugBorderDrawQuad;
+ class OutputSurface;
+@@ -127,6 +129,9 @@ class VIZ_SERVICE_EXPORT SoftwareRenderer : public DirectRenderer {
+   SkSamplingOptions current_sampling_;
+   std::unique_ptr<SkCanvas> current_framebuffer_canvas_;
+ 
++  void SetAroundFilter(SkPaint& paint, const SkImage* image, int filter_id, gfx::RectF bounding_box, gfx::RectF rect);
++  sk_sp<SkRuntimeEffect> around_shader_cache_;
++
+   DISALLOW_COPY_AND_ASSIGN(SoftwareRenderer);
+ };
+ 
 diff --git a/components/viz/service/display/surface_aggregator.cc b/components/viz/service/display/surface_aggregator.cc
 index 7efd27ef6b701251d0ab93d055d598596d0dafed..f41eedc761abd88e278e3a0cdb71e85a17842622 100644
 --- a/components/viz/service/display/surface_aggregator.cc
