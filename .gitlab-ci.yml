@@ -1,0 +1,335 @@
+workflow:
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "master"'
+    - if: '$CI_COMMIT_BRANCH == "prod-release"'
+    - if: '$CI_COMMIT_BRANCH == "ci/run-clean-build"'
+    - if: '$CI_COMMIT_BRANCH == "ci/symbols-test"'
+    - if: '$CI_COMMIT_BRANCH == "around-14.0.0-beta.20"'
+
+stages:
+  - clean
+  - build
+  - deploy
+
+#
+# OS CONFIGS
+#
+
+.base:
+  variables:
+    DEPOT_TOOLS_UPDATE: 0
+    PYTHONUNBUFFERED: 1
+    SCCACHE_CACHE_SIZE: 100G
+
+.linux:
+  extends: .base
+  tags: ["linux", "electron"]
+  variables:
+    GIT_CLONE_PATH: $CI_BUILDS_DIR/$CI_RUNNER_SHORT_TOKEN/$CI_CONCURRENT_ID/src/electron
+    BASH_ENV: $CI_BUILDS_DIR/.bash_env
+    # SCCACHE_BUCKET: electronjs-sccache-ci
+    # SCCACHE_TWO_TIER: 'true'
+    SCCACHE_CACHE_SIZE: 100G
+    SCCACHE_DIR: /cache/sccache
+    GIT_CACHE_PATH: /cache/git
+    PYTHONUNBUFFERED: 1
+
+.windows:
+  extends: .base
+  tags: ["windows", "electron"]
+  variables:
+    # SCCACHE_BUCKET: electronjs-sccache-ci
+    # SCCACHE_TWO_TIER: 'true' # Doesnt work on Windows https://github.com/electron/electron/issues/21006
+    SCCACHE_CACHE_SIZE: 100G
+    SCCACHE_DIR: C:\cache\sccache
+    GIT_CACHE_PATH: C:\cache\git
+    PYTHONUNBUFFERED: 1
+    DEPOT_TOOLS_WIN_TOOLCHAIN: 0
+    GIT_CLONE_PATH: $CI_BUILDS_DIR\$CI_RUNNER_SHORT_TOKEN\$CI_CONCURRENT_ID\src\electron
+    # RUST_LOG: trace # For debugging
+    # SCCACHE_ERROR_LOG: C:\cache\log
+
+.mac:
+  extends: .base
+  tags: ["mac", "electron"]
+  variables:
+    GIT_CLONE_PATH: $CI_BUILDS_DIR/$CI_RUNNER_SHORT_TOKEN/$CI_CONCURRENT_ID/src/electron
+    BASH_ENV: $CI_BUILDS_DIR/.bash_env
+    # SCCACHE_BUCKET: electronjs-sccache-ci # Disabling due to "Connection to server timed out"
+    # SCCACHE_TWO_TIER: 'true'
+    SCCACHE_CACHE_SIZE: 100G
+    SCCACHE_DIR: /Users/administrator/cache/sccache
+    GIT_CACHE_PATH: /Users/administrator/cache/git
+    PYTHONUNBUFFERED: 1
+
+.mac-arm:
+  extends: .base
+  tags: ["mac-arm", "electron"]
+  variables:
+    GIT_CLONE_PATH: $CI_BUILDS_DIR/$CI_RUNNER_SHORT_TOKEN/$CI_CONCURRENT_ID/src/electron
+    BASH_ENV: $CI_BUILDS_DIR/.bash_env
+    # SCCACHE_BUCKET: electronjs-sccache-ci # Disabling due to "Connection to server timed out"
+    # SCCACHE_TWO_TIER: 'true'
+    SCCACHE_CACHE_SIZE: 100G
+    SCCACHE_DIR: /Users/administrator/cache/sccache
+    GIT_CACHE_PATH: /Users/administrator/cache/git
+    PYTHONUNBUFFERED: 1
+    GCLIENT_EXTRA_ARGS: '--custom-var=checkout_mac=True --custom-var=host_os=mac'
+
+#
+# CLEAN
+#
+
+# To run a clean build, take the latest changes and push them to the branch
+# name defined in the job rules below.
+
+.clean:
+  stage: clean
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "ci/run-clean-build"'
+
+clean:linux:
+  extends:
+    - .linux
+    - .clean
+  script:
+    - rm -rf ../out
+
+clean:windows:
+  extends:
+    - .windows
+    - .clean
+  script:
+    - Get-ChildItem ../out -Recurse | Remove-Item -Confirm:$false -Recurse -Force
+
+clean:mac:
+  extends:
+    - .mac
+    - .clean
+  script:
+    - rm -rf ../out
+
+clean:mac-arm:
+  extends:
+    - .mac-arm
+    - .clean
+  script:
+    - rm -rf ../out
+
+
+#
+# BUILD
+#
+
+.build:
+  stage: build
+  variables:
+    # Need to pull ./vendor/bodo for uploading debug symbols
+    GIT_SUBMODULE_STRATEGY: recursive
+
+build:linux:
+  needs:
+    - job: clean:linux
+      optional: true
+  extends:
+    - .linux
+    - .build
+  script:
+    - printenv
+    - git checkout . && git clean -fdx
+    - mkdir -p $SCCACHE_DIR && mkdir -p $GIT_CACHE_PATH
+    - cd ../..
+    - "{ git -C src/third_party/depot_tools fetch origin && git -C src/third_party/depot_tools reset --hard origin/main ; } || git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git src/third_party/depot_tools"
+    - echo 'export PATH="$PATH:'"$PWD"'/src/third_party/depot_tools"' >> $BASH_ENV
+    - source $BASH_ENV
+    - gclient config  --name "src/electron"  --unmanaged  $GCLIENT_EXTRA_ARGS  "$CI_REPOSITORY_URL"
+    - gclient sync --ignore_locks -v --with_branch_heads --with_tags -f
+    - cd src
+    - rm -rf out/Release/dist.zip out/Release/breakpad_symbols out/Release/symbols.zip
+    - python electron/script/gen-version.py
+    - export CHROMIUM_BUILDTOOLS_PATH=`pwd`/buildtools
+    - export GN_EXTRA_ARGS="${GN_EXTRA_ARGS} cc_wrapper=\"${PWD}/electron/external_binaries/sccache\""
+    - gn gen out/Release --args="import(\"//electron/build/args/release.gn\") $GN_EXTRA_ARGS"
+    - ninja  -j 4 -C out/Release electron
+    - electron/script/strip-binaries.py -d out/Release
+    - ninja -C out/Release electron:electron_dist_zip
+    - aws s3 cp ./out/Release/dist.zip s3://around-electron-dist/$CI_COMMIT_SHORT_SHA/linux/amd64/Release/dist.zip
+
+build:windows:
+  needs:
+    - job: clean:windows
+      optional: true
+  extends:
+    - .windows
+    - .build
+  script:
+    - echo $env:path
+    - pwd
+    - git checkout .
+    - git clean -fdx
+    - New-Item -ItemType directory -Force -Path $env:SCCACHE_DIR
+    - New-Item -ItemType directory -Force -Path $env:GIT_CACHE_PATH
+    - cd ../../
+    - gclient config  --name "src/electron"  --unmanaged $env:CI_REPOSITORY_URL
+    - gclient sync --ignore_locks -v --with_branch_heads --with_tags -f
+    - cd src/
+    - if (Test-Path out/Release/dist.zip) { Remove-Item -Force out/Release/dist.zip }
+    - if (Test-Path out/Release/symbols.zip) { Remove-Item -Force out/Release/symbols.zip }
+    - Get-ChildItem out/Release/breakpad_symbols -Recurse | Remove-Item -Confirm:$false -Recurse -Force
+    - python electron/script/gen-version.py
+    - $env:CHROMIUM_BUILDTOOLS_PATH="$pwd\buildtools"
+    - gn gen "out/Release" "--args=import(\`"//electron/build/args/release.gn\`") cc_wrapper=\`"$pwd\electron\external_binaries\sccache.exe\`""
+    - ninja -C "out/Release" electron
+    - ninja -C "out/Release" electron:electron_dist_zip
+    - $env:Path += ";C:\Program Files\Amazon\AWSCLI\bin"
+    - aws s3 cp out\Release\dist.zip s3://around-electron-dist/$env:CI_COMMIT_SHORT_SHA/windows/amd64/Release/dist.zip
+
+build:mac:
+  needs:
+    - job: clean:mac
+      optional: true
+  extends:
+    - .mac
+    - .build
+  script:
+    - printenv
+    - git checkout . && git clean -fdx
+    - mkdir -p $SCCACHE_DIR && mkdir -p $GIT_CACHE_PATH
+    - cd ../..
+    - "{ git -C src/third_party/depot_tools fetch origin && git -C src/third_party/depot_tools reset --hard origin/main ; } || git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git src/third_party/depot_tools"
+    - echo 'export PATH="$PATH:'"$PWD"'/src/third_party/depot_tools"' >> $BASH_ENV
+    - source $BASH_ENV
+    - gclient config  --name "src/electron"  --unmanaged  $GCLIENT_EXTRA_ARGS  "$CI_REPOSITORY_URL"
+    - gclient sync --ignore_locks -v --with_branch_heads --with_tags -f
+    - cd src
+    - rm -rf out/Release/dist.zip out/Release/breakpad_symbols out/Release/symbols.zip
+    - python electron/script/gen-version.py
+    - export CHROMIUM_BUILDTOOLS_PATH=`pwd`/buildtools
+    - export GN_EXTRA_ARGS="${GN_EXTRA_ARGS} cc_wrapper=\"${PWD}/electron/external_binaries/sccache\""
+    - gn gen out/Release --args="import(\"//electron/build/args/release.gn\") $GN_EXTRA_ARGS"
+    - ninja -C out/Release electron
+    # - electron/script/strip-binaries.py -d out/Release
+    - ninja -C out/Release electron:electron_dist_zip
+    - aws s3 cp ./out/Release/dist.zip s3://around-electron-dist/$CI_COMMIT_SHORT_SHA/darwin/amd64/Release/dist.zip
+
+build:mac-arm:
+  needs:
+    - job: clean:mac-arm
+      optional: true
+  extends:
+    - .mac-arm
+    - .build
+  script:
+    - printenv
+    - git checkout . && git clean -fdx
+    - mkdir -p $SCCACHE_DIR && mkdir -p $GIT_CACHE_PATH
+    - cd ../..
+    - "{ git -C src/third_party/depot_tools fetch origin && git -C src/third_party/depot_tools reset --hard origin/main ; } || git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git src/third_party/depot_tools"
+    # - echo 'export PATH="$PATH:'"$PWD"'/src/third_party/depot_tools"' >> $BASH_ENV
+    - echo 'export PATH="'"$PWD"'/src/third_party/depot_tools/bootstrap-3.8.0.chromium.8_bin/python/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:'"$PWD"'/src/third_party/depot_tools"' > $BASH_ENV
+    - source $BASH_ENV
+    - gclient config  --name "src/electron"  --unmanaged  $GCLIENT_EXTRA_ARGS  "$CI_REPOSITORY_URL"
+    - gclient sync --ignore_locks -v --with_branch_heads --with_tags -f
+    - cd src
+    - rm -rf out/Release/dist.zip out/Release/breakpad_symbols out/Release/symbols.zip
+    - python electron/script/gen-version.py
+    - export CHROMIUM_BUILDTOOLS_PATH=`pwd`/buildtools
+    # - export GN_EXTRA_ARGS="${GN_EXTRA_ARGS} cc_wrapper=\"${PWD}/electron/external_binaries/sccache\""
+    - export GN_EXTRA_ARGS="${GN_EXTRA_ARGS} target_cpu=\"arm64\""
+    - gn gen out/Release --args="import(\"//electron/build/args/release.gn\") $GN_EXTRA_ARGS"
+    - ninja -C out/Release electron
+    # - electron/script/strip-binaries.py -d out/Release
+    - ninja -C out/Release electron:electron_dist_zip
+    - aws s3 cp ./out/Release/dist.zip s3://around-electron-dist/$CI_COMMIT_SHORT_SHA/darwin/arm64/Release/dist.zip
+
+#
+# UPLOAD SYMBOLS
+#
+
+.upload_symbols:
+  stage: deploy
+  variables:
+    GIT_STRATEGY: none # disable git clone
+    ELECTRON_OUT_DIR: Release
+    ELECTRON_RELEASE: 1
+    ELECTRON_S3_BUCKET: around-electron-symbols
+    ELECTRON_S3_ACCESS_KEY: $AWS_ACCESS_KEY_ID
+    ELECTRON_S3_SECRET_KEY: $AWS_SECRET_ACCESS_KEY
+    GN_CONFIG: release
+
+upload_symbols:linux:
+  needs: ["build:linux"]
+  extends:
+    - .linux
+    - .upload_symbols
+  script:
+    - printenv
+    - cd .. # up to /src
+    - echo 'export PATH="$PATH:'"$PWD"'/third_party/depot_tools"' >> $BASH_ENV
+    - source $BASH_ENV # add ninja to path
+    - ninja -C out/Release electron:electron_symbols
+    - python electron/script/zip-symbols.py
+    - python -m pip install boto # required by AWS s3put
+    - python electron/script/release/uploaders/upload-symbols.py
+
+# Upload Windows PDBs
+#
+# For this to succeed, a few dependencies are required:
+# - Visual Studio
+# - msdia*.dll must be registered, required by dump_syms.exe
+# - symstore.exe, included with Debugging Tools for Windows (WinDBG)
+#
+# 1. Download and install Visual Studio 2019 Community.
+#    https://visualstudio.microsoft.com/downloads/
+# 2. Register msdia140.dll
+#      To register msdia*.dll, run the regsvr32.exe command found in
+#        https://source.chromium.org/chromium/chromium/src/+/master:third_party/breakpad/breakpad/src/tools/windows/converter_exe/configure.cmd;drc=6ca3f8bbe56951db922fa3b567d7ec441093f96e
+#      OR run the following in Powershell when run as administrator:
+#        & "$env:systemroot\SysWoW64\regsvr32.exe" /s "C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\Common7\IDE\Remote Debugger\x64\msdia140.dll"
+# 3. Download and install Debugging Tools for Windows (WinDBG)
+#    https://docs.microsoft.com/en-us/windows-hardware/drivers/debugger/debugger-download-tools
+# 4. Update PATH environment variable to include the directory for symstore.exe
+#    C:\Program Files (x86)\Windows Kits\10\Debuggers\x86
+upload_symbols:windows:
+  needs: ["build:windows"]
+  extends:
+    - .windows
+    - .upload_symbols
+  script:
+    - $env:PATH += ";C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\Common7\IDE\Remote Debugger\x64" # msdia140.dll
+    - $env:PATH += ";C:\Program Files (x86)\Windows Kits\10\Debuggers\x86" # symstore.exe
+    - echo $env:PATH
+    - pwd
+    - cd ../ # up to /src
+    - ninja -C out/Release electron:electron_symbols
+    - python electron/script/zip-symbols.py
+    - python -m pip install boto # required by AWS s3put
+    - python electron/script/release/uploaders/upload-symbols.py
+
+# Build config to share between macOS architectures.
+.upload_symbols_mac:
+  script:
+    - printenv
+    - cd .. # up to /src
+    - echo 'export PATH="$PATH:'"$PWD"'/third_party/depot_tools"' >> $BASH_ENV
+    - source $BASH_ENV # add ninja to path
+    - ninja -C out/Release electron:electron_symbols
+    - python electron/script/zip-symbols.py
+    - python -m pip install boto # required by AWS s3put
+    - python electron/script/release/uploaders/upload-symbols.py
+
+# x86
+upload_symbols:mac:
+  needs: ["build:mac"]
+  extends:
+    - .mac
+    - .upload_symbols
+    - .upload_symbols_mac
+
+# M1
+upload_symbols:mac-arm:
+  needs: ["build:mac-arm"]
+  extends:
+    - .mac-arm
+    - .upload_symbols
+    - .upload_symbols_mac
