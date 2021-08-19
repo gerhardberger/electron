@@ -214,7 +214,7 @@ index d1e8528638cd5edaa34c4943467336bb1963c06a..de2ea14c6c3566b3eeb4360893264a5b
    // once DWTHX11 stops using them.
    internal::NativeWidgetDelegate* native_widget_delegate() {
 diff --git a/ui/views/widget/desktop_aura/window_event_filter_linux.cc b/ui/views/widget/desktop_aura/window_event_filter_linux.cc
-index d9507c3e8b563a272343525ea7b13815e2d43d65..b0b9ad4b64e454d0fe434ac3bb36ddc23459247f 100644
+index d9507c3e8b563a272343525ea7b13815e2d43d65..f5f9d4f5a137cccdbe6a9f18ef2d994e67386b08 100644
 --- a/ui/views/widget/desktop_aura/window_event_filter_linux.cc
 +++ b/ui/views/widget/desktop_aura/window_event_filter_linux.cc
 @@ -12,7 +12,6 @@
@@ -225,7 +225,18 @@ index d9507c3e8b563a272343525ea7b13815e2d43d65..b0b9ad4b64e454d0fe434ac3bb36ddc2
  #include "ui/events/event_utils.h"
  #include "ui/platform_window/wm/wm_move_resize_handler.h"
  #include "ui/views/linux_ui/linux_ui.h"
-@@ -52,6 +51,15 @@ void WindowEventFilterLinux::HandleLocatedEventWithHitTest(
+@@ -32,10 +31,6 @@ WindowEventFilterLinux::~WindowEventFilterLinux() = default;
+ void WindowEventFilterLinux::HandleLocatedEventWithHitTest(
+     int hit_test,
+     ui::LocatedEvent* event) {
+-  if (event->type() != ui::ET_MOUSE_PRESSED &&
+-      event->type() != ui::ET_TOUCH_PRESSED) {
+-    return;
+-  }
+ 
+   if (event->IsMouseEvent() &&
+       HandleMouseEventWithHitTest(hit_test, event->AsMouseEvent())) {
+@@ -52,6 +47,15 @@ void WindowEventFilterLinux::HandleLocatedEventWithHitTest(
  bool WindowEventFilterLinux::HandleMouseEventWithHitTest(
      int hit_test,
      ui::MouseEvent* event) {

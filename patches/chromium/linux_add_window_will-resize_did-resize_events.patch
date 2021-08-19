@@ -171,7 +171,7 @@ index 55eab0cb37324d882f597b1bb5331f2cd2385d94..d2fb239159990406f3113b8f3d3a1606
    NotifyBoundsChanged(bounds_in_pixels);
  
 diff --git a/ui/platform_window/x11/x11_window.h b/ui/platform_window/x11/x11_window.h
-index bd1bf9411477ddf7ace9315b2deb4323230183bb..4272c071939a9f36396236a857e423025c31d365 100644
+index bd1bf9411477ddf7ace9315b2deb4323230183bb..322e44e51190c775323ad3242cf068f238b123d1 100644
 --- a/ui/platform_window/x11/x11_window.h
 +++ b/ui/platform_window/x11/x11_window.h
 @@ -142,6 +142,10 @@ class X11_WINDOW_EXPORT X11Window
@@ -179,8 +179,8 @@ index bd1bf9411477ddf7ace9315b2deb4323230183bb..4272c071939a9f36396236a857e42302
    void OnXWindowDamageEvent(const gfx::Rect& damage_rect);
    void OnXWindowBoundsChanged(const gfx::Rect& size);
 +
-+  void OnXWindowWillResize(const gfx::Rect& size) override;
-+  void OnXWindowDidResize() override;
++  void OnXWindowWillResize(const gfx::Rect& size);
++  void OnXWindowDidResize();
 +
    void OnXWindowCloseRequested();
    void OnXWindowIsActiveChanged(bool active);
