@@ -1,0 +1,69 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: samuelmaddock <samuel.maddock@gmail.com>
+Date: Fri, 12 Feb 2021 18:52:36 -0500
+Subject: around: fix: use composited cursor in WGC capturer
+
+Uses the WIP Windows.Graphics.Capture API for WebRTC
+https://bugs.chromium.org/p/webrtc/issues/detail?id=9273
+
+Custom modifications are marked by an "AROUND EDIT" comment.
+
+diff --git a/modules/desktop_capture/win/wgc_capture_session.cc b/modules/desktop_capture/win/wgc_capture_session.cc
+index 48c56864b3eb1fb60f248f6b153a0b945c2a60cb..c643d337c68feac3dc801a4ae649fa9756bf55cb 100644
+--- a/modules/desktop_capture/win/wgc_capture_session.cc
++++ b/modules/desktop_capture/win/wgc_capture_session.cc
+@@ -185,6 +185,16 @@ HRESULT WgcCaptureSession::StartCapture() {
+     return hr;
+   }
+ 
++  // AROUND EDIT: Disable cursor capture so DesktopAndCursorComposer doesn't
++  // display a second cursor. This is only supported on Windows 10 builds
++  // greater than 19041 (May 2020).
++  ComPtr<WGC::IGraphicsCaptureSession2> session2;
++  hr = session_->QueryInterface(IID_PPV_ARGS(&session2));
++  if (!FAILED(hr)) {
++    session2->put_IsCursorCaptureEnabled(false);
++    is_cursor_disabled_ = true;
++  }
++
+   hr = session_->StartCapture();
+   if (FAILED(hr)) {
+     RTC_LOG(LS_ERROR) << "Failed to start CaptureSession: " << hr;
+@@ -323,6 +333,10 @@ HRESULT WgcCaptureSession::GetFrame(
+     }
+   }
+ 
++  // AROUND EDIT: Prevent compositing of cursor if this build of Windows 10
++  // doesn't support disabling cursor capture.
++  (*output_frame)->set_may_contain_cursor(!is_cursor_disabled_);
++
+   RecordGetFrameResult(GetFrameResult::kSuccess);
+ 
+   previous_size_ = new_size;
+diff --git a/modules/desktop_capture/win/wgc_capture_session.h b/modules/desktop_capture/win/wgc_capture_session.h
+index 9f08b7cf2dd2cbe36c6ac4cd20b02f1c92215e9c..b100f4a1897a180a1d1bacc560b8ea1f899f7782 100644
+--- a/modules/desktop_capture/win/wgc_capture_session.h
++++ b/modules/desktop_capture/win/wgc_capture_session.h
+@@ -102,6 +102,10 @@ class WgcCaptureSession final {
+   bool item_closed_ = false;
+   bool is_capture_started_ = false;
+ 
++  // AROUND EDIT: Whether cursor capture is disabled. Only possible in
++  // Windows 10 build >19041.
++  bool is_cursor_disabled_ = false;
++
+   SequenceChecker sequence_checker_;
+ };
+ 
+diff --git a/modules/desktop_capture/win/wgc_capturer_win.cc b/modules/desktop_capture/win/wgc_capturer_win.cc
+index 442c827a670bbf16e9431b1578ee12dd00a4c9f5..6801433ae2eace9e82b9456af902e33c04b17c5b 100644
+--- a/modules/desktop_capture/win/wgc_capturer_win.cc
++++ b/modules/desktop_capture/win/wgc_capturer_win.cc
+@@ -199,7 +199,6 @@ void WgcCapturerWin::CaptureFrame() {
+                             capture_time_ms);
+   frame->set_capture_time_ms(capture_time_ms);
+   frame->set_capturer_id(DesktopCapturerId::kWgcCapturerWin);
+-  frame->set_may_contain_cursor(true);
+   frame->set_top_left(capture_source_->GetTopLeft());
+   RecordWgcCapturerResult(WgcCapturerResult::kSuccess);
+   callback_->OnCaptureResult(DesktopCapturer::Result::SUCCESS,
