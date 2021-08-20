@@ -19,6 +19,18 @@ index 725dff1f3d12f9f9b55e4823cfb5a06168e245ff..46bce3d73429ed4e6b6a4e1a8f0f092e
  }
  
  ChannelSend::~ChannelSend() {
+diff --git a/modules/audio_coding/BUILD.gn b/modules/audio_coding/BUILD.gn
+index b6ed45ab7892c764288786388a56e3526d641c69..93b478b1cad97d1b5efcc2df4be42830d02bba10 100644
+--- a/modules/audio_coding/BUILD.gn
++++ b/modules/audio_coding/BUILD.gn
+@@ -745,6 +745,7 @@ rtc_library("webrtc_opus") {
+   ]
+ 
+   deps = [
++    "//media:media_buildflags",
+     ":audio_coding_opus_common",
+     ":audio_network_adaptor",
+     "../../api:array_view",
 diff --git a/modules/audio_coding/codecs/opus/audio_encoder_opus.cc b/modules/audio_coding/codecs/opus/audio_encoder_opus.cc
 index ffea8bc7551dc487dee3294c6635d859083cb9b4..130e1b3fed10204e763be37adfbf5593f45d7937 100644
 --- a/modules/audio_coding/codecs/opus/audio_encoder_opus.cc
