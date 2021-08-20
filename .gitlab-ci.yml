@@ -178,7 +178,7 @@ build:windows:
     - Get-ChildItem out/Release/breakpad_symbols -Recurse | Remove-Item -Confirm:$false -Recurse -Force
     - python electron/script/gen-version.py
     - $env:CHROMIUM_BUILDTOOLS_PATH="$pwd\buildtools"
-    - gn gen "out/Release" "--args=import(\`"//electron/build/args/release.gn\`") cc_wrapper=\`"$pwd\electron\external_binaries\sccache.exe\`""
+    - gn gen "out/Release" "--args=import(\`"//electron/build/args/release.gn\`")"
     - ninja -C "out/Release" electron
     - ninja -C "out/Release" electron:electron_dist_zip
     - $env:Path += ";C:\Program Files\Amazon\AWSCLI\bin"
@@ -205,7 +205,7 @@ build:mac:
     - rm -rf out/Release/dist.zip out/Release/breakpad_symbols out/Release/symbols.zip
     - python electron/script/gen-version.py
     - export CHROMIUM_BUILDTOOLS_PATH=`pwd`/buildtools
-    - export GN_EXTRA_ARGS="${GN_EXTRA_ARGS} cc_wrapper=\"${PWD}/electron/external_binaries/sccache\""
+    - export GN_EXTRA_ARGS="${GN_EXTRA_ARGS}"
     - gn gen out/Release --args="import(\"//electron/build/args/release.gn\") $GN_EXTRA_ARGS"
     - ninja -C out/Release electron
     # - electron/script/strip-binaries.py -d out/Release
