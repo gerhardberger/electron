@@ -1,0 +1,37 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: gellert <gellert.hegyi@around.co>
+Date: Fri, 20 Aug 2021 14:51:48 +0200
+Subject: fix dcheck flags for release build
+
+This patch fixes how buildflag macros for release builds is handled.
+
+diff --git a/base/dcheck_is_on.h b/base/dcheck_is_on.h
+index 0fa831b2192f107283ab7d8295c78f91cbacfaeb..8ee661f3f30adf92a405724226e6873a1eefcf3e 100644
+--- a/base/dcheck_is_on.h
++++ b/base/dcheck_is_on.h
+@@ -5,7 +5,9 @@
+ #ifndef BASE_DCHECK_IS_ON_H_
+ #define BASE_DCHECK_IS_ON_H_
+ 
++#if !defined(NDEBUG)
+ #include "base/debug/debugging_buildflags.h"
++#endif
+ 
+ #if defined(NDEBUG) && !defined(DCHECK_ALWAYS_ON)
+ #define DCHECK_IS_ON() false
+@@ -13,10 +15,15 @@
+ #define DCHECK_IS_ON() true
+ #endif
+ 
++#if !defined(NDEBUG)
++
+ #if BUILDFLAG(EXPENSIVE_DCHECKS_ARE_ON)
+ #define EXPENSIVE_DCHECKS_ARE_ON() true
+ #else
+ #define EXPENSIVE_DCHECKS_ARE_ON() false
+ #endif
++#else
++#define EXPENSIVE_DCHECKS_ARE_ON() false
++#endif
+ 
+ #endif  // BASE_DCHECK_IS_ON_H_

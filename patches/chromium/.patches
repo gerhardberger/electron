@@ -134,3 +134,4 @@ add_switch_to_disable_audio_ipc.patch
 adds_support_to_pause_and_resume_audio_worklet_thread.patch
 linux_window_transparency_fix.patch
 linux_add_window_will-resize_did-resize_events.patch
+fix_dcheck_flags_for_release_build.patch
