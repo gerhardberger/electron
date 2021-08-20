@@ -19,7 +19,7 @@ index bf0cf0d2bca25b8de457b1f822e0542018b29629..814e2831ab7bbc8a057ddc6a75cc7bf6
  
 diff --git a/modules/audio_processing/around_common/BUILD.gn b/modules/audio_processing/around_common/BUILD.gn
 new file mode 100644
-index 0000000000000000000000000000000000000000..98d9a83981843ca4f73edf0e03128cd43643c470
+index 0000000000000000000000000000000000000000..ae1945f3239cbdc164938e02a4f8eefa9ccc673a
 --- /dev/null
 +++ b/modules/audio_processing/around_common/BUILD.gn
 @@ -0,0 +1,13 @@
@@ -34,9 +34,7 @@ index 0000000000000000000000000000000000000000..98d9a83981843ca4f73edf0e03128cd4
 +    "performance_stats.cc",
 +    "timer_context.h",
 +  ]
-+  deps = [
-+    "//build:chromeos_buildflags"
-+  ]
++  deps = ["//build:chromeos_buildflags"]
 +}
 diff --git a/modules/audio_processing/around_common/around_log.cc b/modules/audio_processing/around_common/around_log.cc
 new file mode 100644
