@@ -34,7 +34,9 @@ index 0000000000000000000000000000000000000000..98d9a83981843ca4f73edf0e03128cd4
 +    "performance_stats.cc",
 +    "timer_context.h",
 +  ]
-+  deps = []
++  deps = [
++    "//build:chromeos_buildflags"
++  ]
 +}
 diff --git a/modules/audio_processing/around_common/around_log.cc b/modules/audio_processing/around_common/around_log.cc
 new file mode 100644
