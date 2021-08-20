@@ -1383,7 +1383,7 @@ index b94ffe0bae845928db4f3dc05d71fef72e4b3523..c19a2c2d7d9e2d1eb29ec2899a9bb03e
  };
  
 diff --git a/components/viz/service/display/software_renderer.cc b/components/viz/service/display/software_renderer.cc
-index 64c2f6bdef41216cf0cd8c332db3b809ede432e0..4896d9d8f82d9350db8257d8885501b679cb3472 100644
+index 64c2f6bdef41216cf0cd8c332db3b809ede432e0..584988a6ddcc8fc96d4bda0bc67dc9016142d9af 100644
 --- a/components/viz/service/display/software_renderer.cc
 +++ b/components/viz/service/display/software_renderer.cc
 @@ -39,6 +39,7 @@
@@ -1394,7 +1394,7 @@ index 64c2f6bdef41216cf0cd8c332db3b809ede432e0..4896d9d8f82d9350db8257d8885501b6
  #include "third_party/skia/include/effects/SkShaderMaskFilter.h"
  #include "ui/gfx/geometry/axis_transform2d.h"
  #include "ui/gfx/geometry/rect_conversions.h"
-@@ -76,6 +77,229 @@ class AnimatedImagesProvider : public cc::ImageProvider {
+@@ -76,6 +77,230 @@ class AnimatedImagesProvider : public cc::ImageProvider {
  
  }  // namespace
  
@@ -1525,11 +1525,12 @@ index 64c2f6bdef41216cf0cd8c332db3b809ede432e0..4896d9d8f82d9350db8257d8885501b6
 +  }
 +
 +  half4 main(float2 coord) {
++    float2 uv = float2(coord.x + 0.5, coord.y + 0.5);
++    coord = float2(uv.x * width, uv.y * height);
 +    float2 offset = float2(offset_x, offset_y);
 +    float2 scale = float2(zoom, zoom);
 +    float2 new_coord = coord * scale + offset;
 +    half4 texelColor = sample(input, new_coord);
-+    float2 uv = coord / float2(width, height);
 +
 +    float contrast = 1.0;
 +    float brightness = 0.0;
@@ -1624,19 +1625,27 @@ index 64c2f6bdef41216cf0cd8c332db3b809ede432e0..4896d9d8f82d9350db8257d8885501b6
  SoftwareRenderer::SoftwareRenderer(
      const RendererSettings* settings,
      const DebugRendererSettings* debug_settings,
-@@ -464,6 +688,11 @@ void SoftwareRenderer::DrawTextureQuad(const TextureDrawQuad* quad) {
+@@ -464,6 +689,7 @@ void SoftwareRenderer::DrawTextureQuad(const TextureDrawQuad* quad) {
      current_canvas_->saveLayerAlpha(&quad_rect, current_paint_.getAlpha());
      current_paint_.setAlpha(0xFF);
    }
++
+   if (blend_background) {
+     SkPaint background_paint;
+     background_paint.setColor(quad->background_color);
+@@ -471,6 +697,11 @@ void SoftwareRenderer::DrawTextureQuad(const TextureDrawQuad* quad) {
+   }
+   SkSamplingOptions sampling(quad->nearest_neighbor ? SkFilterMode::kNearest
+                                                     : SkFilterMode::kLinear);
 +
 +  if (quad->is_video_frame) {
 +    SetAroundFilter(current_paint_, image, quad->shared_quad_state->filter_id, quad->shared_quad_state->bounding_box, gfx::RectF(quad->rect));
 +  }
 +
-   if (blend_background) {
-     SkPaint background_paint;
-     background_paint.setColor(quad->background_color);
-@@ -478,6 +707,35 @@ void SoftwareRenderer::DrawTextureQuad(const TextureDrawQuad* quad) {
+   current_canvas_->drawImageRect(image, sk_uv_rect, quad_rect, sampling,
+                                  &current_paint_,
+                                  SkCanvas::kStrict_SrcRectConstraint);
+@@ -478,6 +709,35 @@ void SoftwareRenderer::DrawTextureQuad(const TextureDrawQuad* quad) {
      current_canvas_->restore();
  }
  
