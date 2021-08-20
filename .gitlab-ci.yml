@@ -148,7 +148,7 @@ build:linux:
     - rm -rf out/Release/dist.zip out/Release/breakpad_symbols out/Release/symbols.zip
     - python electron/script/gen-version.py
     - export CHROMIUM_BUILDTOOLS_PATH=`pwd`/buildtools
-    - export GN_EXTRA_ARGS="${GN_EXTRA_ARGS} cc_wrapper=\"${PWD}/electron/external_binaries/sccache\""
+    - export GN_EXTRA_ARGS="${GN_EXTRA_ARGS}"
     - gn gen out/Release --args="import(\"//electron/build/args/release.gn\") $GN_EXTRA_ARGS"
     - ninja  -j 4 -C out/Release electron
     - electron/script/strip-binaries.py -d out/Release
