@@ -13,7 +13,7 @@ def apply_patches(dirs):
   for patch_dir, repo in dirs.items():
     git.import_patches(repo=repo, patch_data=patch_from_dir(patch_dir),
       threeway=threeway is not None,
-      committer_name="Electron Scripts", committer_email="scripts@electron")
+      committer_name="Electron Scripts", committer_email="scripts@electron", keep_cr=False)
 
 
 def parse_args():

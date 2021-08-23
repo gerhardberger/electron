@@ -61,6 +61,8 @@ def am(repo, patch_data, threeway=False, directory=None, exclude=None,
     # endings.
     args += ['--keep-cr']
 
+  args += ['--ignore-whitespace']
+
   root_args = ['-C', repo]
   if committer_name is not None:
     root_args += ['-c', 'user.name=' + committer_name]
