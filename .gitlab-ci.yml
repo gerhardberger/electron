@@ -175,7 +175,7 @@ build:windows:
     - cd src/
     - if (Test-Path out/Release/dist.zip) { Remove-Item -Force out/Release/dist.zip }
     - if (Test-Path out/Release/symbols.zip) { Remove-Item -Force out/Release/symbols.zip }
-    - Get-ChildItem out/Release/breakpad_symbols -Recurse | Remove-Item -Confirm:$false -Recurse -Force
+    - Get-ChildItem out/Release/breakpad_symbols -Recurse -ErrorAction Ignore | Remove-Item -Confirm:$false -Recurse -Force
     - python electron/script/gen-version.py
     - $env:CHROMIUM_BUILDTOOLS_PATH="$pwd\buildtools"
     - gn gen "out/Release" "--args=import(\`"//electron/build/args/release.gn\`")"
