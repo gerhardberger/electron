@@ -236,7 +236,9 @@ build:mac-arm:
     - python electron/script/gen-version.py
     - export CHROMIUM_BUILDTOOLS_PATH=`pwd`/buildtools
     # - export GN_EXTRA_ARGS="${GN_EXTRA_ARGS} cc_wrapper=\"${PWD}/electron/external_binaries/sccache\""
-    - export GN_EXTRA_ARGS="${GN_EXTRA_ARGS} target_cpu=\"arm64\""
+    - export GN_EXTRA_ARGS="${GN_EXTRA_ARGS} target_cpu=\"arm64\" use_prebuilt_v8_context_snapshot=true"
+    - export USE_PREBUILT_V8_CONTEXT_SNAPSHOT=1
+    - npm set npm_config_arch arm64
     - gn gen out/Release --args="import(\"//electron/build/args/release.gn\") $GN_EXTRA_ARGS"
     - ninja -C out/Release electron
     # - electron/script/strip-binaries.py -d out/Release
