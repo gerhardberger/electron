@@ -33,6 +33,23 @@ index 637d248a1b0093e96c323a8991e141b6ed976ab4..04fe5baa8be42d388c35b85a63e2ed3f
  
    client_callback_->Render(
        web_audio_dest_data_, dest->frames(), delay.InSecondsF(),
+diff --git a/third_party/blink/renderer/core/paint/compositing/compositing_layer_property_updater.cc b/third_party/blink/renderer/core/paint/compositing/compositing_layer_property_updater.cc
+index bd35955cb3716e425c2cbdb713e78ca7f2388407..864c570925475774064db8ed97e38ee7ec6f8ff2 100644
+--- a/third_party/blink/renderer/core/paint/compositing/compositing_layer_property_updater.cc
++++ b/third_party/blink/renderer/core/paint/compositing/compositing_layer_property_updater.cc
+@@ -58,9 +58,9 @@ void CompositingLayerPropertyUpdater::Update(const LayoutObject& object) {
+   if (!subpixel_accumulation_may_be_bogus &&
+       layout_snapped_paint_offset != PhysicalOffset(snapped_paint_offset)) {
+     // TODO(crbug.com/925377): Fix the root cause.
+-    DLOG(ERROR) << "Paint offset pixel snapping error for " << object
+-                << " expected: " << snapped_paint_offset
+-                << " actual: " << layout_snapped_paint_offset;
++    // DLOG(ERROR) << "Paint offset pixel snapping error for " << object
++    //             << " expected: " << snapped_paint_offset
++    //             << " actual: " << layout_snapped_paint_offset;
+   }
+ #endif
+ 
 diff --git a/third_party/blink/renderer/modules/webgl/webgl2_rendering_context_base.cc b/third_party/blink/renderer/modules/webgl/webgl2_rendering_context_base.cc
 index d706480b2ce4c7d3da4c22784da9d040df0dfe20..2dcfac64b9cc9ae20674cad712cc11e78186dbc6 100644
 --- a/third_party/blink/renderer/modules/webgl/webgl2_rendering_context_base.cc
