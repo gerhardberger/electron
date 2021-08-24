@@ -1,0 +1,318 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: gellert <gellert.hegyi@around.co>
+Date: Wed, 25 Aug 2021 01:00:26 +0200
+Subject: adds support for around screen capturer
+
+This patch adds support for a new screen capturer implementation that is based on CGWindowListCreateImageFromArray to capture the display every frame, thus providing perfect exclusion of around windows.
+
+diff --git a/content/browser/media/capture/desktop_capture_device.cc b/content/browser/media/capture/desktop_capture_device.cc
+index 6776c5908c061b41f54c90796747e490580f73f5..ba9717811a611d44980d4a677f81df11535b1a2a 100644
+--- a/content/browser/media/capture/desktop_capture_device.cc
++++ b/content/browser/media/capture/desktop_capture_device.cc
+@@ -526,7 +526,7 @@ base::TimeTicks DesktopCaptureDevice::Core::NowTicks() const {
+ 
+ // static
+ std::unique_ptr<media::VideoCaptureDevice> DesktopCaptureDevice::Create(
+-    const DesktopMediaID& source) {
++    const DesktopMediaID& source, bool using_around_capturer) {
+   auto options = desktop_capture::CreateDesktopCaptureOptions();
+   std::unique_ptr<webrtc::DesktopCapturer> capturer;
+   std::unique_ptr<media::VideoCaptureDevice> result;
+@@ -558,7 +558,7 @@ std::unique_ptr<media::VideoCaptureDevice> DesktopCaptureDevice::Create(
+ #endif
+       if (screen_capturer && screen_capturer->SelectSource(source.id)) {
+         capturer = std::make_unique<webrtc::DesktopAndCursorComposer>(
+-            std::move(screen_capturer), options);
++            std::move(screen_capturer), options, using_around_capturer);
+         IncrementDesktopCaptureCounter(SCREEN_CAPTURER_CREATED);
+         IncrementDesktopCaptureCounter(
+             source.audio_share ? SCREEN_CAPTURER_CREATED_WITH_AUDIO
+@@ -579,7 +579,7 @@ std::unique_ptr<media::VideoCaptureDevice> DesktopCaptureDevice::Create(
+       if (window_capturer && window_capturer->SelectSource(source.id)) {
+         window_capturer->FocusOnSelectedSource();
+         capturer = std::make_unique<webrtc::DesktopAndCursorComposer>(
+-            std::move(window_capturer), options);
++            std::move(window_capturer), options, false);
+         IncrementDesktopCaptureCounter(WINDOW_CAPTURER_CREATED);
+       }
+       break;
+diff --git a/content/browser/media/capture/desktop_capture_device.h b/content/browser/media/capture/desktop_capture_device.h
+index 4519ecbf34fa04b186599ce7ded8c881aa264c67..32409d57ebc26ffed16aed527ea25655e6b5afb5 100644
+--- a/content/browser/media/capture/desktop_capture_device.h
++++ b/content/browser/media/capture/desktop_capture_device.h
+@@ -39,7 +39,7 @@ class CONTENT_EXPORT DesktopCaptureDevice : public media::VideoCaptureDevice {
+   // DesktopCaptureDevice for it. May return NULL in case of a failure (e.g. if
+   // requested window was destroyed).
+   static std::unique_ptr<media::VideoCaptureDevice> Create(
+-      const DesktopMediaID& source);
++      const DesktopMediaID& source, bool using_around_capturer);
+ 
+   ~DesktopCaptureDevice() override;
+ 
+diff --git a/content/browser/renderer_host/media/in_process_video_capture_device_launcher.cc b/content/browser/renderer_host/media/in_process_video_capture_device_launcher.cc
+index a17a2460f75281a9d548bdeb47725564b7d0d503..38eda070b2492b82e27bf0fc743552b390ec958d 100644
+--- a/content/browser/renderer_host/media/in_process_video_capture_device_launcher.cc
++++ b/content/browser/renderer_host/media/in_process_video_capture_device_launcher.cc
+@@ -398,16 +398,18 @@ void InProcessVideoCaptureDeviceLauncher::DoStartDesktopCaptureOnDeviceThread(
+   DCHECK(device_task_runner_->BelongsToCurrentThread());
+   DCHECK(!desktop_id.is_null());
+ 
++  bool using_around_capturer = params.using_around_capturer;
++
+   std::unique_ptr<media::VideoCaptureDevice> video_capture_device;
+ #if defined(OS_ANDROID)
+   video_capture_device = std::make_unique<ScreenCaptureDeviceAndroid>();
+ #else
+ #if defined(OS_MAC)
+-  if (base::FeatureList::IsEnabled(features::kDesktopCaptureMacV2))
++  if (base::FeatureList::IsEnabled(features::kDesktopCaptureMacV2) && !using_around_capturer)
+     video_capture_device = CreateDesktopCaptureDeviceMac(desktop_id);
+ #endif
+   if (!video_capture_device)
+-    video_capture_device = DesktopCaptureDevice::Create(desktop_id);
++    video_capture_device = DesktopCaptureDevice::Create(desktop_id, using_around_capturer);
+ #endif
+ 
+   if (video_capture_device)
+diff --git a/media/capture/mojom/video_capture_types.mojom b/media/capture/mojom/video_capture_types.mojom
+index f55a3dc716105bc7ce4ec6cc614aff031136134a..fe67fa38bbc2a6a9c80091c2ce41953b7aa02880 100644
+--- a/media/capture/mojom/video_capture_types.mojom
++++ b/media/capture/mojom/video_capture_types.mojom
+@@ -285,6 +285,7 @@ struct VideoCaptureParams {
+   PowerLineFrequency power_line_frequency;
+   bool enable_face_detection;
+   bool show_cursor;
++  bool using_around_capturer;
+ };
+ 
+ // |resource_utilization| reports that the frame incurred some fractional
+diff --git a/media/capture/mojom/video_capture_types_mojom_traits.cc b/media/capture/mojom/video_capture_types_mojom_traits.cc
+index e50957475389e324c448ef75946da4b3edfdb0c0..3d474e6340ede72b64d4a894e0e6fa70a7d03681 100644
+--- a/media/capture/mojom/video_capture_types_mojom_traits.cc
++++ b/media/capture/mojom/video_capture_types_mojom_traits.cc
+@@ -1714,6 +1714,7 @@ bool StructTraits<media::mojom::VideoCaptureParamsDataView,
+     return false;
+   out->enable_face_detection = data.enable_face_detection();
+   out->show_cursor = data.show_cursor();
++  out->using_around_capturer = data.using_around_capturer();
+   return true;
+ }
+ 
+diff --git a/media/capture/mojom/video_capture_types_mojom_traits.h b/media/capture/mojom/video_capture_types_mojom_traits.h
+index 3e5f0efd1bec3d1e7f7c1dfe2724068583bdf71b..6e9d5af5ee0490ffa173e99882577fba7054bc35 100644
+--- a/media/capture/mojom/video_capture_types_mojom_traits.h
++++ b/media/capture/mojom/video_capture_types_mojom_traits.h
+@@ -178,6 +178,11 @@ struct COMPONENT_EXPORT(MEDIA_CAPTURE_MOJOM_TRAITS)
+     return params.show_cursor;
+   }
+ 
++  static bool using_around_capturer(
++      const media::VideoCaptureParams& params) {
++    return params.using_around_capturer;
++  }
++
+   static bool Read(media::mojom::VideoCaptureParamsDataView data,
+                    media::VideoCaptureParams* out);
+ };
+diff --git a/media/capture/video_capture_types.cc b/media/capture/video_capture_types.cc
+index df99d8cc0d6f9d46981f5fc87a24217073fe2c67..023ea75f995f3cf9ffa4dc2dc439a223ba91f828 100644
+--- a/media/capture/video_capture_types.cc
++++ b/media/capture/video_capture_types.cc
+@@ -68,7 +68,8 @@ VideoCaptureParams::VideoCaptureParams()
+       resolution_change_policy(ResolutionChangePolicy::FIXED_RESOLUTION),
+       power_line_frequency(PowerLineFrequency::FREQUENCY_DEFAULT),
+       enable_face_detection(false),
+-      show_cursor(true) {}
++      show_cursor(true),
++      using_around_capturer(false) {}
+ 
+ bool VideoCaptureParams::IsValid() const {
+   return requested_format.IsValid() &&
+diff --git a/media/capture/video_capture_types.h b/media/capture/video_capture_types.h
+index 33ae3dac33c2d5cbe9546bb780524b3d7e66fdee..18b8c6a968743cc799f48ca7d53a34b81665eafb 100644
+--- a/media/capture/video_capture_types.h
++++ b/media/capture/video_capture_types.h
+@@ -320,6 +320,8 @@ struct CAPTURE_EXPORT VideoCaptureParams {
+   bool enable_face_detection;
+ 
+   bool show_cursor;
++
++  bool using_around_capturer;
+ };
+ 
+ }  // namespace media
+diff --git a/third_party/blink/public/mojom/web_feature/web_feature.mojom b/third_party/blink/public/mojom/web_feature/web_feature.mojom
+index a49ed51f237e0da79a459f0fe345724cf826359d..ed438df58412a9e048e83bfd99548b514f992f03 100644
+--- a/third_party/blink/public/mojom/web_feature/web_feature.mojom
++++ b/third_party/blink/public/mojom/web_feature/web_feature.mojom
+@@ -3278,6 +3278,7 @@ enum WebFeature {
+   kMediaStreamConstraintsAroundAudioProcessing = 3963,
+   kV8RTCRtpReceiver_BufferDrained_Method = 3964,
+   kV8RTCRtpReceiver_BufferRestored_Method = 3965,
++  kMediaStreamConstraintsUsingAroundCapturer = 3966,
+ 
+   // Add new features immediately above this line. Don't change assigned
+   // numbers of any item, and don't reuse removed slots.
+diff --git a/third_party/blink/renderer/modules/mediastream/media_constraints_impl.cc b/third_party/blink/renderer/modules/mediastream/media_constraints_impl.cc
+index 8ff67efc220de1844ecc6eee46c4e02f161b201f..c5698adff4f385b7dcb04c402721371717181be9 100644
+--- a/third_party/blink/renderer/modules/mediastream/media_constraints_impl.cc
++++ b/third_party/blink/renderer/modules/mediastream/media_constraints_impl.cc
+@@ -142,6 +142,7 @@ const char kCpuOveruseEncodeUsage[] = "googCpuOveruseEncodeUsage";
+ const char kHighStartBitrate[] = "googHighStartBitrate";
+ const char kPayloadPadding[] = "googPayloadPadding";
+ const char kAudioLatency[] = "latencyMs";
++const char kUsingAroundCapturer[] = "usingAroundCapturer";
+ 
+ // Names that have been used in the past, but should now be ignored.
+ // Kept around for backwards compatibility.
+@@ -416,6 +417,8 @@ static void ParseOldStyleNames(
+       result.goog_payload_padding.SetExact(ToBoolean(constraint.value_));
+     } else if (constraint.name_.Equals(kAudioLatency)) {
+       result.goog_latency_ms.SetExact(atoi(constraint.value_.Utf8().c_str()));
++    } else if (constraint.name_.Equals(kUsingAroundCapturer)) {
++      result.using_around_capturer.SetExact(ToBoolean(constraint.value_));
+     } else if (constraint.name_.Equals(kCpuUnderuseThreshold) ||
+                constraint.name_.Equals(kCpuOveruseThreshold) ||
+                constraint.name_.Equals(kCpuUnderuseEncodeRsdThreshold) ||
+@@ -758,6 +761,10 @@ void CopyConstraintSet(const MediaTrackConstraintSet* constraints_in,
+     CopyBooleanOrDoubleConstraint(constraints_in->zoom(), naked_treatment,
+                                   constraint_buffer.zoom);
+   }
++  if (constraints_in->hasUsingAroundCapturer()) {
++    CopyBooleanConstraint(constraints_in->usingAroundCapturer(), naked_treatment,
++                          constraint_buffer.using_around_capturer);
++  }
+ }
+ 
+ MediaConstraints ConvertTrackConstraintsToMediaConstraints(
+diff --git a/third_party/blink/renderer/modules/mediastream/media_stream_constraints_util_video_content.cc b/third_party/blink/renderer/modules/mediastream/media_stream_constraints_util_video_content.cc
+index eca856b293d4f5a1dc1a23950d09153affed4934..c79a316491fe796d1439e3ef1076dfe0b720f61c 100644
+--- a/third_party/blink/renderer/modules/mediastream/media_stream_constraints_util_video_content.cc
++++ b/third_party/blink/renderer/modules/mediastream/media_stream_constraints_util_video_content.cc
+@@ -205,6 +205,7 @@ media::VideoCaptureParams SelectVideoCaptureParamsFromCandidates(
+       media::PIXEL_FORMAT_I420);
+   params.resolution_change_policy = SelectResolutionPolicyFromCandidates(
+       candidates.resolution_set(), default_resolution_policy);
++  params.using_around_capturer = basic_constraint_set.using_around_capturer.Exact();
+   // Content capture always uses default power-line frequency.
+   DCHECK(params.IsValid());
+ 
+diff --git a/third_party/blink/renderer/modules/mediastream/media_track_capabilities.idl b/third_party/blink/renderer/modules/mediastream/media_track_capabilities.idl
+index e4e57dc245ba1202a23d6a5c20818967b3e08d33..1f0bd92f4df4d41b41bcfcf88ceb88fa8cea0cab 100644
+--- a/third_party/blink/renderer/modules/mediastream/media_track_capabilities.idl
++++ b/third_party/blink/renderer/modules/mediastream/media_track_capabilities.idl
+@@ -17,6 +17,7 @@ dictionary MediaTrackCapabilities {
+     LongRange channelCount;
+     LongRange sampleRate;
+     DoubleRange latency;
++    sequence<boolean> usingAroundCapturer;
+     DOMString deviceId;
+     DOMString groupId;
+     // W3C Image Capture API
+diff --git a/third_party/blink/renderer/modules/mediastream/media_track_constraint_set.idl b/third_party/blink/renderer/modules/mediastream/media_track_constraint_set.idl
+index 3cb4f4670df847ba29dbadf990578631a0960860..8ee80d1123a6f9324cf31578f28553699cd7727f 100644
+--- a/third_party/blink/renderer/modules/mediastream/media_track_constraint_set.idl
++++ b/third_party/blink/renderer/modules/mediastream/media_track_constraint_set.idl
+@@ -25,6 +25,7 @@ dictionary MediaTrackConstraintSet {
+     ConstrainBoolean aroundAudioProcessing;
+     ConstrainDouble latency;
+     ConstrainLong channelCount;
++    ConstrainBoolean usingAroundCapturer;
+     ConstrainDOMString deviceId;
+     ConstrainDOMString groupId;
+     // Media Capture Depth Stream Extensions
+diff --git a/third_party/blink/renderer/modules/mediastream/media_track_settings.idl b/third_party/blink/renderer/modules/mediastream/media_track_settings.idl
+index 891b9359ad1cc0a81c722d3edb2b5edbcafd0d12..132995be76c26bb051dd24886f00d48c1ea3a32a 100644
+--- a/third_party/blink/renderer/modules/mediastream/media_track_settings.idl
++++ b/third_party/blink/renderer/modules/mediastream/media_track_settings.idl
+@@ -19,6 +19,7 @@ dictionary MediaTrackSettings {
+     boolean aroundAudioProcessing;
+     double latency;
+     long channelCount;
++    boolean usingAroundCapturer;
+     DOMString deviceId;
+     DOMString groupId;
+     // Media Capture Depth Stream Extensions
+diff --git a/third_party/blink/renderer/modules/mediastream/media_track_supported_constraints.idl b/third_party/blink/renderer/modules/mediastream/media_track_supported_constraints.idl
+index 22966e6af699198bf88b99ffe766a9b661beeef9..e82dc4b0f62a1b7c47ad65093027d4be1b21b97e 100644
+--- a/third_party/blink/renderer/modules/mediastream/media_track_supported_constraints.idl
++++ b/third_party/blink/renderer/modules/mediastream/media_track_supported_constraints.idl
+@@ -24,6 +24,7 @@ dictionary MediaTrackSupportedConstraints {
+     boolean channelCount = true;
+     boolean deviceId = true;
+     boolean groupId = true;
++    boolean usingAroundCapturer = true;
+ 
+     // Media Capture Depth Stream Extensions
+     // https://w3c.github.io/mediacapture-depth
+diff --git a/third_party/blink/renderer/modules/mediastream/user_media_request.cc b/third_party/blink/renderer/modules/mediastream/user_media_request.cc
+index 03973de698d121600c66420f6307f86b85ae8216..989a97f3f7094ffec64d5ab3f3332b3d7e86984e 100644
+--- a/third_party/blink/renderer/modules/mediastream/user_media_request.cc
++++ b/third_party/blink/renderer/modules/mediastream/user_media_request.cc
+@@ -225,6 +225,10 @@ void CountAudioConstraintUses(ExecutionContext* context,
+           &MediaTrackConstraintSetPlatform::goog_da_echo_cancellation)) {
+     counter.Count(WebFeature::kMediaStreamConstraintsGoogDAEchoCancellation);
+   }
++  if (RequestUsesDiscreteConstraint(
++          constraints, &MediaTrackConstraintSetPlatform::using_around_capturer)) {
++    counter.Count(WebFeature::kMediaStreamConstraintsUsingAroundCapturer);
++  }
+ 
+   UseCounter::Count(context, WebFeature::kMediaStreamConstraintsAudio);
+   if (counter.IsUnconstrained()) {
+diff --git a/third_party/blink/renderer/platform/mediastream/media_constraints.cc b/third_party/blink/renderer/platform/mediastream/media_constraints.cc
+index 66a5d2e687c9ed5c826d8bf92c8e6b1103062562..0913d5e39a11231547551f067c3a93f2d44be1be 100644
+--- a/third_party/blink/renderer/platform/mediastream/media_constraints.cc
++++ b/third_party/blink/renderer/platform/mediastream/media_constraints.cc
+@@ -385,7 +385,8 @@ MediaTrackConstraintSetPlatform::MediaTrackConstraintSetPlatform()
+       goog_cpu_overuse_detection("googCpuOveruseDetection"),
+       goog_high_start_bitrate("googHighStartBitrate"),
+       goog_payload_padding("googPayloadPadding"),
+-      goog_latency_ms("latencyMs") {}
++      goog_latency_ms("latencyMs"),
++      using_around_capturer("usingAroundCapturer") {}
+ 
+ Vector<const BaseConstraint*> MediaTrackConstraintSetPlatform::AllConstraints()
+     const {
+@@ -438,7 +439,8 @@ Vector<const BaseConstraint*> MediaTrackConstraintSetPlatform::AllConstraints()
+           &goog_cpu_overuse_detection,
+           &goog_high_start_bitrate,
+           &goog_payload_padding,
+-          &goog_latency_ms};
++          &goog_latency_ms,
++          &using_around_capturer};
+ }
+ 
+ bool MediaTrackConstraintSetPlatform::IsUnconstrained() const {
+diff --git a/third_party/blink/renderer/platform/mediastream/media_constraints.h b/third_party/blink/renderer/platform/mediastream/media_constraints.h
+index 82bb80d6717211048d9058cf0cae846f8f08e1b0..e27b95e54f0f58542f5455a3cb94647228e1c33c 100644
+--- a/third_party/blink/renderer/platform/mediastream/media_constraints.h
++++ b/third_party/blink/renderer/platform/mediastream/media_constraints.h
+@@ -282,6 +282,7 @@ struct MediaTrackConstraintSetPlatform {
+   LongConstraint goog_high_start_bitrate;
+   BooleanConstraint goog_payload_padding;
+   LongConstraint goog_latency_ms;
++  BooleanConstraint using_around_capturer;
+ 
+   PLATFORM_EXPORT bool IsUnconstrained() const;
+   PLATFORM_EXPORT bool HasMandatory() const;
+diff --git a/third_party/blink/web_tests/external/wpt/interfaces/mediacapture-streams.idl b/third_party/blink/web_tests/external/wpt/interfaces/mediacapture-streams.idl
+index dd14ccc68f553c6208c7ad022ea3ed2bbbffb964..200e05e6ad31b48edfe78ba5a664f6b47bcd3ebb 100644
+--- a/third_party/blink/web_tests/external/wpt/interfaces/mediacapture-streams.idl
++++ b/third_party/blink/web_tests/external/wpt/interfaces/mediacapture-streams.idl
+@@ -62,6 +62,7 @@ dictionary MediaTrackSupportedConstraints {
+   boolean channelCount = true;
+   boolean deviceId = true;
+   boolean groupId = true;
++  boolean usingAroundCapturer = true;
+ };
+ 
+ dictionary MediaTrackCapabilities {
+@@ -104,6 +105,7 @@ dictionary MediaTrackConstraintSet {
+   ConstrainULong channelCount;
+   ConstrainDOMString deviceId;
+   ConstrainDOMString groupId;
++  ConstrainBoolean usingAroundCapturer;
+ };
+ 
+ dictionary MediaTrackSettings {
