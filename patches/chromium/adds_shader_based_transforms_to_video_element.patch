@@ -1077,10 +1077,10 @@ index f64ae80494614b0dc8b2ff7ccb8d32730b6e689b..a7ec1d92a26f1e4a44e1bfe6aa339c54
    int resource_multiplier_location_ = -1;
    int resource_offset_location_ = -1;
 diff --git a/components/viz/service/display/skia_renderer.cc b/components/viz/service/display/skia_renderer.cc
-index ba17de03682807102796036807a93e05992d6228..ccaf3ff376198f71dc627604fddfb852031e93ca 100644
+index ba17de03682807102796036807a93e05992d6228..3cce6745b070c3337a82f8fa998c14cd652102fe 100644
 --- a/components/viz/service/display/skia_renderer.cc
 +++ b/components/viz/service/display/skia_renderer.cc
-@@ -83,6 +83,228 @@ namespace viz {
+@@ -83,6 +83,241 @@ namespace viz {
  
  namespace {
  
@@ -1093,6 +1093,7 @@ index ba17de03682807102796036807a93e05992d6228..ccaf3ff376198f71dc627604fddfb852
 +  uniform half zoom;
 +  uniform half width;
 +  uniform half height;
++  uniform bool is_yuv;
 +
 +  const half4 color_yellow = half4(1.0, 255.0 / 255.0, 104.0 / 255.0, 1.0);
 +  const half4 color_purple = half4(190.0 / 255.0, 0.0 / 255.0, 190.0 / 200.0, 1.0);
@@ -1214,6 +1215,17 @@ index ba17de03682807102796036807a93e05992d6228..ccaf3ff376198f71dc627604fddfb852
 +    float2 scale = float2(zoom, zoom);
 +    float2 new_coord = coord * scale + offset;
 +    half4 texelColor = sample(input, new_coord);
++
++    if (is_yuv) {
++      float y = 1.1643 * (texelColor.r - 0.0625);
++      float u = texelColor.g - 0.5;
++      float v = texelColor.b - 0.5;
++      float r = y + 1.5958 * v;
++      float g = y - 0.39173 * u - 0.81290 * v;
++      float b = y + 2.017 * u;
++      texelColor = half4(r, g, b, 1.0);
++    }
++
 +    float2 uv = coord / float2(width, height);
 +
 +    float contrast = 1.0;
@@ -1304,12 +1316,13 @@ index ba17de03682807102796036807a93e05992d6228..ccaf3ff376198f71dc627604fddfb852
 +  float zoom;
 +  float width;
 +  float height;
++  bool is_yuv;
 +};
 +
  // Smallest unit that impacts anti-aliasing output. We use this to determine
  // when an exterior edge (with AA) has been clipped (no AA). The specific value
  // was chosen to match that used by gl_renderer.
-@@ -1942,8 +2164,7 @@ void SkiaRenderer::DrawTextureQuad(const TextureDrawQuad* quad,
+@@ -1942,8 +2177,7 @@ void SkiaRenderer::DrawTextureQuad(const TextureDrawQuad* quad,
                                     DrawQuadParams* params) {
    const gfx::ColorSpace& src_color_space =
        resource_provider()->GetColorSpace(quad->resource_id());
@@ -1319,24 +1332,28 @@ index ba17de03682807102796036807a93e05992d6228..ccaf3ff376198f71dc627604fddfb852
  
    ScopedSkImageBuilder builder(
        this, quad->resource_id(), /*maybe_concurrent_reads=*/true,
-@@ -2067,7 +2288,11 @@ void SkiaRenderer::DrawTextureQuad(const TextureDrawQuad* quad,
+@@ -2067,7 +2301,11 @@ void SkiaRenderer::DrawTextureQuad(const TextureDrawQuad* quad,
      paint.setColorFilter(std::move(cf));
    }
  
 -  if (needs_color_conversion_filter) {
 +  if (quad->is_video_frame) {
-+    SetAroundFilter(paint, image, quad->shared_quad_state->filter_id, quad->shared_quad_state->bounding_box, params->rect);
++    SetAroundFilter(paint, image, quad->shared_quad_state->filter_id, quad->shared_quad_state->bounding_box, params->rect, false);
 +  }
 +
 +  if (needs_color_conversion_filter && src_color_space.IsHDR()) {
      // Skia won't perform color conversion.
      const gfx::ColorSpace dst_color_space = CurrentRenderPassColorSpace();
      DCHECK(SkColorSpace::Equals(image->colorSpace(),
-@@ -2086,6 +2311,35 @@ void SkiaRenderer::DrawTextureQuad(const TextureDrawQuad* quad,
+@@ -2086,6 +2324,40 @@ void SkiaRenderer::DrawTextureQuad(const TextureDrawQuad* quad,
    DrawSingleImage(image, valid_texel_bounds, rpdq_params, &paint, params);
  }
  
-+void SkiaRenderer::SetAroundFilter(SkPaint& paint, const SkImage* image, int filter_id, gfx::RectF bounding_box, gfx::RectF rect) {
++void SkiaRenderer::SetAroundFilter(SkPaint& paint, const SkImage* image, int filter_id, gfx::RectF bounding_box, gfx::RectF rect, bool is_yuv) {
++  if (filter_id == 0 && bounding_box.IsEmpty()) {
++    return;
++  }
++
 +  if (!around_shader_cache_) {
 +    around_shader_cache_ = SkRuntimeEffect::MakeForShader(SkString(kAroundShader)).effect;
 +  }
@@ -1350,6 +1367,7 @@ index ba17de03682807102796036807a93e05992d6228..ccaf3ff376198f71dc627604fddfb852
 +    bounding_box.height() * (image->height() / rect.height()));
 +  uniforms.width = rect.width();
 +  uniforms.height = rect.height();
++  uniforms.is_yuv = is_yuv;
 +
 +  sk_sp<SkData> data = SkData::MakeWithCopy(&uniforms, sizeof(uniforms));
 +  sk_sp<SkShader> imageShader = image->makeShader(SkSamplingOptions(SkFilterMode::kLinear));
@@ -1368,22 +1386,31 @@ index ba17de03682807102796036807a93e05992d6228..ccaf3ff376198f71dc627604fddfb852
  void SkiaRenderer::DrawTileDrawQuad(const TileDrawQuad* quad,
                                      const DrawRPDQParams* rpdq_params,
                                      DrawQuadParams* params) {
+@@ -2191,6 +2463,8 @@ void SkiaRenderer::DrawYUVVideoQuad(const YUVVideoDrawQuad* quad,
+   // entire YUV image.
+   SkPaint paint = params->paint(color_filter);
+ 
++  SetAroundFilter(paint, image, quad->shared_quad_state->filter_id, quad->shared_quad_state->bounding_box, params->rect, true);
++
+   DrawSingleImage(image, quad->ya_tex_coord_rect, rpdq_params, &paint, params);
+ }
+ 
 diff --git a/components/viz/service/display/skia_renderer.h b/components/viz/service/display/skia_renderer.h
-index b94ffe0bae845928db4f3dc05d71fef72e4b3523..c19a2c2d7d9e2d1eb29ec2899a9bb03e0ce1d378 100644
+index b94ffe0bae845928db4f3dc05d71fef72e4b3523..7bec2e8c4db20f7e7905acfba2dd273715a31eae 100644
 --- a/components/viz/service/display/skia_renderer.h
 +++ b/components/viz/service/display/skia_renderer.h
 @@ -362,6 +362,9 @@ class VIZ_SERVICE_EXPORT SkiaRenderer : public DirectRenderer {
    bool UsingSkiaForDelegatedInk() const;
    uint32_t debug_tint_modulate_count_ = 0;
  
-+  void SetAroundFilter(SkPaint& paint, const SkImage* image, int filter_id, gfx::RectF bounding_box, gfx::RectF rect);
++  void SetAroundFilter(SkPaint& paint, const SkImage* image, int filter_id, gfx::RectF bounding_box, gfx::RectF rect, bool is_yuv);
 +  sk_sp<SkRuntimeEffect> around_shader_cache_;
 +
    DISALLOW_COPY_AND_ASSIGN(SkiaRenderer);
  };
  
 diff --git a/components/viz/service/display/software_renderer.cc b/components/viz/service/display/software_renderer.cc
-index 64c2f6bdef41216cf0cd8c332db3b809ede432e0..a7999c40e878446e6ea59cf903a5442a6388bdf6 100644
+index 64c2f6bdef41216cf0cd8c332db3b809ede432e0..8f455ac5f50d593851dbe135855e7ffdc766d003 100644
 --- a/components/viz/service/display/software_renderer.cc
 +++ b/components/viz/service/display/software_renderer.cc
 @@ -39,6 +39,7 @@
@@ -1645,11 +1672,15 @@ index 64c2f6bdef41216cf0cd8c332db3b809ede432e0..a7999c40e878446e6ea59cf903a5442a
    current_canvas_->drawImageRect(image, sk_uv_rect, quad_rect, sampling,
                                   &current_paint_,
                                   SkCanvas::kStrict_SrcRectConstraint);
-@@ -478,6 +709,35 @@ void SoftwareRenderer::DrawTextureQuad(const TextureDrawQuad* quad) {
+@@ -478,6 +709,39 @@ void SoftwareRenderer::DrawTextureQuad(const TextureDrawQuad* quad) {
      current_canvas_->restore();
  }
  
 +void SoftwareRenderer::SetAroundFilter(SkPaint& paint, const SkImage* image, int filter_id, gfx::RectF bounding_box, gfx::RectF rect) {
++  if (filter_id == 0 && bounding_box.IsEmpty()) {
++    return;
++  }
++
 +  if (!around_shader_cache_) {
 +    around_shader_cache_ = SkRuntimeEffect::MakeForShader(SkString(kAroundShader)).effect;
 +  }
