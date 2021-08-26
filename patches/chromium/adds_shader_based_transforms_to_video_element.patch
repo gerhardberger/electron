@@ -1077,7 +1077,7 @@ index f64ae80494614b0dc8b2ff7ccb8d32730b6e689b..a7ec1d92a26f1e4a44e1bfe6aa339c54
    int resource_multiplier_location_ = -1;
    int resource_offset_location_ = -1;
 diff --git a/components/viz/service/display/skia_renderer.cc b/components/viz/service/display/skia_renderer.cc
-index ba17de03682807102796036807a93e05992d6228..3cce6745b070c3337a82f8fa998c14cd652102fe 100644
+index ba17de03682807102796036807a93e05992d6228..cbae8cfd08a5580fd1a64fd06284ef6395037603 100644
 --- a/components/viz/service/display/skia_renderer.cc
 +++ b/components/viz/service/display/skia_renderer.cc
 @@ -83,6 +83,241 @@ namespace viz {
@@ -1087,13 +1087,13 @@ index ba17de03682807102796036807a93e05992d6228..3cce6745b070c3337a82f8fa998c14cd
 +const char *kAroundShader = R"(
 +  uniform shader input;
 +
-+  uniform int filter_id;
++  uniform half filter_id;
 +  uniform half offset_x;
 +  uniform half offset_y;
 +  uniform half zoom;
 +  uniform half width;
 +  uniform half height;
-+  uniform bool is_yuv;
++  uniform half is_yuv;
 +
 +  const half4 color_yellow = half4(1.0, 255.0 / 255.0, 104.0 / 255.0, 1.0);
 +  const half4 color_purple = half4(190.0 / 255.0, 0.0 / 255.0, 190.0 / 200.0, 1.0);
@@ -1216,7 +1216,7 @@ index ba17de03682807102796036807a93e05992d6228..3cce6745b070c3337a82f8fa998c14cd
 +    float2 new_coord = coord * scale + offset;
 +    half4 texelColor = sample(input, new_coord);
 +
-+    if (is_yuv) {
++    if (is_yuv == 1) {
 +      float y = 1.1643 * (texelColor.r - 0.0625);
 +      float u = texelColor.g - 0.5;
 +      float v = texelColor.b - 0.5;
@@ -1264,11 +1264,11 @@ index ba17de03682807102796036807a93e05992d6228..3cce6745b070c3337a82f8fa998c14cd
 +      filter = float4(base.r * (1.2 - uv.y), base.g * (uv.x), base.b * uv.y * 0.8 + 0.2, 1.0);
 +    } else if (filter_id == 12) { // gameboy
 +      base = float4(levels(grey.rgb, 55.0/255.0, 1.3, 235.0/255.0), 1.0);
-+      float4 dithered = float4(dither4x4(coord * (1.0) * 2.0, base.r));
++      float4 dithered = float4(dither4x4(sk_FragCoord.xy, base.r));
 +      filter = mix(color_darkblue, color_displaygreen, dithered);
 +    } else if (filter_id == 13) { // pink pixels
 +      base = float4(levels(grey.rgb, 55.0/255.0, 1.3, 235.0/255.0), 1.0);
-+      float4 dithered = float4(dither4x4(coord * (1.0) * 2.0, base.r));
++      float4 dithered = float4(dither4x4(sk_FragCoord.xy, base.r));
 +      filter = mix(color_purple1990, color_pinkhotel, dithered);
 +    } else if (filter_id == 14) { // sunrise
 +      // colors
@@ -1310,13 +1310,13 @@ index ba17de03682807102796036807a93e05992d6228..3cce6745b070c3337a82f8fa998c14cd
 +
 +struct AroundShaderInput {
 +  AroundShaderInput() { memset(this, 0, sizeof(*this)); }
-+  int filter_id;
++  float filter_id;
 +  float offset_x;
 +  float offset_y;
 +  float zoom;
 +  float width;
 +  float height;
-+  bool is_yuv;
++  float is_yuv;
 +};
 +
  // Smallest unit that impacts anti-aliasing output. We use this to determine
@@ -1367,7 +1367,7 @@ index ba17de03682807102796036807a93e05992d6228..3cce6745b070c3337a82f8fa998c14cd
 +    bounding_box.height() * (image->height() / rect.height()));
 +  uniforms.width = rect.width();
 +  uniforms.height = rect.height();
-+  uniforms.is_yuv = is_yuv;
++  uniforms.is_yuv = is_yuv ? 1 : 0;
 +
 +  sk_sp<SkData> data = SkData::MakeWithCopy(&uniforms, sizeof(uniforms));
 +  sk_sp<SkShader> imageShader = image->makeShader(SkSamplingOptions(SkFilterMode::kLinear));
