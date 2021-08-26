@@ -97,7 +97,7 @@ int FramelessView::NonClientHitTest(const gfx::Point& cursor) {
   // window.
   SkRegion* draggable_region = window_->draggable_region();
   if (draggable_region && draggable_region->contains(cursor.x(), cursor.y()))
-    return HTCAPTION;
+    return HTDRAG;
 
   return HTCLIENT;
 }

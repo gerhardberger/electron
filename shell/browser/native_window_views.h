@@ -195,6 +195,10 @@ class NativeWindowViews : public NativeWindow,
   void OnWidgetDestroying(views::Widget* widget) override;
   void OnWidgetDestroyed(views::Widget* widget) override;
 
+  void OnWidgetWillResize(views::Widget* widget,
+                          const gfx::Rect& new_bounds) override;
+  void OnWidgetDidResize(views::Widget* widget) override;
+
   // views::WidgetDelegate:
   views::View* GetInitiallyFocusedView() override;
   bool CanMaximize() const override;

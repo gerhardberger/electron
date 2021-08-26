@@ -1498,6 +1498,22 @@ void NativeWindowViews::OnWidgetBoundsChanged(views::Widget* changed_widget,
   }
 }
 
+void NativeWindowViews::OnWidgetWillResize(views::Widget* changed_widget,
+                                           const gfx::Rect& new_bounds) {
+  if (changed_widget != widget())
+    return;
+
+  bool prevent_default = false;
+  NotifyWindowWillResize(new_bounds, &prevent_default);
+}
+
+void NativeWindowViews::OnWidgetDidResize(views::Widget* changed_widget) {
+  if (changed_widget != widget())
+    return;
+
+  NotifyWindowResized();
+}
+
 void NativeWindowViews::OnWidgetDestroying(views::Widget* widget) {
   aura::Window* window = GetNativeWindow();
   if (window)
