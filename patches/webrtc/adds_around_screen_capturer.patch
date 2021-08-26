@@ -106,18 +106,14 @@ index 8e006665730e1114ea57dc298f18824f3036abc2..96328618d9b35327e1412b61568033aa
  
   private:
 diff --git a/modules/desktop_capture/mac/desktop_frame_cgimage.mm b/modules/desktop_capture/mac/desktop_frame_cgimage.mm
-index fb13fe273880727dd102710dd626a772c4183c51..3f5b4d62a82e43cf92c7bfa3e439b59901253bab 100644
+index fb13fe273880727dd102710dd626a772c4183c51..c94bb272e444d856aeee7337d6312d80500c4b1a 100644
 --- a/modules/desktop_capture/mac/desktop_frame_cgimage.mm
 +++ b/modules/desktop_capture/mac/desktop_frame_cgimage.mm
-@@ -41,6 +41,19 @@
-   return DesktopFrameCGImage::CreateFromCGImage(cg_image);
- }
- 
-+// static
-+std::unique_ptr<DesktopFrameCGImage> DesktopFrameCGImage::CreateForWindowList(CFArrayRef window_list, CGRect screen_bounds) {
-+  rtc::ScopedCFTypeRef<CGImageRef> cg_image(
-+      CGWindowListCreateImageFromArray(screen_bounds,
-+                              window_list,
+@@ -33,7 +33,20 @@
+       CGWindowListCreateImage(CGRectNull,
+                               kCGWindowListOptionIncludingWindow,
+                               window_id,
+-                              kCGWindowImageBoundsIgnoreFraming));
 +                              kCGWindowImageNominalResolution | kCGWindowImageShouldBeOpaque | kCGWindowImageBoundsIgnoreFraming));
 +  if (!cg_image) {
 +    return nullptr;
@@ -126,9 +122,15 @@ index fb13fe273880727dd102710dd626a772c4183c51..3f5b4d62a82e43cf92c7bfa3e439b599
 +  return DesktopFrameCGImage::CreateFromCGImage(cg_image);
 +}
 +
- // static
- std::unique_ptr<DesktopFrameCGImage> DesktopFrameCGImage::CreateFromCGImage(
-     rtc::ScopedCFTypeRef<CGImageRef> cg_image) {
++// static
++std::unique_ptr<DesktopFrameCGImage> DesktopFrameCGImage::CreateForWindowList(CFArrayRef window_list, CGRect screen_bounds) {
++  rtc::ScopedCFTypeRef<CGImageRef> cg_image(
++      CGWindowListCreateImageFromArray(screen_bounds,
++                              window_list,
++                              kCGWindowImageNominalResolution | kCGWindowImageShouldBeOpaque | kCGWindowImageBoundsIgnoreFraming));
+   if (!cg_image) {
+     return nullptr;
+   }
 diff --git a/modules/desktop_capture/mouse_cursor_monitor.h b/modules/desktop_capture/mouse_cursor_monitor.h
 index 43b75b3f79439b018a7e4ff24a3d06c5ac031bb5..58c7ffbb0baf9cd8c50894d29a314e2420a2e11f 100644
 --- a/modules/desktop_capture/mouse_cursor_monitor.h
