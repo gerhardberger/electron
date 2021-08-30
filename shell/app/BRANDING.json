@@ -1,5 +1,5 @@
 {
-  "project_name": "electron",
-  "product_name": "Electron",
-  "mac_bundle_id": "com.github.Electron"
+  "project_name": "around",
+  "product_name": "Around",
+  "mac_bundle_id": "co.teamport.around"
 }
