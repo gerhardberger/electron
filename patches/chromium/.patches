@@ -136,3 +136,4 @@ linux_window_transparency_fix.patch
 linux_add_window_will-resize_did-resize_events.patch
 fix_dcheck_flags_for_release_build.patch
 adds_support_for_around_screen_capturer.patch
+add_native_down_mixing_support_for_et.patch

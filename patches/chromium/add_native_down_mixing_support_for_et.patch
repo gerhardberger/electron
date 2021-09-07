@@ -1,0 +1,550 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Eldar Rello <eldar.rello@gmail.com>
+Date: Fri, 27 Aug 2021 21:53:42 +0300
+Subject: Add native down mixing support for ET
+
+
+diff --git a/third_party/blink/renderer/modules/mediastream/BUILD.gn b/third_party/blink/renderer/modules/mediastream/BUILD.gn
+index c2884478b0aa28407c36360380298e210eefac7c..95354e8e3ae974b9eb2d1cdca295c1f53df2b919 100644
+--- a/third_party/blink/renderer/modules/mediastream/BUILD.gn
++++ b/third_party/blink/renderer/modules/mediastream/BUILD.gn
+@@ -10,6 +10,8 @@ blink_modules_sources("mediastream") {
+     "apply_constraints_processor.h",
+     "apply_constraints_request.cc",
+     "apply_constraints_request.h",
++    "around_audio_mixer.h",
++    "around_audio_mixer.cc",
+     "capture_handle_change_event.cc",
+     "capture_handle_change_event.h",
+     "dom_window_media_stream.h",
+diff --git a/third_party/blink/renderer/modules/mediastream/around_audio_mixer.cc b/third_party/blink/renderer/modules/mediastream/around_audio_mixer.cc
+new file mode 100644
+index 0000000000000000000000000000000000000000..2e3689323abada8cbb9eb1e6d6483cc12ac5c5eb
+--- /dev/null
++++ b/third_party/blink/renderer/modules/mediastream/around_audio_mixer.cc
+@@ -0,0 +1,162 @@
++#include "third_party/blink/renderer/modules/mediastream/around_audio_mixer.h"
++
++#include "third_party/blink/renderer/core/execution_context/execution_context.h"
++#include "third_party/blink/renderer/modules/peerconnection/peer_connection_dependency_factory.h"
++#include "third_party/blink/renderer/modules/webrtc/webrtc_audio_device_impl.h"
++#include "third_party/blink/renderer/platform/mediastream/media_stream_audio_source.h"
++#include "third_party/webrtc/audio/audio_receive_stream.h"
++#include "third_party/webrtc/modules/audio_mixer/audio_mixer_impl.h"
++#include "third_party/blink/renderer/platform/scheduler/public/thread.h"
++
++namespace blink {
++
++AroundAudioMixer::AroundAudioMixer() {
++  playback_mixer_ = webrtc::AudioMixerImpl::Create();
++}
++
++bool AroundAudioMixer::AddSource(webrtc::AudioMixer::Source* audio_source) {
++  webrtc::MutexLock lock(&mutex_);
++  if (microphone_mixer_) {
++    auto* receive_stream = static_cast<webrtc::internal::AudioReceiveStream*>(audio_source);
++    // Assumption is that Around sets it to 79 for streams from secondaries.
++    if (receive_stream->config().jitter_buffer_max_packets == 79) {
++      return microphone_mixer_->AddSource(audio_source);
++    }
++  }
++  return playback_mixer_->AddSource(audio_source);
++}
++
++void AroundAudioMixer::RemoveSource(webrtc::AudioMixer::Source* audio_source) {
++  webrtc::MutexLock lock(&mutex_);
++  if (microphone_mixer_) {
++    auto* receive_stream = static_cast<webrtc::internal::AudioReceiveStream*>(audio_source);
++    if (receive_stream->config().jitter_buffer_max_packets != 200) {
++      microphone_mixer_->RemoveSource(audio_source);
++    }
++  } else {
++    playback_mixer_->RemoveSource(audio_source);
++  }
++}
++
++void AroundAudioMixer::Mix(size_t number_of_channels,
++         webrtc::AudioFrame* audio_frame_for_mixing) {
++  playback_mixer_->Mix(number_of_channels, audio_frame_for_mixing);
++}
++
++std::vector<webrtc::AudioMixer::Source*> AroundAudioMixer::audio_sources() {
++  return playback_mixer_->audio_sources();
++}
++
++void AroundAudioMixer::OnData(const media::AudioBus& audio_bus,
++            base::TimeTicks estimated_capture_time) {
++  webrtc::MutexLock lock(&mutex_);
++  if (!destination_)
++    return;
++
++  DCHECK_EQ(audio_bus.frames(), 480);
++  for (int i = 0; i < 480; i++) {
++    delay_buffer_[delay_index_ * 480 + i] = media::SignedInt16SampleTypeTraits::FromFloat(audio_bus.channel(0)[i]);
++  }
++  delay_index_++;
++  if (delay_index_ == delay_) {
++    delay_index_ = 0;
++  }
++  MixMicrophoneInputsAndDeliverToDestination();
++}
++
++void AroundAudioMixer::OnSetFormat(const media::AudioParameters& params) {
++}
++
++void AroundAudioMixer::OnReadyStateChanged(WebMediaStreamSource::ReadyState state) {
++}
++
++webrtc::AudioMixer::Source::AudioFrameInfo
++  AroundAudioMixer::GetAudioFrameWithInfo(int sample_rate_hz,
++                                          webrtc::AudioFrame* audio_frame) {
++  audio_frame->UpdateFrame(0,
++                           &delay_buffer_[delay_index_ * 480],
++                           480,
++                           48000,
++                           webrtc::AudioFrame::kNormalSpeech,
++                           webrtc::AudioFrame::kVadUnknown);
++  return webrtc::AudioMixer::Source::AudioFrameInfo::kNormal;
++}
++
++int AroundAudioMixer::Ssrc() const {
++  return 1;       // Just some number for local microphone, which hopefully doesn't clash.
++}
++
++int AroundAudioMixer::PreferredSampleRate() const {
++  return 48000;
++}
++
++void AroundAudioMixer::OnPlayoutData(media::AudioBus* audio_bus,
++                   int sample_rate,
++                   base::TimeDelta audio_delay) {
++  MixMicrophoneInputsAndDeliverToDestination();
++}
++
++void AroundAudioMixer::OnPlayoutDataSourceChanged() {
++}
++
++void AroundAudioMixer::OnRenderThreadChanged() {
++}
++
++void AroundAudioMixer::ConnectDestination(MediaStreamAudioSource* destination,
++                                          WebRtcAudioDeviceImpl* audio_device) {
++  webrtc::MutexLock lock(&mutex_);
++  destination_ = destination;
++  if (destination_) {
++    playback_device_ = audio_device;
++    microphone_mixer_ = webrtc::AudioMixerImpl::Create();
++    audio_bus_ = media::AudioBus::Create(1, 480);
++    DriveWithPlayback(true);
++  } else {
++    DriveWithPlayback(false);
++    microphone_mixer_ = nullptr;
++    audio_bus_ = nullptr;
++  }
++}
++
++void AroundAudioMixer::ConnectLocalMicrophone(const WebMediaStreamTrack& track, int delay) {
++  webrtc::MutexLock lock(&mutex_);
++  DriveWithPlayback(false);
++  delay_ = delay;
++  delay_index_ = 0;
++  delay_buffer_.resize((delay_ + 1) * 480);
++  microphone_mixer_->AddSource(this);
++  have_set_destination_format_ = false;
++  WebMediaStreamAudioSink::AddToAudioTrack(this, track);
++}
++
++void AroundAudioMixer::DisconnectLocalMicrophone(const WebMediaStreamTrack& track) {
++  webrtc::MutexLock lock(&mutex_);
++  microphone_mixer_->RemoveSource(this);
++  delay_buffer_.clear();
++  WebMediaStreamAudioSink::RemoveFromAudioTrack(this, track);
++  DriveWithPlayback(true);
++}
++
++void AroundAudioMixer::DriveWithPlayback(bool value) {
++  if (value) {
++    playback_device_->AddPlayoutSink(this);
++  } else {
++    playback_device_->RemovePlayoutSink(this);
++  }
++}
++
++void AroundAudioMixer::MixMicrophoneInputsAndDeliverToDestination() {
++  microphone_mixer_->Mix(1, &mixed_frame_);
++  if (!have_set_destination_format_) {
++    destination_->SetFormat(
++        media::AudioParameters(media::AudioParameters::AUDIO_PCM_LOW_LATENCY,
++                               media::GuessChannelLayout(audio_bus_->channels()),
++                               audio_bus_->frames() * 100, audio_bus_->frames()));
++    have_set_destination_format_ = true;
++  }
++  audio_bus_->FromInterleaved<media::SignedInt16SampleTypeTraits>(
++    mixed_frame_.data(), 480);
++  destination_->DeliverDataToTracks(*audio_bus_, base::TimeTicks::Now());
++}
++
++}
+diff --git a/third_party/blink/renderer/modules/mediastream/around_audio_mixer.h b/third_party/blink/renderer/modules/mediastream/around_audio_mixer.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..06631d765fcab296a1a47f13ca2d8085f3fc27d0
+--- /dev/null
++++ b/third_party/blink/renderer/modules/mediastream/around_audio_mixer.h
+@@ -0,0 +1,80 @@
++#ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_MEDIASTREAM_AROUND_AUDIO_MIXER_H
++#define THIRD_PARTY_BLINK_RENDERER_MODULES_MEDIASTREAM_AROUND_AUDIO_MIXER_H
++
++#include "base/memory/scoped_refptr.h"
++#include "third_party/blink/public/platform/modules/mediastream/web_media_stream_audio_sink.h"
++#include "third_party/blink/renderer/platform/webrtc/webrtc_source.h"
++#include "third_party/webrtc/api/audio/audio_mixer.h"
++#include "third_party/webrtc/rtc_base/synchronization/mutex.h"
++
++namespace media {
++class AudioBus;
++class AudioParameters;
++}
++
++namespace blink {
++
++class MediaStreamAudioSource;
++class WebRtcAudioDeviceImpl;
++
++class AroundAudioMixer
++    : public webrtc::AudioMixer,
++      public WebMediaStreamAudioSink,
++      public webrtc::AudioMixer::Source,
++      public WebRtcPlayoutDataSource::Sink {
++ public:
++  AroundAudioMixer();
++
++  // AudioMixer implementation
++  bool AddSource(webrtc::AudioMixer::Source* audio_source) override;
++  void RemoveSource(webrtc::AudioMixer::Source* audio_source) override;
++  void Mix(size_t number_of_channels,
++           webrtc::AudioFrame* audio_frame_for_mixing) override;
++  std::vector<webrtc::AudioMixer::Source*> audio_sources() override;
++
++  // WebMediaStreamAudioSink implementation.
++  void OnData(const media::AudioBus& audio_bus,
++              base::TimeTicks estimated_capture_time) override;
++  void OnSetFormat(const media::AudioParameters& params) override;
++  void OnReadyStateChanged(WebMediaStreamSource::ReadyState state) override;
++
++  // AudioMixer::Source implementation.
++  webrtc::AudioMixer::Source::AudioFrameInfo
++    GetAudioFrameWithInfo(int sample_rate_hz,
++                          webrtc::AudioFrame* audio_frame) override;
++  int Ssrc() const override;
++  int PreferredSampleRate() const override;
++
++  // WebRtcPlayoutDataSource::Sink implementation.
++  void OnPlayoutData(media::AudioBus* audio_bus,
++                     int sample_rate,
++                     base::TimeDelta audio_delay) override;
++  void OnPlayoutDataSourceChanged() override;
++  void OnRenderThreadChanged() override;
++
++  // AroundAudioMixer
++  void ConnectDestination(MediaStreamAudioSource* destination,
++                          WebRtcAudioDeviceImpl* audio_device);
++  void ConnectLocalMicrophone(const WebMediaStreamTrack& track, int delay);
++  void DisconnectLocalMicrophone(const WebMediaStreamTrack& track);
++
++ private:
++  void DriveWithPlayback(bool value);
++  void MixMicrophoneInputsAndDeliverToDestination();
++
++  MediaStreamAudioSource* destination_ = nullptr;
++  bool have_set_destination_format_ = false;
++  rtc::scoped_refptr<webrtc::AudioMixer> playback_mixer_;
++  rtc::scoped_refptr<webrtc::AudioMixer> microphone_mixer_;
++  webrtc::AudioFrame mixed_frame_;
++  Vector<int16_t> delay_buffer_;
++  int delay_index_ = 0;
++  int delay_ = 0;
++  std::unique_ptr<media::AudioBus> audio_bus_;
++  mutable webrtc::Mutex mutex_;
++  WebRtcAudioDeviceImpl* playback_device_ = nullptr;
++};
++
++}
++
++#endif  //THIRD_PARTY_BLINK_RENDERER_MODULES_MEDIASTREAM_AROUND_AUDIO_MIXER_H
+diff --git a/third_party/blink/renderer/modules/mediastream/media_stream.cc b/third_party/blink/renderer/modules/mediastream/media_stream.cc
+index e010f2b3f75a321670510035a09c1f1399cd68f9..093ef5da0b46de37180f7b31f6ca849c78911d29 100644
+--- a/third_party/blink/renderer/modules/mediastream/media_stream.cc
++++ b/third_party/blink/renderer/modules/mediastream/media_stream.cc
+@@ -28,14 +28,35 @@
+ #include "third_party/blink/public/platform/task_type.h"
+ #include "third_party/blink/renderer/core/execution_context/execution_context.h"
+ #include "third_party/blink/renderer/core/frame/deprecation.h"
++#include "third_party/blink/renderer/modules/mediastream/around_audio_mixer.h"
+ #include "third_party/blink/renderer/modules/mediastream/media_stream_track_event.h"
++#include "third_party/blink/renderer/modules/peerconnection/peer_connection_dependency_factory.h"
++#include "third_party/blink/renderer/modules/webrtc/webrtc_audio_device_impl.h"
+ #include "third_party/blink/renderer/platform/bindings/exception_state.h"
+ #include "third_party/blink/renderer/platform/bindings/script_state.h"
+ #include "third_party/blink/renderer/platform/heap/heap.h"
++#include "third_party/blink/renderer/platform/mediastream/media_stream_audio_source.h"
+ #include "third_party/blink/renderer/platform/mediastream/media_stream_source.h"
++#include "third_party/blink/renderer/platform/scheduler/public/thread.h"
+ 
+ namespace blink {
+ 
++namespace {
++
++const char* kGroupInputLabel = "group_capture";
++const char* kGroupOutputLabel = "group_playback";
++
++const int kLocalCaptureDelay = 20;      //200ms
++#if defined(_WIN32)
++// 160ms, On Windows audio engine typically adds 30-40ms of extra delay,
++// which has to be subtracted from 200.
++const int kLocalPlaybackDelay = 16;
++#else
++const int kLocalPlaybackDelay = 20;
++#endif
++
++}
++
+ static bool ContainsSource(MediaStreamTrackVector& track_vector,
+                            MediaStreamSource* source) {
+   for (MediaStreamTrack* track : track_vector) {
+@@ -289,6 +310,24 @@ void MediaStream::addTrack(MediaStreamTrack* track,
+ 
+   switch (track->Component()->Source()->GetType()) {
+     case MediaStreamSource::kTypeAudio:
++      if (track->label() == kGroupOutputLabel) {
++        PeerConnectionDependencyFactory::From(*GetExecutionContext()).GetWebRtcAudioDevice()->
++          SetAroundPrimaryPlayoutSink(MediaStreamAudioSource::From(track->Component()->Source()), kLocalPlaybackDelay);
++      } else if (track->label() == kGroupInputLabel) {
++        // Init the mixer and connect destination track.
++        auto* mixer = static_cast<AroundAudioMixer*>(PeerConnectionDependencyFactory::From(*GetExecutionContext()).GetWebRtcAudioMixer());
++        auto* device = PeerConnectionDependencyFactory::From(*GetExecutionContext()).GetWebRtcAudioDevice();
++        if (!mixer || !device) {
++          exception_state.ThrowDOMException(
++              DOMExceptionCode::kTypeMismatchError,
++              !mixer ? "AroundAudioMixer is missing." : "WebRtcAudioDevice is missing.");
++          return;
++        }
++        mixer->ConnectDestination(MediaStreamAudioSource::From(track->Component()->Source()), device);
++      } else if (audio_tracks_.size() == 1 && audio_tracks_[0]->label() == kGroupInputLabel) {
++        auto* mixer = static_cast<AroundAudioMixer*>(PeerConnectionDependencyFactory::From(*GetExecutionContext()).GetWebRtcAudioMixer());
++        mixer->ConnectLocalMicrophone(WebMediaStreamTrack(track->Component()), kLocalCaptureDelay);
++      }
+       audio_tracks_.push_back(track);
+       break;
+     case MediaStreamSource::kTypeVideo:
+@@ -320,8 +359,20 @@ void MediaStream::removeTrack(MediaStreamTrack* track,
+   switch (track->Component()->Source()->GetType()) {
+     case MediaStreamSource::kTypeAudio:
+       pos = audio_tracks_.Find(track);
+-      if (pos != kNotFound)
++      if (pos != kNotFound) {
++        if (track->label() == kGroupOutputLabel) {
++          WebRtcAudioDeviceImpl* audio_device = PeerConnectionDependencyFactory::From(*GetExecutionContext()).GetWebRtcAudioDevice();
++          audio_device->SetAroundPrimaryPlayoutSink(nullptr, 0);
++        } else if (track->label() == kGroupInputLabel) {
++          // Teardown the mixer.
++          auto* mixer = static_cast<AroundAudioMixer*>(PeerConnectionDependencyFactory::From(*GetExecutionContext()).GetWebRtcAudioMixer());
++          mixer->ConnectDestination(nullptr, nullptr);
++        } else if (audio_tracks_.size() == 2 && audio_tracks_[0]->label() == kGroupInputLabel) {
++          auto* mixer = static_cast<AroundAudioMixer*>(PeerConnectionDependencyFactory::From(*GetExecutionContext()).GetWebRtcAudioMixer());
++          mixer->DisconnectLocalMicrophone(WebMediaStreamTrack(track->Component()));
++        }
+         audio_tracks_.EraseAt(pos);
++      }
+       break;
+     case MediaStreamSource::kTypeVideo:
+       pos = video_tracks_.Find(track);
+@@ -356,7 +407,41 @@ MediaStreamTrack* MediaStream::getTrackById(String id) {
+     if ((*iter)->id() == id)
+       return iter->Get();
+   }
+-
++  if (id == kGroupOutputLabel || id == kGroupInputLabel) {
++    auto* media_stream_source = MakeGarbageCollected<MediaStreamSource>(
++        id, MediaStreamSource::StreamType::kTypeAudio, id, false /* is_remote */);
++    if (!media_stream_source) {
++      return nullptr;
++    }
++    auto* media_stream_component =
++        MakeGarbageCollected<MediaStreamComponent>(media_stream_source);
++    if (!media_stream_component) {
++      return nullptr;
++    }
++    MediaStreamAudioSource* const media_stream_audio_source =
++        new MediaStreamAudioSource(Thread::MainThread()->GetTaskRunner(), true);
++    if (!media_stream_audio_source) {
++      return nullptr;
++    }
++    // |media_stream_source| takes ownership of |media_stream_audio_source|.
++    media_stream_source->SetPlatformSource(
++        base::WrapUnique(media_stream_audio_source));
++
++    MediaStreamSource::Capabilities capabilities;
++    capabilities.device_id = id;
++    capabilities.echo_cancellation.emplace_back(false);
++    capabilities.auto_gain_control.emplace_back(false);
++    capabilities.noise_suppression.emplace_back(false);
++    capabilities.around_audio_processing.emplace_back(false);
++    capabilities.sample_size = {
++        media::SampleFormatToBitsPerChannel(media::kSampleFormatS16),  // min
++        media::SampleFormatToBitsPerChannel(media::kSampleFormatS16)   // max
++    };
++    media_stream_source->SetCapabilities(capabilities);
++    media_stream_audio_source->ConnectToTrack(media_stream_component);
++
++    return MakeGarbageCollected<MediaStreamTrack>(GetExecutionContext(), media_stream_component);
++  }
+   return nullptr;
+ }
+ 
+diff --git a/third_party/blink/renderer/modules/peerconnection/peer_connection_dependency_factory.cc b/third_party/blink/renderer/modules/peerconnection/peer_connection_dependency_factory.cc
+index 07a203371d7211c22495bbb165c2e1b65cc656a7..8c1c256de5df7cb0bb7bf567e22c2cba40636017 100644
+--- a/third_party/blink/renderer/modules/peerconnection/peer_connection_dependency_factory.cc
++++ b/third_party/blink/renderer/modules/peerconnection/peer_connection_dependency_factory.cc
+@@ -38,6 +38,7 @@
+ #include "third_party/blink/public/web/web_local_frame_client.h"
+ #include "third_party/blink/renderer/core/execution_context/execution_context.h"
+ #include "third_party/blink/renderer/core/execution_context/execution_context_lifecycle_observer.h"
++#include "third_party/blink/renderer/modules/mediastream/around_audio_mixer.h"
+ #include "third_party/blink/renderer/modules/peerconnection/rtc_error_util.h"
+ #include "third_party/blink/renderer/modules/peerconnection/rtc_peer_connection_handler.h"
+ #include "third_party/blink/renderer/modules/webrtc/webrtc_audio_device_impl.h"
+@@ -848,8 +849,7 @@ void PeerConnectionDependencyFactory::EnsureWebRtcAudioMixer() {
+   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+   if (audio_mixer_.get())
+     return;
+-
+-  audio_mixer_ = webrtc::AudioMixerImpl::Create();
++  audio_mixer_ = new rtc::RefCountedObject<AroundAudioMixer>();
+ }
+ 
+ std::unique_ptr<webrtc::RtpCapabilities>
+diff --git a/third_party/blink/renderer/modules/webrtc/webrtc_audio_device_impl.cc b/third_party/blink/renderer/modules/webrtc/webrtc_audio_device_impl.cc
+index c78e07ca49b77e3d9305d6de5b8206fa3310c0da..0479108e00ec429fd95b67b284deaa1059827674 100644
+--- a/third_party/blink/renderer/modules/webrtc/webrtc_audio_device_impl.cc
++++ b/third_party/blink/renderer/modules/webrtc/webrtc_audio_device_impl.cc
+@@ -15,6 +15,7 @@
+ #include "third_party/blink/public/platform/modules/webrtc/webrtc_logging.h"
+ #include "third_party/blink/renderer/modules/mediastream/processed_local_audio_source.h"
+ #include "third_party/blink/renderer/modules/webrtc/webrtc_audio_renderer.h"
++#include "third_party/blink/renderer/platform/mediastream/media_stream_audio_source.h"
+ 
+ using media::AudioParameters;
+ using media::ChannelLayout;
+@@ -87,13 +88,17 @@ void WebRtcAudioDeviceImpl::RenderData(media::AudioBus* audio_bus,
+   DCHECK_LE(audio_bus->channels(), 8);
+ 
+   // Get 10ms audio and copy result to temporary byte buffer.
+-  render_buffer_.resize(audio_bus->frames() * audio_bus->channels());
++  int chunk_size = audio_bus->frames() * audio_bus->channels();
++  if (static_cast<int>(render_buffer_.size()) != chunk_size + playback_delay_ * chunk_size) {
++    render_buffer_.resize(chunk_size + playback_delay_ * chunk_size);
++    memset(render_buffer_.data(), 0, render_buffer_.size());
++  }
+   constexpr int kBytesPerSample = 2;
+   static_assert(sizeof(render_buffer_[0]) == kBytesPerSample,
+                 "kBytesPerSample and FromInterleaved expect 2 bytes.");
+   int64_t elapsed_time_ms = -1;
+   int64_t ntp_time_ms = -1;
+-  int16_t* audio_data = render_buffer_.data();
++  int16_t* audio_data = render_buffer_.data() + playback_delay_index_ * chunk_size;
+ 
+   TRACE_EVENT_BEGIN1("audio", "VoE::PullRenderData", "frames",
+                      frames_per_10_ms);
+@@ -112,6 +117,23 @@ void WebRtcAudioDeviceImpl::RenderData(media::AudioBus* audio_bus,
+ 
+   // Pass the render data to the playout sinks.
+   base::AutoLock auto_lock(lock_);
++  if (primary_playout_sink_) {
++    if (!have_set_format_) {
++      primary_playout_sink_->SetFormat(
++          media::AudioParameters(media::AudioParameters::AUDIO_PCM_LOW_LATENCY,
++                                 media::GuessChannelLayout(audio_bus->channels()),
++                                 sample_rate, audio_bus->frames()));
++      have_set_format_ = true;
++    }
++    primary_playout_sink_->DeliverDataToTracks(*audio_bus, base::TimeTicks::Now());
++    playback_delay_index_++;
++    if (playback_delay_index_ == playback_delay_) {
++      playback_delay_index_ = 0;
++    }
++    audio_data = render_buffer_.data() + playback_delay_index_ * chunk_size;
++    audio_bus->FromInterleaved<media::SignedInt16SampleTypeTraits>(
++      audio_data, audio_bus->frames());
++  }
+   for (auto* sink : playout_sinks_)
+     sink->OnPlayoutData(audio_bus, sample_rate, audio_delay);
+ }
+@@ -440,6 +462,14 @@ void WebRtcAudioDeviceImpl::RemovePlayoutSink(
+   playout_sinks_.remove(sink);
+ }
+ 
++void WebRtcAudioDeviceImpl::SetAroundPrimaryPlayoutSink(MediaStreamAudioSource* primary_playout_sink, int delay) {
++  base::AutoLock auto_lock(lock_);
++  playback_delay_ = delay;
++  playback_delay_index_ = 0;
++  have_set_format_ = false;
++  primary_playout_sink_ = primary_playout_sink;
++}
++
+ base::UnguessableToken
+ WebRtcAudioDeviceImpl::GetAuthorizedDeviceSessionIdForAudioRenderer() {
+   DCHECK_CALLED_ON_VALID_THREAD(main_thread_checker_);
+diff --git a/third_party/blink/renderer/modules/webrtc/webrtc_audio_device_impl.h b/third_party/blink/renderer/modules/webrtc/webrtc_audio_device_impl.h
+index 11090c323056d3ce6d1d7a7dfe6df57123f5d89e..79b3d9641d63e2d7650bef6552c104106ec9e61c 100644
+--- a/third_party/blink/renderer/modules/webrtc/webrtc_audio_device_impl.h
++++ b/third_party/blink/renderer/modules/webrtc/webrtc_audio_device_impl.h
+@@ -36,6 +36,7 @@
+ //
+ namespace blink {
+ class WebRtcAudioRenderer;
++class MediaStreamAudioSource;
+ }
+ 
+ namespace media {
+@@ -140,6 +141,9 @@ class MODULES_EXPORT WebRtcAudioDeviceImpl
+   void AddPlayoutSink(blink::WebRtcPlayoutDataSource::Sink* sink) override;
+   void RemovePlayoutSink(blink::WebRtcPlayoutDataSource::Sink* sink) override;
+ 
++  // Connect sink for passing the playout signal to secondaries. |delay| - local playout delay in 10ms units.
++  void SetAroundPrimaryPlayoutSink(MediaStreamAudioSource* primary_playout_sink, int delay);
++
+  private:
+   using CapturerList = std::list<ProcessedLocalAudioSource*>;
+   using PlayoutDataSinkList = std::list<blink::WebRtcPlayoutDataSource::Sink*>;
+@@ -169,6 +173,8 @@ class MODULES_EXPORT WebRtcAudioDeviceImpl
+   // before it goes away.
+   PlayoutDataSinkList playout_sinks_ GUARDED_BY(lock_);
+ 
++  MediaStreamAudioSource* primary_playout_sink_ GUARDED_BY(lock_);
++
+   // Weak reference to the audio callback.
+   // The webrtc client defines |audio_transport_callback_| by calling
+   // RegisterAudioCallback().
+@@ -188,6 +194,10 @@ class MODULES_EXPORT WebRtcAudioDeviceImpl
+   // Buffer used for temporary storage during render callback.
+   // It is only accessed by the audio render thread.
+   Vector<int16_t> render_buffer_;
++  // Delay playback in 10ms units. 1 - 10ms, 2 - 20ms
++  int playback_delay_ = 0;
++  int playback_delay_index_ = 0;
++  bool have_set_format_ = false;
+ 
+   // The output device used for echo cancellation
+   String output_device_id_for_aec_;
+diff --git a/third_party/blink/renderer/platform/mediastream/media_stream_audio_source.h b/third_party/blink/renderer/platform/mediastream/media_stream_audio_source.h
+index 66912cb85434abbbc1ddf9254eab964f1a7fb038..5e57a9b885adc9b381d02de76cfe2fc91b7a13f0 100644
+--- a/third_party/blink/renderer/platform/mediastream/media_stream_audio_source.h
++++ b/third_party/blink/renderer/platform/mediastream/media_stream_audio_source.h
+@@ -134,7 +134,6 @@ class PLATFORM_EXPORT MediaStreamAudioSource
+     return error_code_;
+   }
+ 
+- protected:
+   // Returns a new MediaStreamAudioTrack. |id| is the blink track's ID in UTF-8.
+   // Subclasses may override this to provide an extended implementation.
+   virtual std::unique_ptr<MediaStreamAudioTrack> CreateMediaStreamAudioTrack(
