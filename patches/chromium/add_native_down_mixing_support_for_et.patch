@@ -19,10 +19,10 @@ index c2884478b0aa28407c36360380298e210eefac7c..95354e8e3ae974b9eb2d1cdca295c1f5
      "dom_window_media_stream.h",
 diff --git a/third_party/blink/renderer/modules/mediastream/around_audio_mixer.cc b/third_party/blink/renderer/modules/mediastream/around_audio_mixer.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..2e3689323abada8cbb9eb1e6d6483cc12ac5c5eb
+index 0000000000000000000000000000000000000000..5810bf0a7e42f516e850b3f66f84aa8c5c93a7fa
 --- /dev/null
 +++ b/third_party/blink/renderer/modules/mediastream/around_audio_mixer.cc
-@@ -0,0 +1,162 @@
+@@ -0,0 +1,167 @@
 +#include "third_party/blink/renderer/modules/mediastream/around_audio_mixer.h"
 +
 +#include "third_party/blink/renderer/core/execution_context/execution_context.h"
@@ -35,6 +35,12 @@ index 0000000000000000000000000000000000000000..2e3689323abada8cbb9eb1e6d6483cc1
 +
 +namespace blink {
 +
++namespace {
++// This is a special value used by PeerManager for receive streams between primary and
++// secondaries in ET group. It has to match what is defined as FIFO_BUFFER_INDICATOR in peerManager.ts
++const int kFifoBufferIndicator = 79;
++}
++
 +AroundAudioMixer::AroundAudioMixer() {
 +  playback_mixer_ = webrtc::AudioMixerImpl::Create();
 +}
@@ -43,8 +49,7 @@ index 0000000000000000000000000000000000000000..2e3689323abada8cbb9eb1e6d6483cc1
 +  webrtc::MutexLock lock(&mutex_);
 +  if (microphone_mixer_) {
 +    auto* receive_stream = static_cast<webrtc::internal::AudioReceiveStream*>(audio_source);
-+    // Assumption is that Around sets it to 79 for streams from secondaries.
-+    if (receive_stream->config().jitter_buffer_max_packets == 79) {
++    if (receive_stream->config().jitter_buffer_max_packets == kFifoBufferIndicator) {
 +      return microphone_mixer_->AddSource(audio_source);
 +    }
 +  }
@@ -55,12 +60,12 @@ index 0000000000000000000000000000000000000000..2e3689323abada8cbb9eb1e6d6483cc1
 +  webrtc::MutexLock lock(&mutex_);
 +  if (microphone_mixer_) {
 +    auto* receive_stream = static_cast<webrtc::internal::AudioReceiveStream*>(audio_source);
-+    if (receive_stream->config().jitter_buffer_max_packets != 200) {
++    if (receive_stream->config().jitter_buffer_max_packets == kFifoBufferIndicator) {
 +      microphone_mixer_->RemoveSource(audio_source);
++      return;
 +    }
-+  } else {
-+    playback_mixer_->RemoveSource(audio_source);
 +  }
++  playback_mixer_->RemoveSource(audio_source);
 +}
 +
 +void AroundAudioMixer::Mix(size_t number_of_channels,
