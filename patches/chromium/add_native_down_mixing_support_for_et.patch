@@ -19,10 +19,10 @@ index c2884478b0aa28407c36360380298e210eefac7c..95354e8e3ae974b9eb2d1cdca295c1f5
      "dom_window_media_stream.h",
 diff --git a/third_party/blink/renderer/modules/mediastream/around_audio_mixer.cc b/third_party/blink/renderer/modules/mediastream/around_audio_mixer.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..5810bf0a7e42f516e850b3f66f84aa8c5c93a7fa
+index 0000000000000000000000000000000000000000..2f084a5105a4c29237f39c414a3b303f406767ad
 --- /dev/null
 +++ b/third_party/blink/renderer/modules/mediastream/around_audio_mixer.cc
-@@ -0,0 +1,167 @@
+@@ -0,0 +1,170 @@
 +#include "third_party/blink/renderer/modules/mediastream/around_audio_mixer.h"
 +
 +#include "third_party/blink/renderer/core/execution_context/execution_context.h"
@@ -47,23 +47,24 @@ index 0000000000000000000000000000000000000000..5810bf0a7e42f516e850b3f66f84aa8c
 +
 +bool AroundAudioMixer::AddSource(webrtc::AudioMixer::Source* audio_source) {
 +  webrtc::MutexLock lock(&mutex_);
-+  if (microphone_mixer_) {
-+    auto* receive_stream = static_cast<webrtc::internal::AudioReceiveStream*>(audio_source);
-+    if (receive_stream->config().jitter_buffer_max_packets == kFifoBufferIndicator) {
-+      return microphone_mixer_->AddSource(audio_source);
++  auto* receive_stream = static_cast<webrtc::internal::AudioReceiveStream*>(audio_source);
++  if (receive_stream->config().jitter_buffer_max_packets == kFifoBufferIndicator) {
++    if (!microphone_mixer_) {
++      microphone_mixer_ = webrtc::AudioMixerImpl::Create();
 +    }
++    return microphone_mixer_->AddSource(audio_source);
 +  }
 +  return playback_mixer_->AddSource(audio_source);
 +}
 +
 +void AroundAudioMixer::RemoveSource(webrtc::AudioMixer::Source* audio_source) {
 +  webrtc::MutexLock lock(&mutex_);
-+  if (microphone_mixer_) {
-+    auto* receive_stream = static_cast<webrtc::internal::AudioReceiveStream*>(audio_source);
-+    if (receive_stream->config().jitter_buffer_max_packets == kFifoBufferIndicator) {
++  auto* receive_stream = static_cast<webrtc::internal::AudioReceiveStream*>(audio_source);
++  if (receive_stream->config().jitter_buffer_max_packets == kFifoBufferIndicator) {
++    if (microphone_mixer_) {
 +      microphone_mixer_->RemoveSource(audio_source);
-+      return;
 +    }
++    return;
 +  }
 +  playback_mixer_->RemoveSource(audio_source);
 +}
@@ -137,8 +138,11 @@ index 0000000000000000000000000000000000000000..5810bf0a7e42f516e850b3f66f84aa8c
 +  webrtc::MutexLock lock(&mutex_);
 +  destination_ = destination;
 +  if (destination_) {
++    have_set_destination_format_ = false;
 +    playback_device_ = audio_device;
-+    microphone_mixer_ = webrtc::AudioMixerImpl::Create();
++    if (!microphone_mixer_) {
++      microphone_mixer_ = webrtc::AudioMixerImpl::Create();
++    }
 +    audio_bus_ = media::AudioBus::Create(1, 480);
 +    DriveWithPlayback(true);
 +  } else {
@@ -155,7 +159,6 @@ index 0000000000000000000000000000000000000000..5810bf0a7e42f516e850b3f66f84aa8c
 +  delay_index_ = 0;
 +  delay_buffer_.resize((delay_ + 1) * 480);
 +  microphone_mixer_->AddSource(this);
-+  have_set_destination_format_ = false;
 +  WebMediaStreamAudioSink::AddToAudioTrack(this, track);
 +}
 +
