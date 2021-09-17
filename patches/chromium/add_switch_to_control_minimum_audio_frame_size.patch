@@ -6,10 +6,10 @@ Subject: add switch to control minimum audio frame size
 This patch adds a switch to control minimum audio frame size.
 
 diff --git a/content/browser/renderer_host/render_process_host_impl.cc b/content/browser/renderer_host/render_process_host_impl.cc
-index 0dbb7fad5c9f3b3889b0825d553992d6fe2745f9..8072e45bc2bdadec4f4b6f434565401763222e32 100644
+index bd24cb0f6edc37bf23c40f0a7839a2f5d85c9a01..d844e60f0bed9489c0c104defff314417b40b4d4 100644
 --- a/content/browser/renderer_host/render_process_host_impl.cc
 +++ b/content/browser/renderer_host/render_process_host_impl.cc
-@@ -3385,6 +3385,7 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
+@@ -3443,6 +3443,7 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
      switches::kAllowLoopbackInPeerConnection,
      switches::kAndroidFontsPath,
      switches::kAudioBufferSize,

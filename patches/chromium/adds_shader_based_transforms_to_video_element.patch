@@ -1077,10 +1077,10 @@ index f64ae80494614b0dc8b2ff7ccb8d32730b6e689b..a7ec1d92a26f1e4a44e1bfe6aa339c54
    int resource_multiplier_location_ = -1;
    int resource_offset_location_ = -1;
 diff --git a/components/viz/service/display/skia_renderer.cc b/components/viz/service/display/skia_renderer.cc
-index ba17de03682807102796036807a93e05992d6228..cbae8cfd08a5580fd1a64fd06284ef6395037603 100644
+index 43d10d9654bf535210a5c6ab7eda032f4cc8e40e..6f3a0c8112dacd828f4a2e8d35cdef60be737d64 100644
 --- a/components/viz/service/display/skia_renderer.cc
 +++ b/components/viz/service/display/skia_renderer.cc
-@@ -83,6 +83,241 @@ namespace viz {
+@@ -84,6 +84,241 @@ namespace viz {
  
  namespace {
  
@@ -1322,7 +1322,7 @@ index ba17de03682807102796036807a93e05992d6228..cbae8cfd08a5580fd1a64fd06284ef63
  // Smallest unit that impacts anti-aliasing output. We use this to determine
  // when an exterior edge (with AA) has been clipped (no AA). The specific value
  // was chosen to match that used by gl_renderer.
-@@ -1942,8 +2177,7 @@ void SkiaRenderer::DrawTextureQuad(const TextureDrawQuad* quad,
+@@ -1952,8 +2187,7 @@ void SkiaRenderer::DrawTextureQuad(const TextureDrawQuad* quad,
                                     DrawQuadParams* params) {
    const gfx::ColorSpace& src_color_space =
        resource_provider()->GetColorSpace(quad->resource_id());
@@ -1332,7 +1332,7 @@ index ba17de03682807102796036807a93e05992d6228..cbae8cfd08a5580fd1a64fd06284ef63
  
    ScopedSkImageBuilder builder(
        this, quad->resource_id(), /*maybe_concurrent_reads=*/true,
-@@ -2067,7 +2301,11 @@ void SkiaRenderer::DrawTextureQuad(const TextureDrawQuad* quad,
+@@ -2077,7 +2311,11 @@ void SkiaRenderer::DrawTextureQuad(const TextureDrawQuad* quad,
      paint.setColorFilter(std::move(cf));
    }
  
@@ -1345,7 +1345,7 @@ index ba17de03682807102796036807a93e05992d6228..cbae8cfd08a5580fd1a64fd06284ef63
      // Skia won't perform color conversion.
      const gfx::ColorSpace dst_color_space = CurrentRenderPassColorSpace();
      DCHECK(SkColorSpace::Equals(image->colorSpace(),
-@@ -2086,6 +2324,40 @@ void SkiaRenderer::DrawTextureQuad(const TextureDrawQuad* quad,
+@@ -2096,6 +2334,40 @@ void SkiaRenderer::DrawTextureQuad(const TextureDrawQuad* quad,
    DrawSingleImage(image, valid_texel_bounds, rpdq_params, &paint, params);
  }
  
@@ -1386,7 +1386,7 @@ index ba17de03682807102796036807a93e05992d6228..cbae8cfd08a5580fd1a64fd06284ef63
  void SkiaRenderer::DrawTileDrawQuad(const TileDrawQuad* quad,
                                      const DrawRPDQParams* rpdq_params,
                                      DrawQuadParams* params) {
-@@ -2191,6 +2463,8 @@ void SkiaRenderer::DrawYUVVideoQuad(const YUVVideoDrawQuad* quad,
+@@ -2201,6 +2473,8 @@ void SkiaRenderer::DrawYUVVideoQuad(const YUVVideoDrawQuad* quad,
    // entire YUV image.
    SkPaint paint = params->paint(color_filter);
  
@@ -1775,7 +1775,7 @@ index 82dc8ca69f91e46d8e6a20198aa3a216c8f1c558..1de2eb458e8c2f43f12a4b90d46d0fbc
    friend class base::RefCountedThreadSafe<VideoFrame>;
  
 diff --git a/media/renderers/video_resource_updater.cc b/media/renderers/video_resource_updater.cc
-index 9f0934ae584e338384597cd1c64e174bf789e21c..1294b5ea5be10cd98e6a07fd7977dd78ede5300c 100644
+index f819aed4a58d0b2be37cc0459ea182f3b067aed9..881e87438be776a0a2327aa147f6ec366429aa1d 100644
 --- a/media/renderers/video_resource_updater.cc
 +++ b/media/renderers/video_resource_updater.cc
 @@ -550,7 +550,9 @@ void VideoResourceUpdater::AppendQuads(

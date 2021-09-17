@@ -93,7 +93,7 @@ index c0316c5ebf350bc34119e260cab866788da9e0f3..075c6bdd029552fc349e2883d174b10b
  
  // https://w3c.github.io/webrtc-pc/#dom-rtcpeerconnectionerrorcallback
 diff --git a/third_party/blink/renderer/modules/peerconnection/rtc_peer_connection_handler.cc b/third_party/blink/renderer/modules/peerconnection/rtc_peer_connection_handler.cc
-index 9773ee6a92962f402b00a16279aa9b45cb80fa0e..2cf72850eee886b1c24cc0defb4a3a13b6124aac 100644
+index f99d8e726f4df652ee0d1326d6f8aa5ad48abd25..a04cef659d59fa9b2be9f48872848c65ec95e15a 100644
 --- a/third_party/blink/renderer/modules/peerconnection/rtc_peer_connection_handler.cc
 +++ b/third_party/blink/renderer/modules/peerconnection/rtc_peer_connection_handler.cc
 @@ -1082,6 +1082,30 @@ class RTCPeerConnectionHandler::Observer
@@ -127,7 +127,7 @@ index 9773ee6a92962f402b00a16279aa9b45cb80fa0e..2cf72850eee886b1c24cc0defb4a3a13
   private:
    const base::WeakPtr<RTCPeerConnectionHandler> handler_;
    const scoped_refptr<base::SingleThreadTaskRunner> main_thread_;
-@@ -2625,6 +2649,16 @@ void RTCPeerConnectionHandler::OnInterestingUsage(int usage_pattern) {
+@@ -2626,6 +2650,16 @@ void RTCPeerConnectionHandler::OnInterestingUsage(int usage_pattern) {
      client_->DidNoteInterestingUsage(usage_pattern);
  }
  

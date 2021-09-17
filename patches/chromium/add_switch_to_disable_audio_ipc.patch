@@ -24,10 +24,10 @@ index 0c018c0e390932035c56b1f6166642148b55fa9c..7b95e9ed1009f1ec12bc0d166107559c
        raw_unique_id == media::AudioDeviceDescription::kCommunicationsDeviceId) {
      return raw_unique_id;
 diff --git a/content/browser/renderer_host/render_process_host_impl.cc b/content/browser/renderer_host/render_process_host_impl.cc
-index bc854896652c6ba4acb9a08c431806207fc3b1e3..7913fcb2d55f3805c6dec0eddb2059e5c2c06a01 100644
+index 7cc235e569c75729724a9982aa8e92fa7552f125..ae8cf92a423fdaac7f549e1240acd1c7941cec26 100644
 --- a/content/browser/renderer_host/render_process_host_impl.cc
 +++ b/content/browser/renderer_host/render_process_host_impl.cc
-@@ -3386,6 +3386,7 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
+@@ -3444,6 +3444,7 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
      switches::kAndroidFontsPath,
      switches::kAudioBufferSize,
      switches::kAudioLatencyFactor,

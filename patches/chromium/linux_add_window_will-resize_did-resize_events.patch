@@ -118,7 +118,7 @@ index d3e6ac9a54446acfa2b09c2332c4241117c3394e..6d9f81f7ff211403a9276d4b1573a75a
    // physical pixels.
    virtual void OnDamageRect(const gfx::Rect& damaged_region) = 0;
 diff --git a/ui/platform_window/x11/x11_window.cc b/ui/platform_window/x11/x11_window.cc
-index 55eab0cb37324d882f597b1bb5331f2cd2385d94..d2fb239159990406f3113b8f3d3a1606efe8724b 100644
+index c3b1703f5d97fa414d2b8a92dbc62bc3a904e53b..818d6ac572ccb109c8b5130bfd0b00e8bfc230b4 100644
 --- a/ui/platform_window/x11/x11_window.cc
 +++ b/ui/platform_window/x11/x11_window.cc
 @@ -1317,6 +1317,14 @@ void X11Window::OnXWindowBoundsChanged(const gfx::Rect& bounds) {
@@ -136,7 +136,7 @@ index 55eab0cb37324d882f597b1bb5331f2cd2385d94..d2fb239159990406f3113b8f3d3a1606
  void X11Window::OnXWindowCloseRequested() {
    platform_window_delegate_->OnCloseRequest();
  }
-@@ -2020,6 +2028,19 @@ void X11Window::HandleEvent(const x11::Event& xev) {
+@@ -2021,6 +2029,19 @@ void X11Window::HandleEvent(const x11::Event& xev) {
                                      expose->height);
      OnXWindowDamageEvent(damage_rect_in_pixels);
    } else if (auto* focus = xev.As<x11::FocusEvent>()) {
@@ -156,7 +156,7 @@ index 55eab0cb37324d882f597b1bb5331f2cd2385d94..d2fb239159990406f3113b8f3d3a1606
      OnFocusEvent(focus->opcode == x11::FocusEvent::In, focus->mode,
                   focus->detail);
    } else if (auto* configure = xev.As<x11::ConfigureNotifyEvent>()) {
-@@ -2250,6 +2271,13 @@ void X11Window::DelayedResize(const gfx::Rect& bounds_in_pixels) {
+@@ -2251,6 +2272,13 @@ void X11Window::DelayedResize(const gfx::Rect& bounds_in_pixels) {
                     ++current_counter_value_);
    }
  
@@ -196,10 +196,10 @@ index bd1bf9411477ddf7ace9315b2deb4323230183bb..322e44e51190c775323ad3242cf068f2
  
    DISALLOW_COPY_AND_ASSIGN(X11Window);
 diff --git a/ui/views/widget/desktop_aura/desktop_native_widget_aura.cc b/ui/views/widget/desktop_aura/desktop_native_widget_aura.cc
-index b27610b31fbdb3fe4b02503ed88e2dbaef4a395e..46bc07c42d857a478d92dc45eb44c3040e4043d4 100644
+index 2bef0c757b55aed994878f36074c3bee675adb73..192083db095794d6833c40c20e85c5930feed2d1 100644
 --- a/ui/views/widget/desktop_aura/desktop_native_widget_aura.cc
 +++ b/ui/views/widget/desktop_aura/desktop_native_widget_aura.cc
-@@ -1304,6 +1304,21 @@ void DesktopNativeWidgetAura::OnHostCloseRequested(aura::WindowTreeHost* host) {
+@@ -1305,6 +1305,21 @@ void DesktopNativeWidgetAura::OnHostCloseRequested(aura::WindowTreeHost* host) {
    GetWidget()->Close();
  }
  
@@ -222,7 +222,7 @@ index b27610b31fbdb3fe4b02503ed88e2dbaef4a395e..46bc07c42d857a478d92dc45eb44c304
    // Don't update the bounds of the child layers when animating closed. If we
    // did it would force a paint, which we don't want. We don't want the paint
 diff --git a/ui/views/widget/desktop_aura/desktop_native_widget_aura.h b/ui/views/widget/desktop_aura/desktop_native_widget_aura.h
-index 054ac8dcbea9035aa51c88c2430b93ecc12f34b3..9dae9ee3da0005e2888964685043eb0cf0dafc2e 100644
+index 80f29aad0f8155dfd00ece48d85336e81e9f63a2..79bf946f4393cb3dc2e98f825190888a1ed02cc4 100644
 --- a/ui/views/widget/desktop_aura/desktop_native_widget_aura.h
 +++ b/ui/views/widget/desktop_aura/desktop_native_widget_aura.h
 @@ -259,6 +259,12 @@ class VIEWS_EXPORT DesktopNativeWidgetAura
@@ -255,7 +255,7 @@ index 12e702107880b369532a2339e441e1b6c8625c2b..ba3a2a7b3231e1d5aad597f6afe65d1c
    // workspaces state changes.
    virtual void OnNativeWidgetWorkspaceChanged() = 0;
 diff --git a/ui/views/widget/widget.cc b/ui/views/widget/widget.cc
-index a742d7d7f5d56511b249fe178faee113316a721f..2e6f63879f201dd822a6818e7d9ec8d6f45dec5c 100644
+index 4b7f2bbe19abfbd707d34b645b5a7458522f9575..8d2366f95788cf8cdd0acf88cc9ab4b524b26d6c 100644
 --- a/ui/views/widget/widget.cc
 +++ b/ui/views/widget/widget.cc
 @@ -1374,6 +1374,25 @@ void Widget::OnNativeWidgetMove() {
@@ -285,7 +285,7 @@ index a742d7d7f5d56511b249fe178faee113316a721f..2e6f63879f201dd822a6818e7d9ec8d6
    TRACE_EVENT0("ui", "Widget::OnNativeWidgetSizeChanged");
  
 diff --git a/ui/views/widget/widget.h b/ui/views/widget/widget.h
-index d6ce8c4934ed16112c7b97a96606f8957aa75693..badfc434dc95c159ab750d50347fe7e6d667d833 100644
+index 4a1527951ae36a236749e021e7b72eb2c2d7923b..1e123e7c0ccf807ae1b0354ee93be5d844a3598b 100644
 --- a/ui/views/widget/widget.h
 +++ b/ui/views/widget/widget.h
 @@ -994,6 +994,12 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,

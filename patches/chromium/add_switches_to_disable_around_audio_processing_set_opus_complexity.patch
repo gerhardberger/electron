@@ -7,10 +7,10 @@ Subject: Add switches to disable Around audio processing, set opus complexity
 Add switches to disable Around audio processing, set opus complexity and disable audio encoder queue.
 
 diff --git a/content/browser/renderer_host/render_process_host_impl.cc b/content/browser/renderer_host/render_process_host_impl.cc
-index 8072e45bc2bdadec4f4b6f434565401763222e32..bc854896652c6ba4acb9a08c431806207fc3b1e3 100644
+index d844e60f0bed9489c0c104defff314417b40b4d4..7cc235e569c75729724a9982aa8e92fa7552f125 100644
 --- a/content/browser/renderer_host/render_process_host_impl.cc
 +++ b/content/browser/renderer_host/render_process_host_impl.cc
-@@ -3386,6 +3386,9 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
+@@ -3444,6 +3444,9 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
      switches::kAndroidFontsPath,
      switches::kAudioBufferSize,
      switches::kAudioLatencyFactor,

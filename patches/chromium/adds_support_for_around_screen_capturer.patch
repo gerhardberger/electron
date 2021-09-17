@@ -50,10 +50,10 @@ index 4519ecbf34fa04b186599ce7ded8c881aa264c67..32409d57ebc26ffed16aed527ea25655
    ~DesktopCaptureDevice() override;
  
 diff --git a/content/browser/renderer_host/media/in_process_video_capture_device_launcher.cc b/content/browser/renderer_host/media/in_process_video_capture_device_launcher.cc
-index a17a2460f75281a9d548bdeb47725564b7d0d503..38eda070b2492b82e27bf0fc743552b390ec958d 100644
+index 38c1ab8a812da61e4dab724205403f580736ea46..937bd32beec2b9739f8eb2e53deb6e592e79b9fa 100644
 --- a/content/browser/renderer_host/media/in_process_video_capture_device_launcher.cc
 +++ b/content/browser/renderer_host/media/in_process_video_capture_device_launcher.cc
-@@ -398,16 +398,18 @@ void InProcessVideoCaptureDeviceLauncher::DoStartDesktopCaptureOnDeviceThread(
+@@ -404,16 +404,18 @@ void InProcessVideoCaptureDeviceLauncher::DoStartDesktopCaptureOnDeviceThread(
    DCHECK(device_task_runner_->BelongsToCurrentThread());
    DCHECK(!desktop_id.is_null());
  
@@ -64,8 +64,8 @@ index a17a2460f75281a9d548bdeb47725564b7d0d503..38eda070b2492b82e27bf0fc743552b3
    video_capture_device = std::make_unique<ScreenCaptureDeviceAndroid>();
  #else
  #if defined(OS_MAC)
--  if (base::FeatureList::IsEnabled(features::kDesktopCaptureMacV2))
-+  if (base::FeatureList::IsEnabled(features::kDesktopCaptureMacV2) && !using_around_capturer)
+-  if (base::FeatureList::IsEnabled(kDesktopCaptureMacV2))
++  if (base::FeatureList::IsEnabled(kDesktopCaptureMacV2) && !using_around_capturer)
      video_capture_device = CreateDesktopCaptureDeviceMac(desktop_id);
  #endif
    if (!video_capture_device)

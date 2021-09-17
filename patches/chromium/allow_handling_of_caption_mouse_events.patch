@@ -190,7 +190,7 @@ index 265a1029fd85399ecc625e40eccf9ebc85244c15..70534e3eb5ad6a6da8497c8c0eb033ec
    WebMouseEvent result(type, modifiers, time_stamp);
    result.pointer_type = pointer_type;
 diff --git a/ui/views/widget/desktop_aura/desktop_native_widget_aura.h b/ui/views/widget/desktop_aura/desktop_native_widget_aura.h
-index 9d847b51b8dbc44e53c7e011e86977f3d450fed0..054ac8dcbea9035aa51c88c2430b93ecc12f34b3 100644
+index 661b6cd232bb331341bb066cc769f7890639fa5c..80f29aad0f8155dfd00ece48d85336e81e9f63a2 100644
 --- a/ui/views/widget/desktop_aura/desktop_native_widget_aura.h
 +++ b/ui/views/widget/desktop_aura/desktop_native_widget_aura.h
 @@ -109,7 +109,6 @@ class VIEWS_EXPORT DesktopNativeWidgetAura
