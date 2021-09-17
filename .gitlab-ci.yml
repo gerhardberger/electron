@@ -5,6 +5,7 @@ workflow:
     - if: '$CI_COMMIT_BRANCH == "ci/run-clean-build"'
     - if: '$CI_COMMIT_BRANCH == "ci/symbols-test"'
     - if: '$CI_COMMIT_BRANCH == "around-14.0.0-beta.20"'
+    - if: '$CI_COMMIT_BRANCH == "around-14.0.1"'
 
 stages:
   - clean
@@ -74,7 +75,7 @@ stages:
     SCCACHE_DIR: /Users/administrator/cache/sccache
     GIT_CACHE_PATH: /Users/administrator/cache/git
     PYTHONUNBUFFERED: 1
-    GCLIENT_EXTRA_ARGS: '--custom-var=checkout_mac=True --custom-var=host_os=mac'
+    GCLIENT_EXTRA_ARGS: "--custom-var=checkout_mac=True --custom-var=host_os=mac"
 
 #
 # CLEAN
@@ -115,7 +116,6 @@ clean:mac-arm:
     - .clean
   script:
     - rm -rf ../out
-
 
 #
 # BUILD
