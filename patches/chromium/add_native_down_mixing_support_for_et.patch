@@ -19,10 +19,10 @@ index c2884478b0aa28407c36360380298e210eefac7c..95354e8e3ae974b9eb2d1cdca295c1f5
      "dom_window_media_stream.h",
 diff --git a/third_party/blink/renderer/modules/mediastream/around_audio_mixer.cc b/third_party/blink/renderer/modules/mediastream/around_audio_mixer.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..2f084a5105a4c29237f39c414a3b303f406767ad
+index 0000000000000000000000000000000000000000..cad9863b9461225b91258a858efc9a7e1eb313fb
 --- /dev/null
 +++ b/third_party/blink/renderer/modules/mediastream/around_audio_mixer.cc
-@@ -0,0 +1,170 @@
+@@ -0,0 +1,182 @@
 +#include "third_party/blink/renderer/modules/mediastream/around_audio_mixer.h"
 +
 +#include "third_party/blink/renderer/core/execution_context/execution_context.h"
@@ -49,10 +49,9 @@ index 0000000000000000000000000000000000000000..2f084a5105a4c29237f39c414a3b303f
 +  webrtc::MutexLock lock(&mutex_);
 +  auto* receive_stream = static_cast<webrtc::internal::AudioReceiveStream*>(audio_source);
 +  if (receive_stream->config().jitter_buffer_max_packets == kFifoBufferIndicator) {
-+    if (!microphone_mixer_) {
-+      microphone_mixer_ = webrtc::AudioMixerImpl::Create();
++    if (microphone_mixer_) {
++      return microphone_mixer_->AddSource(audio_source);
 +    }
-+    return microphone_mixer_->AddSource(audio_source);
 +  }
 +  return playback_mixer_->AddSource(audio_source);
 +}
@@ -62,11 +61,22 @@ index 0000000000000000000000000000000000000000..2f084a5105a4c29237f39c414a3b303f
 +  auto* receive_stream = static_cast<webrtc::internal::AudioReceiveStream*>(audio_source);
 +  if (receive_stream->config().jitter_buffer_max_packets == kFifoBufferIndicator) {
 +    if (microphone_mixer_) {
-+      microphone_mixer_->RemoveSource(audio_source);
++      // When a secondary becomes the primary then it can happen that microphone_mixer gets
++      // created before secondary's stream is cleaned up.
++      auto sources = microphone_mixer_->audio_sources();
++      if (std::find(sources.begin(), sources.end(), audio_source) != sources.end()) {
++        microphone_mixer_->RemoveSource(audio_source);
++        return;
++      }
 +    }
++  }
++  auto sources = playback_mixer_->audio_sources();
++  // There are cases where microphone_mixer teardown happens before calls to RemoveSource().
++  // Attempt to remove non existing source causes crash.
++  if (std::find(sources.begin(), sources.end(), audio_source) != sources.end()) {
++    playback_mixer_->RemoveSource(audio_source);
 +    return;
 +  }
-+  playback_mixer_->RemoveSource(audio_source);
 +}
 +
 +void AroundAudioMixer::Mix(size_t number_of_channels,
@@ -75,6 +85,8 @@ index 0000000000000000000000000000000000000000..2f084a5105a4c29237f39c414a3b303f
 +}
 +
 +std::vector<webrtc::AudioMixer::Source*> AroundAudioMixer::audio_sources() {
++  // This is supposedly used only on secondaries to detect fifo buffer underruns and mute mic to prevent echo.
++  // On secondaries only playback_mixer is relevant.
 +  return playback_mixer_->audio_sources();
 +}
 +
@@ -140,9 +152,9 @@ index 0000000000000000000000000000000000000000..2f084a5105a4c29237f39c414a3b303f
 +  if (destination_) {
 +    have_set_destination_format_ = false;
 +    playback_device_ = audio_device;
-+    if (!microphone_mixer_) {
-+      microphone_mixer_ = webrtc::AudioMixerImpl::Create();
-+    }
++    microphone_mixer_ = webrtc::AudioMixerImpl::Create();
++    // todo:: just in case scan playback mixer for sources with fifo buffer indicator.
++    // Maybe it is possible that source from secondaries get added before this method is called?
 +    audio_bus_ = media::AudioBus::Create(1, 480);
 +    DriveWithPlayback(true);
 +  } else {
