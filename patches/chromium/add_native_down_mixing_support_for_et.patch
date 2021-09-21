@@ -3,6 +3,7 @@ From: Eldar Rello <eldar.rello@gmail.com>
 Date: Fri, 27 Aug 2021 21:53:42 +0300
 Subject: Add native down mixing support for ET
 
+Add native down mixing support to WebRTC Audio pipeline for EchoTerminator.
 
 diff --git a/third_party/blink/renderer/modules/mediastream/BUILD.gn b/third_party/blink/renderer/modules/mediastream/BUILD.gn
 index c2884478b0aa28407c36360380298e210eefac7c..95354e8e3ae974b9eb2d1cdca295c1f53df2b919 100644
@@ -444,7 +445,7 @@ index 07a203371d7211c22495bbb165c2e1b65cc656a7..8c1c256de5df7cb0bb7bf567e22c2cba
  
  std::unique_ptr<webrtc::RtpCapabilities>
 diff --git a/third_party/blink/renderer/modules/webrtc/webrtc_audio_device_impl.cc b/third_party/blink/renderer/modules/webrtc/webrtc_audio_device_impl.cc
-index c78e07ca49b77e3d9305d6de5b8206fa3310c0da..0479108e00ec429fd95b67b284deaa1059827674 100644
+index c78e07ca49b77e3d9305d6de5b8206fa3310c0da..bcb804cba5d7616eec87190f408c7cc899a4a685 100644
 --- a/third_party/blink/renderer/modules/webrtc/webrtc_audio_device_impl.cc
 +++ b/third_party/blink/renderer/modules/webrtc/webrtc_audio_device_impl.cc
 @@ -15,6 +15,7 @@
@@ -455,7 +456,15 @@ index c78e07ca49b77e3d9305d6de5b8206fa3310c0da..0479108e00ec429fd95b67b284deaa10
  
  using media::AudioParameters;
  using media::ChannelLayout;
-@@ -87,13 +88,17 @@ void WebRtcAudioDeviceImpl::RenderData(media::AudioBus* audio_bus,
+@@ -31,6 +32,7 @@ void SendLogMessage(const std::string& message) {
+ 
+ WebRtcAudioDeviceImpl::WebRtcAudioDeviceImpl()
+     : audio_processing_id_(base::UnguessableToken::Create()),
++      primary_playout_sink_(nullptr),
+       audio_transport_callback_(nullptr),
+       initialized_(false),
+       playing_(false),
+@@ -87,13 +89,17 @@ void WebRtcAudioDeviceImpl::RenderData(media::AudioBus* audio_bus,
    DCHECK_LE(audio_bus->channels(), 8);
  
    // Get 10ms audio and copy result to temporary byte buffer.
@@ -475,7 +484,7 @@ index c78e07ca49b77e3d9305d6de5b8206fa3310c0da..0479108e00ec429fd95b67b284deaa10
  
    TRACE_EVENT_BEGIN1("audio", "VoE::PullRenderData", "frames",
                       frames_per_10_ms);
-@@ -112,6 +117,23 @@ void WebRtcAudioDeviceImpl::RenderData(media::AudioBus* audio_bus,
+@@ -112,6 +118,23 @@ void WebRtcAudioDeviceImpl::RenderData(media::AudioBus* audio_bus,
  
    // Pass the render data to the playout sinks.
    base::AutoLock auto_lock(lock_);
@@ -499,7 +508,7 @@ index c78e07ca49b77e3d9305d6de5b8206fa3310c0da..0479108e00ec429fd95b67b284deaa10
    for (auto* sink : playout_sinks_)
      sink->OnPlayoutData(audio_bus, sample_rate, audio_delay);
  }
-@@ -440,6 +462,14 @@ void WebRtcAudioDeviceImpl::RemovePlayoutSink(
+@@ -440,6 +463,14 @@ void WebRtcAudioDeviceImpl::RemovePlayoutSink(
    playout_sinks_.remove(sink);
  }
  
