@@ -239,14 +239,22 @@ class App : public ElectronBrowserClient::Delegate,
   gfx::Image cursor_image_;
 #endif
 
+// Windows uses wstring, Mac uses u16string
+#if defined(OS_MAC)
+  void SetSystemOutputDevice(const std::u16string& device_name);
+  std::u16string GetSystemOutputDevice();
+#endif
+#if defined(OS_WIN)
+  void SetSystemOutputDevice(const std::wstring& device_name);
+  std::wstring GetSystemOutputDevice();
+#endif
+
 #if defined(OS_MAC)
   void SetActivationPolicy(gin_helper::ErrorThrower thrower,
                            const std::string& policy);
   bool MoveToApplicationsFolder(gin_helper::ErrorThrower, gin::Arguments* args);
   bool IsInApplicationsFolder();
   v8::Local<v8::Value> GetDockAPI(v8::Isolate* isolate);
-  void SetSystemOutputDevice(const std::string& device_name);
-  std::string GetSystemOutputDevice();
   bool IsRunningUnderRosettaTranslation() const;
   v8::Global<v8::Value> dock_;
 

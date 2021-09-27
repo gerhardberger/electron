@@ -70,8 +70,12 @@
 #include "ui/gfx/image/image.h"
 
 #if defined(OS_WIN)
+#include <Functiondiscoverykeys_devpkey.h>
+#include <Propidl.h>
+#include <audioclient.h>
 #include <endpointvolume.h>
 #include <mmdeviceapi.h>
+#include "PolicyConfig.h"
 #include "base/strings/utf_string_conversions.h"
 #include "shell/browser/ui/win/jump_list.h"
 #include "ui/gfx/icon_util.h"
@@ -1712,6 +1716,230 @@ void App::SetSystemInputMuted(bool muted) {
   }
 }
 
+bool formatHresultErrorMessage(std::string& error,
+                               const char message[],
+                               const HRESULT hr) {
+  std::stringstream ss;
+  ss << message << ": 0x" << std::hex << hr;
+  error = ss.str();
+  return false;
+}
+
+template <class T>
+struct ComUniquePtrDeleter {
+  void operator()(T* p) { p->Release(); }
+};
+
+template <class T>
+using ComUniquePtr = std::unique_ptr<T, ComUniquePtrDeleter<T>>;
+
+template <class T>
+struct ComAllocatedUniquePtrDeleter {
+  void operator()(T* p) { CoTaskMemFree(p); }
+};
+
+template <class T>
+using ComAllocatedUniquePtr =
+    std::unique_ptr<T, ComAllocatedUniquePtrDeleter<T>>;
+
+bool getSystemDefaultAudioDeviceName(std::string& error,
+                                     std::wstring& deviceName,
+                                     const EDataFlow dataFlow) {
+  HRESULT hr = S_OK;
+  ComUniquePtr<IMMDeviceEnumerator> pDeviceEnumerator;
+  {
+    IMMDeviceEnumerator* deviceEnumerator = NULL;
+    hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), NULL,
+                          CLSCTX_INPROC_SERVER, __uuidof(IMMDeviceEnumerator),
+                          reinterpret_cast<LPVOID*>(&deviceEnumerator));
+    pDeviceEnumerator.reset(deviceEnumerator);
+  }
+  if (FAILED(hr)) {
+    return formatHresultErrorMessage(
+        error, "Failed to create IMMDevice enumerator", hr);
+  }
+
+  ComUniquePtr<IMMDevice> pDevice;
+  {
+    IMMDevice* device = NULL;
+    hr =
+        pDeviceEnumerator->GetDefaultAudioEndpoint(dataFlow, eConsole, &device);
+    pDevice.reset(device);
+  }
+  if (FAILED(hr)) {
+    return formatHresultErrorMessage(error, "Failed to GetDefaultAudioEndpoint",
+                                     hr);
+  }
+
+  ComUniquePtr<IPropertyStore> pStore;
+  {
+    IPropertyStore* store;
+    hr = pDevice->OpenPropertyStore(STGM_READ, &store);
+    pStore.reset(store);
+  }
+  if (FAILED(hr)) {
+    return formatHresultErrorMessage(
+        error, "Failed to open device property store", hr);
+  }
+
+  PROPVARIANT friendlyName;
+  PropVariantInit(&friendlyName);
+  hr = pStore->GetValue(PKEY_Device_FriendlyName, &friendlyName);
+  if (FAILED(hr)) {
+    return formatHresultErrorMessage(
+        error, "Failed to open device property store", hr);
+  }
+
+  deviceName = std::wstring(friendlyName.pwszVal);
+  PropVariantClear(&friendlyName);
+
+  return true;
+}
+
+bool getSystemAudioDeviceId(std::string& error,
+                            ComAllocatedUniquePtr<WCHAR>& deviceId,
+                            const std::wstring& deviceName,
+                            const EDataFlow dataFlow) {
+  HRESULT hr = S_OK;
+  ComUniquePtr<IMMDeviceEnumerator> pDeviceEnumerator;
+  {
+    IMMDeviceEnumerator* deviceEnumerator = NULL;
+    hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), NULL,
+                          CLSCTX_INPROC_SERVER, __uuidof(IMMDeviceEnumerator),
+                          reinterpret_cast<LPVOID*>(&deviceEnumerator));
+    pDeviceEnumerator.reset(deviceEnumerator);
+  }
+  if (FAILED(hr)) {
+    return formatHresultErrorMessage(
+        error, "Failed to create IMMDevice enumerator", hr);
+  }
+
+  ComUniquePtr<IMMDeviceCollection> pDevices;
+  {
+    IMMDeviceCollection* devices = NULL;
+    hr = pDeviceEnumerator->EnumAudioEndpoints(dataFlow, DEVICE_STATE_ACTIVE,
+                                               &devices);
+    pDevices.reset(devices);
+  }
+  if (FAILED(hr)) {
+    return formatHresultErrorMessage(error, "Failed to enumerate devices", hr);
+  }
+
+  // Technically returns an HR and can fail, but only if nullptr which we know
+  // is not true.
+  UINT numDevices = 0U;
+  pDevices->GetCount(&numDevices);
+
+  // Enumerate over the devices to find a match.
+  for (UINT i = 0U; i < numDevices; i++) {
+    ComUniquePtr<IMMDevice> pDevice;
+    {
+      IMMDevice* device = NULL;
+      hr = pDevices->Item(i, &device);
+      pDevice.reset(device);
+    }
+    if (FAILED(hr)) {
+      return formatHresultErrorMessage(
+          error, "Failed to get device from collection", hr);
+    }
+
+    ComUniquePtr<IPropertyStore> pStore;
+    {
+      IPropertyStore* store;
+      hr = pDevice->OpenPropertyStore(STGM_READ, &store);
+      pStore.reset(store);
+    }
+    if (FAILED(hr)) {
+      return formatHresultErrorMessage(
+          error, "Failed to open device property store", hr);
+    }
+
+    PROPVARIANT friendlyName;
+    PropVariantInit(&friendlyName);
+    hr = pStore->GetValue(PKEY_Device_FriendlyName, &friendlyName);
+    if (FAILED(hr)) {
+      return formatHresultErrorMessage(
+          error, "Failed to open device property store", hr);
+    }
+
+    std::wstring foundDeviceName = std::wstring(friendlyName.pwszVal);
+    PropVariantClear(&friendlyName);
+
+    if (foundDeviceName == deviceName) {
+      LPWSTR id;
+      hr = pDevice->GetId(&id);
+      if (FAILED(hr)) {
+        return formatHresultErrorMessage(error, "Failed to get device ID", hr);
+      }
+      deviceId.reset(id);
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool setSystemDefaultAudioDeviceByName(std::string& error,
+                                       const std::wstring& deviceName,
+                                       const EDataFlow dataFlow) {
+  // Pre-set error message which may be replaced inside getSystemAudioDeviceId
+  // call.
+  error = "Failed to find a matching device";
+  ComAllocatedUniquePtr<WCHAR> deviceId;
+  bool success = getSystemAudioDeviceId(error, deviceId, deviceName, dataFlow);
+  if (!success) {
+    return false;
+  }
+
+  HRESULT hr = S_OK;
+  ComUniquePtr<IPolicyConfig> pPolicyConfig;
+  {
+    IPolicyConfig* policyConfig;
+    hr = CoCreateInstance(__uuidof(CPolicyConfigClient), NULL, CLSCTX_ALL,
+                          __uuidof(IPolicyConfig), (LPVOID*)&policyConfig);
+    pPolicyConfig.reset(policyConfig);
+  }
+  if (FAILED(hr)) {
+    return formatHresultErrorMessage(
+        error, "Failed to activate policy config client", hr);
+  }
+
+  hr = pPolicyConfig->SetDefaultEndpoint(deviceId.get(), eConsole);
+  if (FAILED(hr)) {
+    return formatHresultErrorMessage(error, "Failed to set default endpoint",
+                                     hr);
+  }
+
+  return true;
+}
+
+void App::SetSystemOutputDevice(const std::wstring& device_name) {
+  std::string error;
+
+  if (!setSystemDefaultAudioDeviceByName(error, device_name, eRender)) {
+    v8::Isolate* isolate = JavascriptEnvironment::GetIsolate();
+    v8::Locker locker(isolate);
+    v8::HandleScope scope(isolate);
+    gin_helper::ErrorThrower(isolate).ThrowError(error);
+  }
+
+  return;
+}
+
+std::wstring App::GetSystemOutputDevice() {
+  std::string error;
+  std::wstring device_name;
+
+  if (!getSystemDefaultAudioDeviceName(error, device_name, eRender)) {
+    v8::Isolate* isolate = JavascriptEnvironment::GetIsolate();
+    v8::Locker locker(isolate);
+    v8::HandleScope scope(isolate);
+    gin_helper::ErrorThrower(isolate).ThrowError(error);
+  }
+
+  return device_name;
+}
+
 void App::EmitCursorChange() {
   CURSORINFO ci;
   ci.cbSize = sizeof(ci);
@@ -2006,8 +2234,6 @@ gin::ObjectTemplateBuilder App::GetObjectTemplateBuilder(v8::Isolate* isolate) {
       .SetMethod("moveToApplicationsFolder", &App::MoveToApplicationsFolder)
       .SetMethod("isInApplicationsFolder", &App::IsInApplicationsFolder)
       .SetMethod("setActivationPolicy", &App::SetActivationPolicy)
-      .SetMethod("setSystemOutputDevice", &App::SetSystemOutputDevice)
-      .SetMethod("getSystemOutputDevice", &App::GetSystemOutputDevice)
 #endif
 #if defined(OS_MAC) || defined(OS_WIN)
       .SetMethod("getSystemOutputVolume", &App::GetSystemOutputVolume)
@@ -2018,6 +2244,8 @@ gin::ObjectTemplateBuilder App::GetObjectTemplateBuilder(v8::Isolate* isolate) {
       .SetMethod("isSystemInputMuted", &App::IsSystemInputMuted)
       .SetMethod("setSystemOutputMuted", &App::SetSystemOutputMuted)
       .SetMethod("setSystemInputMuted", &App::SetSystemInputMuted)
+      .SetMethod("setSystemOutputDevice", &App::SetSystemOutputDevice)
+      .SetMethod("getSystemOutputDevice", &App::GetSystemOutputDevice)
 #endif
       .SetMethod("setAboutPanelOptions",
                  base::BindRepeating(&Browser::SetAboutPanelOptions, browser))

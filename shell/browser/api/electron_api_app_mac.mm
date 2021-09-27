@@ -52,9 +52,10 @@ AudioDeviceID obtainDefaultAudioDevice(AudioObjectPropertySelector selector) {
  * scope: kAudioDevicePropertyScopeInput | kAudioDevicePropertyScopeOutput
  * returns: false if error
  */
-bool setSystemDefaultAudioDeviceByName(std::string& error,
-                                       const std::string& requestedDeviceName,
-                                       const AudioObjectPropertyScope& scope) {
+bool setSystemDefaultAudioDeviceByName(
+    std::string& error,
+    const std::u16string& requestedDeviceName,
+    const AudioObjectPropertyScope& scope) {
   OSStatus status = kAudioHardwareNoError;
   CFStringRef deviceNameCfString = nullptr;
   UInt32 propertySize = 0;
@@ -103,7 +104,7 @@ bool setSystemDefaultAudioDeviceByName(std::string& error,
       return false;
     }
 
-    std::string deviceName = base::SysCFStringRefToUTF8(deviceNameCfString);
+    std::u16string deviceName = base::SysCFStringRefToUTF16(deviceNameCfString);
     CFRelease(deviceNameCfString);
 
     // Determine device type.
@@ -114,7 +115,7 @@ bool setSystemDefaultAudioDeviceByName(std::string& error,
                                         NULL, &propertySize, &bufferList);
     if (status != kAudioHardwareNoError) {
       error = (std::string("Error determing device type | OSStatus:") +
-               std::to_string(status) + std::string(" name:") + deviceName);
+               std::to_string(status));
       return false;
     }
 
@@ -133,7 +134,7 @@ bool setSystemDefaultAudioDeviceByName(std::string& error,
                                           sizeof(AudioObjectID), &devices[i]);
       if (status != kAudioHardwareNoError) {
         error = (std::string("Error setting device as default | OSStatus:") +
-                 std::to_string(status) + std::string(" name:") + deviceName);
+                 std::to_string(status));
         return false;
       }
 
@@ -141,7 +142,7 @@ bool setSystemDefaultAudioDeviceByName(std::string& error,
     }
   }
 
-  error = (std::string("No matching device found for: ") + requestedDeviceName);
+  error = std::string("No matching device found");
   return false;
 }
 
@@ -154,7 +155,7 @@ bool setSystemDefaultAudioDeviceByName(std::string& error,
  * returns: false if error
  */
 bool getSystemDefaultAudioDeviceName(std::string& error,
-                                     std::string& deviceName,
+                                     std::u16string& deviceName,
                                      const AudioObjectPropertyScope& scope) {
   OSStatus status = kAudioHardwareNoError;
   AudioObjectID deviceId = kAudioObjectUnknown;
@@ -192,7 +193,7 @@ bool getSystemDefaultAudioDeviceName(std::string& error,
     return false;
   }
 
-  deviceName = base::SysCFStringRefToUTF8(deviceNameCfString);
+  deviceName = base::SysCFStringRefToUTF16(deviceNameCfString);
   CFRelease(deviceNameCfString);
 
   return true;
@@ -439,7 +440,7 @@ void App::SetSystemInputMuted(bool muted) {
       kAudioDevicePropertyScopeInput);
 }
 
-void App::SetSystemOutputDevice(const std::string& device_name) {
+void App::SetSystemOutputDevice(const std::u16string& device_name) {
   std::string error;
 
   if (!setSystemDefaultAudioDeviceByName(error, device_name,
@@ -453,9 +454,9 @@ void App::SetSystemOutputDevice(const std::string& device_name) {
   return;
 }
 
-std::string App::GetSystemOutputDevice() {
+std::u16string App::GetSystemOutputDevice() {
   std::string error;
-  std::string device_name;
+  std::u16string device_name;
 
   if (!getSystemDefaultAudioDeviceName(error, device_name,
                                        kAudioDevicePropertyScopeOutput)) {
@@ -467,9 +468,6 @@ std::string App::GetSystemOutputDevice() {
 
   return device_name;
 }
-
-void SetSystemOutputDevice(const std::string& device_name);
-std::string GetSystemOutputDevice();
 
 void App::SetAppLogsPath(gin_helper::ErrorThrower thrower,
                          absl::optional<base::FilePath> custom_path) {
