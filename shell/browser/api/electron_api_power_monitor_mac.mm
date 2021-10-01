@@ -123,14 +123,16 @@ void PowerMonitor::InitPlatformSpecificMonitors() {
 }
 
 int PowerMonitor::GetCPUPowerSpeedLimit() {
+  // If we fail to get CPU limit, return 100.
+  int cpuSpeedLimit = 100;
   CFDictionaryRef cfCPUPowerStatus;
-  IOPMCopyCPUPowerStatus(&cfCPUPowerStatus);
-
-  NSDictionary* cpuPowerStatus = (__bridge NSDictionary*)cfCPUPowerStatus;
-  NSString* key = @kIOPMCPUPowerLimitProcessorSpeedKey;
-  int cpuSpeedLimit = [cpuPowerStatus[key] intValue];
-  [key release];
-  CFRelease(cfCPUPowerStatus);
+  if (IOPMCopyCPUPowerStatus(&cfCPUPowerStatus) == kIOReturnSuccess) {
+    NSDictionary* cpuPowerStatus = (__bridge NSDictionary*)cfCPUPowerStatus;
+    NSString* key = @kIOPMCPUPowerLimitProcessorSpeedKey;
+    cpuSpeedLimit = [cpuPowerStatus[key] intValue];
+    [key release];
+    CFRelease(cfCPUPowerStatus);
+  }
 
   return cpuSpeedLimit;
 }
