@@ -7,7 +7,9 @@
 
 #include "base/path_service.h"
 #include "base/strings/sys_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
+#include "media/audio/mac/core_audio_util_mac.h"
 #include "shell/browser/api/electron_api_app.h"
 #include "shell/common/api/electron_api_native_image.h"
 #include "shell/common/electron_paths.h"
@@ -53,56 +55,16 @@ bool getAudioDeviceNameFromDeviceId(
     const AudioObjectID& deviceId /*input*/,
     std::u16string& deviceName /*output*/,
     std::string& error /*output*/) {
-  // First we try to take the name from the device "source"
-  // and if that comes back blank then we take the normal friendly name. See
-  // media/audio/mac/core_audio_util_mac.cc :: GetDeviceLabel()
-  OSStatus status = kAudioHardwareNoError;
-  CFStringRef deviceNameCfString = nullptr;
-  UInt32 propertySize = 0;
+  // Use Chromium's implementation.
+  auto label = media::core_audio_mac::GetDeviceLabel(
+      deviceId, scope == kAudioDevicePropertyScopeInput ? true : false);
 
-  // Try to use source for getting the name
-  AudioObjectPropertyAddress deviceSourceAddress = {
-      kAudioDevicePropertyDataSource, scope, kAudioObjectPropertyElementMaster};
-  UInt32 sourceId = 0;
-  status = AudioObjectGetPropertyData(deviceId, &deviceSourceAddress, 0, NULL,
-                                      &propertySize, &sourceId);
-  if (status == kAudioHardwareNoError && sourceId != 0) {
-    AudioValueTranslation translation;
-    translation.mInputData = &sourceId;
-    translation.mInputDataSize = sizeof(sourceId);
-    translation.mOutputData = &deviceNameCfString;
-    translation.mOutputDataSize = sizeof(deviceNameCfString);
-
-    propertySize = sizeof(translation);
-    AudioObjectPropertyAddress propertyAddress = {
-        kAudioDevicePropertyDataSourceNameForIDCFString, scope,
-        kAudioObjectPropertyElementMaster};
-    status = AudioObjectGetPropertyData(
-        deviceId, &propertyAddress, 0 /* inQualifierDataSize */,
-        nullptr /* inQualifierData */, &propertySize, &translation);
-    if (status != kAudioHardwareNoError) {
-      // Don't error out, try normal friendly name below.
-      deviceNameCfString = nullptr;
-    }
+  if (!label.has_value()) {
+    error = "Failed to get device label";
+    return false;
   }
 
-  // If still null, try normal friendly name
-  if (deviceNameCfString == nullptr) {
-    AudioObjectPropertyAddress propertyAddress = {
-        kAudioObjectPropertyName, kAudioObjectPropertyScopeGlobal,
-        kAudioObjectPropertyElementMaster};
-    propertySize = sizeof(deviceNameCfString);
-    status = AudioObjectGetPropertyData(deviceId, &propertyAddress, 0, NULL,
-                                        &propertySize, &deviceNameCfString);
-    if (status != kAudioHardwareNoError) {
-      error = (std::string("Error getting device name from ID | OSStatus:") +
-               std::to_string(status));
-      return false;
-    }
-  }
-
-  deviceName = base::SysCFStringRefToUTF16(deviceNameCfString);
-  CFRelease(deviceNameCfString);
+  deviceName = base::UTF8ToUTF16(*label);
   return true;
 }
 
@@ -123,9 +85,6 @@ bool setSystemDefaultAudioDeviceByName(
 
   AudioObjectPropertyAddress globalScopeAddress = {
       0, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMaster};
-  AudioObjectPropertyAddress specificScopeAddress = {
-      scope, kAudioDevicePropertyScopeOutput,
-      kAudioObjectPropertyElementMaster};
 
   // Get the size of the array of aduio devices.
   globalScopeAddress.mSelector = kAudioHardwarePropertyDevices;
@@ -153,28 +112,36 @@ bool setSystemDefaultAudioDeviceByName(
       AudioObjectGetPropertyData(kAudioObjectSystemObject, &globalScopeAddress,
                                  0, nullptr, &propertySize, devices.data());
 
+  bool lookingForOutputDevices =
+      scope == kAudioDevicePropertyScopeInput ? false : true;
   for (size_t i = 0U; i < numberOfDevices; i++) {
-    // Get the device name.
-    std::u16string deviceName;
-    if (!getAudioDeviceNameFromDeviceId(scope, devices[i], deviceName, error)) {
-      return false;
-    }
-
-    if (deviceName == requestedDeviceName) {
-      specificScopeAddress.mSelector =
-          scope == kAudioDevicePropertyScopeInput
-              ? kAudioHardwarePropertyDefaultInputDevice
-              : kAudioHardwarePropertyDefaultOutputDevice;
-      status = AudioObjectSetPropertyData(kAudioObjectSystemObject,
-                                          &specificScopeAddress, 0, NULL,
-                                          sizeof(AudioObjectID), &devices[i]);
-      if (status != kAudioHardwareNoError) {
-        error = (std::string("Error setting device as default | OSStatus:") +
-                 std::to_string(status));
+    // Check that the direction is correct.
+    if (media::core_audio_mac::IsOutputDevice(devices[i]) &&
+        lookingForOutputDevices) {
+      // Get the device name.
+      std::u16string deviceName;
+      if (!getAudioDeviceNameFromDeviceId(scope, devices[i], deviceName,
+                                          error)) {
         return false;
       }
 
-      return true;
+      if (deviceName == requestedDeviceName) {
+        AudioObjectPropertyAddress address = {
+            scope == kAudioDevicePropertyScopeInput
+                ? kAudioHardwarePropertyDefaultInputDevice
+                : kAudioHardwarePropertyDefaultOutputDevice,
+            scope, kAudioObjectPropertyElementMaster};
+        status = AudioObjectSetPropertyData(kAudioObjectSystemObject, &address,
+                                            0, NULL, sizeof(AudioObjectID),
+                                            &devices[i]);
+        if (status != kAudioHardwareNoError) {
+          error = (std::string("Error setting device as default | OSStatus:") +
+                   std::to_string(status));
+          return false;
+        }
+
+        return true;
+      }
     }
   }
 
