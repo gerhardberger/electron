@@ -293,7 +293,7 @@ index 0000000000000000000000000000000000000000..06631d765fcab296a1a47f13ca2d8085
 +
 +#endif  //THIRD_PARTY_BLINK_RENDERER_MODULES_MEDIASTREAM_AROUND_AUDIO_MIXER_H
 diff --git a/third_party/blink/renderer/modules/mediastream/media_stream.cc b/third_party/blink/renderer/modules/mediastream/media_stream.cc
-index e010f2b3f75a321670510035a09c1f1399cd68f9..093ef5da0b46de37180f7b31f6ca849c78911d29 100644
+index e010f2b3f75a321670510035a09c1f1399cd68f9..fa0d4f700bf1e696a379f2ad82af591f8163e330 100644
 --- a/third_party/blink/renderer/modules/mediastream/media_stream.cc
 +++ b/third_party/blink/renderer/modules/mediastream/media_stream.cc
 @@ -28,14 +28,35 @@
@@ -324,7 +324,7 @@ index e010f2b3f75a321670510035a09c1f1399cd68f9..093ef5da0b46de37180f7b31f6ca849c
 +// which has to be subtracted from 200.
 +const int kLocalPlaybackDelay = 16;
 +#else
-+const int kLocalPlaybackDelay = 20;
++const int kLocalPlaybackDelay = 21;     //210ms
 +#endif
 +
 +}
