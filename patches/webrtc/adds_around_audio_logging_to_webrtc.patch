@@ -153,148 +153,164 @@ index 0000000000000000000000000000000000000000..c792330b975ef72b1625323536b9e0c8
 +#endif
 diff --git a/modules/audio_processing/around_common/performance_stats.cc b/modules/audio_processing/around_common/performance_stats.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..fd169c46d23721e88930e33f83bdcda075db54bc
+index 0000000000000000000000000000000000000000..c01bd2f0958b43ef2341768e9a56135a5e268a14
 --- /dev/null
 +++ b/modules/audio_processing/around_common/performance_stats.cc
-@@ -0,0 +1,53 @@
+@@ -0,0 +1,55 @@
 +#include "performance_stats.h"
++
 +#include <algorithm>
 +
 +namespace webrtc {
 +
-+  PerformanceStats::PerformanceStats() : mCategories() {
-+  }
++PerformanceStats::PerformanceStats() : mCategories() {}
 +
-+  void PerformanceStats::AddCategory(const std::string& categoryName) {
-+    mCategories.emplace(std::make_pair(std::string(categoryName), StatsEntry()));
-+  }
++void PerformanceStats::AddCategory(const std::string& categoryName) {
++  mCategories.emplace(std::make_pair(std::string(categoryName), StatsEntry()));
++}
 +
-+  void PerformanceStats::AddMeasurement(const std::string& categoryName, const float& x, const bool incrementCount) {
-+    auto& stats = mCategories.at(categoryName);
-+    stats.max = std::max(stats.max, x);
-+    stats.min = std::min(stats.min, x);
-+    stats.total += x;
-+    if (incrementCount)
-+    {
-+      ++stats.count;
-+    }
++void PerformanceStats::AddMeasurement(const std::string& categoryName,
++                                      const float& x,
++                                      const bool incrementCount) {
++  auto& stats = mCategories.at(categoryName);
++  stats.max = std::max(stats.max, x);
++  stats.min = std::min(stats.min, x);
++  stats.total += x;
++  if (incrementCount) {
++    ++stats.count;
 +  }
++}
 +
-+  void PerformanceStats::ResetCategory(const std::string& categoryName) {
-+    mCategories.at(categoryName).Reset();
++void PerformanceStats::ResetCategory(const std::string& categoryName) {
++  mCategories.at(categoryName).Reset();
++}
++
++void PerformanceStats::ResetAll() {
++  for (auto& c : mCategories) {
++    c.second.Reset();
 +  }
++}
 +
-+  void PerformanceStats::ResetAll()
-+  {
-+    for (auto& c : mCategories)
-+    {
++std::string PerformanceStats::ToString(const std::string& logPrefix,
++                                       const bool resetStats) {
++  std::string s = logPrefix;
++  s.reserve(mCategories.size() * 50);
++  s.append("{");
++  for (auto& c : mCategories) {
++    s.append("\"")
++        .append(c.first)
++        .append("\":{")
++        .append(c.second.ToString())
++        .append("},");
++    if (resetStats) {
 +      c.second.Reset();
 +    }
 +  }
-+
-+  std::string PerformanceStats::ToString(const bool resetStats)
-+  {
-+    std::string s;
-+    s.reserve(mCategories.size() * 50);
-+    for (auto& c : mCategories)
-+    {
-+      s.append(c.first).append(": { ").append(c.second.ToString()).append(" }, ");
-+      if (resetStats)
-+      {
-+        c.second.Reset();
-+      }
-+    }
-+    s.pop_back(); // pop ' '
-+    s.pop_back(); // pop ','
-+    return s;
-+  }
-+
++  s.pop_back();  // remove final ','
++  s.append("}");
++  return s;
 +}
++
++}  // namespace webrtc
 diff --git a/modules/audio_processing/around_common/performance_stats.h b/modules/audio_processing/around_common/performance_stats.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..75c85ef50cda95348d94d9fd2cf186eb72717aeb
+index 0000000000000000000000000000000000000000..47556caa3b725f18d25a0e30ff32f7b298b141a8
 --- /dev/null
 +++ b/modules/audio_processing/around_common/performance_stats.h
-@@ -0,0 +1,81 @@
+@@ -0,0 +1,95 @@
 +#ifndef MODULES_AUDIO_PROCESSING_LOG_THROTTLE_H_
 +#define MODULES_AUDIO_PROCESSING_LOG_THROTTLE_H_
 +
++#include <limits>
 +#include <string>
 +#include <unordered_map>
-+#include <limits>
-+#include "timer_context.h"
++
 +#include "around_log.h"
++#include "timer_context.h"
 +
 +namespace webrtc {
 +
-+  // Helper class that provides ability to measure statistics for arbitrary named categories.
-+  class PerformanceStats {
-+  public:
++// Helper class that provides ability to measure statistics for arbitrary named
++// categories.
++class PerformanceStats {
++ public:
++  // Statistics entry for a category. T must be a fundamental type that can be
++  // converted to string using std::to_string.
++  struct StatsEntry {
++    StatsEntry() noexcept
++        : min(std::numeric_limits<float>::max()),
++          max(std::numeric_limits<float>::lowest()),
++          total(0.0f),
++          count(0U) {}
 +
-+    // Statistics entry for a category. T must be a fundamental type that can be converted
-+    // to string using std::to_string.
-+    struct StatsEntry {
-+      StatsEntry() noexcept :
-+        min(std::numeric_limits<float>::max()),
-+        max(std::numeric_limits<float>::lowest()),
-+        total(0.0f),
-+        count(0U) {
++    // Resets the object stats.
++    inline void Reset() noexcept {
++      min = std::numeric_limits<float>::max();
++      max = std::numeric_limits<float>::lowest();
++      total = 0.0f;
++      count = 0U;
++    }
++
++    // Prints a JSON-like string representing the current stats.
++    inline std::string ToString() {
++      float mean;
++      if (count > 0U) {
++        mean = total / count;
++      } else {
++        mean = 0.0f;
++        min = 0.0f;
++        max = 0.0f;
 +      }
++      std::string s;
++      s.append("\"min\":")
++          .append(std::to_string(min))
++          .append(",\"mean\":")
++          .append(std::to_string(mean))
++          .append(",\"max\":")
++          .append(std::to_string(max))
++          .append(",\"count\":")
++          .append(std::to_string(count));
++      return s;
++    }
 +
-+      // Resets the object stats.
-+      inline void Reset() noexcept {
-+        min = std::numeric_limits<float>::max();
-+        max = std::numeric_limits<float>::lowest();
-+        total = 0.0f;
-+        count = 0U;
-+      }
-+
-+      // Prints a JSON-like string representing the current stats.
-+      inline std::string ToString() {
-+        float mean = count > 0U ? (total / count) : 0.0f;
-+        std::string s;
-+        s.append("min: ").append(std::to_string(min))
-+          .append(", mean: ").append(std::to_string(mean))
-+          .append(", max: ").append(std::to_string(max))
-+          .append(", total: ").append(std::to_string(total))
-+          .append(", count: ").append(std::to_string(count));
-+          return s;
-+      }
-+
-+      float min;
-+      float max;
-+      float total;
-+      size_t count;
-+    };
-+
-+    // Constructs an instance of performance stats with no initial categories.
-+    PerformanceStats();
-+
-+    // Registers a new category with the PerformanceStats instance, creating a StatsEntry
-+    // to hold future stats entries. Propagates any exceptions from std::unordered_map.
-+    void AddCategory(const std::string& categoryName);
-+
-+    // Adds a new measurement for an existing category. Category must exist.
-+    // Propagates any exceptions from std::unordered_map. If `incrementCount` is false,
-+    // then the count is not increased on each measurement.
-+    void AddMeasurement(const std::string& categoryName, const float& x,
-+      const bool incrementCount = true);
-+
-+    // Resets all measurements for the given category. Category must exist.
-+    // Propagates any exceptions from std::unordered_map.
-+    void ResetCategory(const std::string& categoryName);
-+
-+    // Resets all stats in all categories.
-+    void ResetAll();
-+
-+    // Prints all of the current stats to JSON-like string and optionally resets counters.
-+    std::string ToString(const bool resetStats = false);
-+
-+  private:
-+    std::unordered_map<std::string, StatsEntry> mCategories;
++    float min;
++    float max;
++    float total;
++    size_t count;
 +  };
 +
-+}
++  // Constructs an instance of performance stats with no initial categories.
++  PerformanceStats();
++
++  // Registers a new category with the PerformanceStats instance, creating a
++  // StatsEntry to hold future stats entries. Propagates any exceptions from
++  // std::unordered_map.
++  void AddCategory(const std::string& categoryName);
++
++  // Adds a new measurement for an existing category. Category must exist.
++  // Propagates any exceptions from std::unordered_map. If `incrementCount` is
++  // false, then the count is not increased on each measurement.
++  void AddMeasurement(const std::string& categoryName,
++                      const float& x,
++                      const bool incrementCount = true);
++
++  // Resets all measurements for the given category. Category must exist.
++  // Propagates any exceptions from std::unordered_map.
++  void ResetCategory(const std::string& categoryName);
++
++  // Resets all stats in all categories.
++  void ResetAll();
++
++  // Prints all of the current stats to JSON string and optionally resets
++  // counters. If given prefix will be prepended to the string.
++  std::string ToString(const std::string& logPrefix = "",
++                       const bool resetStats = false);
++
++ private:
++  std::unordered_map<std::string, StatsEntry> mCategories;
++};
++
++}  // namespace webrtc
 +
 +#endif
 diff --git a/modules/audio_processing/around_common/timer_context.h b/modules/audio_processing/around_common/timer_context.h
@@ -359,7 +375,7 @@ index 0000000000000000000000000000000000000000..0b0741c7262d0fe0c986e108099f8e8d
 +
 +#endif
 diff --git a/modules/audio_processing/audio_processing_impl.cc b/modules/audio_processing/audio_processing_impl.cc
-index b322d2016440742df3157d6547a5628e26e647f1..0c54c32aeabc8f30c68a1d9f849ac12015a454b7 100644
+index b322d2016440742df3157d6547a5628e26e647f1..3e99ce4020f8c26007e14ca131538335a99deea1 100644
 --- a/modules/audio_processing/audio_processing_impl.cc
 +++ b/modules/audio_processing/audio_processing_impl.cc
 @@ -271,6 +271,8 @@ AudioProcessingImpl::AudioProcessingImpl(
@@ -718,11 +734,11 @@ index b322d2016440742df3157d6547a5628e26e647f1..0c54c32aeabc8f30c68a1d9f849ac120
 +
 +  if (around_log_control_.processing_time_stats) {
 +    LOG_THROTTLE(around_log_control_.stats_log_period)
-+      << processing_time_stats_.ToString(true) << LOG_ENDL;
++      << processing_time_stats_.ToString("ProcessingTimeStats", true) << LOG_ENDL;
 +  }
 +  if (around_log_control_.pipeline_stats) {
 +    LOG_THROTTLE(around_log_control_.stats_log_period)
-+      << pipeline_stats_.ToString(true) << LOG_ENDL;
++      << pipeline_stats_.ToString("PipelineStats", true) << LOG_ENDL;
 +  }
 +
    return kNoError;
