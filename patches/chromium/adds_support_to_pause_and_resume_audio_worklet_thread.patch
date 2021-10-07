@@ -8,7 +8,7 @@ This patch adds support using the around-dc internal datachannel to pause and re
 Signed-off-by: gellert <gellert.hegyi@around.co>
 
 diff --git a/third_party/blink/renderer/platform/audio/audio_destination.cc b/third_party/blink/renderer/platform/audio/audio_destination.cc
-index d32f68ce9771a304ac998cb506f575e3dd58bb45..4cd8797eefba5b18c982c4df820550ca53944693 100644
+index 0cfcf81a327418830f83c5198799c6cdd592540e..e7ec437841854d7a5153f93f1e354fe4ee0b086c 100644
 --- a/third_party/blink/renderer/platform/audio/audio_destination.cc
 +++ b/third_party/blink/renderer/platform/audio/audio_destination.cc
 @@ -213,15 +213,17 @@ void AudioDestination::Render(const WebVector<float*>& destination_data,
@@ -38,7 +38,7 @@ index d32f68ce9771a304ac998cb506f575e3dd58bb45..4cd8797eefba5b18c982c4df820550ca
    } else {
      // Otherwise use the single-thread rendering.
      size_t frames_to_render = fifo_->Pull(output_bus_.get(), number_of_frames);
-@@ -325,6 +327,8 @@ void AudioDestination::StartWithWorkletTaskRunner(
+@@ -324,6 +326,8 @@ void AudioDestination::StartWithWorkletTaskRunner(
    worklet_task_runner_ = std::move(worklet_task_runner);
    web_audio_device_->Start();
    SetDeviceState(DeviceState::kRunning);
@@ -47,7 +47,7 @@ index d32f68ce9771a304ac998cb506f575e3dd58bb45..4cd8797eefba5b18c982c4df820550ca
  }
  
  void AudioDestination::Stop() {
-@@ -332,6 +336,8 @@ void AudioDestination::Stop() {
+@@ -331,6 +335,8 @@ void AudioDestination::Stop() {
    TRACE_EVENT0("webaudio", "AudioDestination::Stop");
    SendLogMessage(String::Format("%s", __func__));
  
@@ -56,7 +56,7 @@ index d32f68ce9771a304ac998cb506f575e3dd58bb45..4cd8797eefba5b18c982c4df820550ca
    if (device_state_ == DeviceState::kStopped)
      return;
    web_audio_device_->Stop();
-@@ -443,4 +449,10 @@ void AudioDestination::SendLogMessage(const String& message) {
+@@ -442,4 +448,10 @@ void AudioDestination::SendLogMessage(const String& message) {
                         .Utf8());
  }
  
@@ -68,7 +68,7 @@ index d32f68ce9771a304ac998cb506f575e3dd58bb45..4cd8797eefba5b18c982c4df820550ca
 +
  }  // namespace blink
 diff --git a/third_party/blink/renderer/platform/audio/audio_destination.h b/third_party/blink/renderer/platform/audio/audio_destination.h
-index 8a9b79dec559c80f973becb3504dc2bd5c158c34..dad2607b8c1fe39fd1e38aac1d2af034dfaf282b 100644
+index 3a9dfbb560db7497982c3b8f9833cabb6ff14d45..6f839873c21b894bace6771b192df295e10887fb 100644
 --- a/third_party/blink/renderer/platform/audio/audio_destination.h
 +++ b/third_party/blink/renderer/platform/audio/audio_destination.h
 @@ -42,6 +42,7 @@

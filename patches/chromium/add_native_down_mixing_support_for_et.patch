@@ -6,7 +6,7 @@ Subject: Add native down mixing support for ET
 Add native down mixing support to WebRTC Audio pipeline for EchoTerminator.
 
 diff --git a/third_party/blink/renderer/modules/mediastream/BUILD.gn b/third_party/blink/renderer/modules/mediastream/BUILD.gn
-index c2884478b0aa28407c36360380298e210eefac7c..95354e8e3ae974b9eb2d1cdca295c1f53df2b919 100644
+index 108eb4cbfe26bb833e78ba32b36eeb985488001d..1f303dd09da91523c320d23140ee3440bf7e613d 100644
 --- a/third_party/blink/renderer/modules/mediastream/BUILD.gn
 +++ b/third_party/blink/renderer/modules/mediastream/BUILD.gn
 @@ -10,6 +10,8 @@ blink_modules_sources("mediastream") {

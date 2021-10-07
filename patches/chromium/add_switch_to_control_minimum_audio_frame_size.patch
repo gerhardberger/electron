@@ -6,10 +6,10 @@ Subject: add switch to control minimum audio frame size
 This patch adds a switch to control minimum audio frame size.
 
 diff --git a/content/browser/renderer_host/render_process_host_impl.cc b/content/browser/renderer_host/render_process_host_impl.cc
-index bd24cb0f6edc37bf23c40f0a7839a2f5d85c9a01..d844e60f0bed9489c0c104defff314417b40b4d4 100644
+index 1ca7025f2271edb28229877f37337369340cf5cc..e4761990dda4501bb99416b8cfe2571cbccbf0dd 100644
 --- a/content/browser/renderer_host/render_process_host_impl.cc
 +++ b/content/browser/renderer_host/render_process_host_impl.cc
-@@ -3443,6 +3443,7 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
+@@ -3403,6 +3403,7 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
      switches::kAllowLoopbackInPeerConnection,
      switches::kAndroidFontsPath,
      switches::kAudioBufferSize,
@@ -18,10 +18,10 @@ index bd24cb0f6edc37bf23c40f0a7839a2f5d85c9a01..d844e60f0bed9489c0c104defff31441
      switches::kMojoCoreLibraryPath,
      switches::kDisable2dCanvasImageChromium,
 diff --git a/content/browser/utility_process_host.cc b/content/browser/utility_process_host.cc
-index dc2de5687268e0692086543ed688799d350e4e32..9e44fe6591569487a23d650cca13f19e6c7a3582 100644
+index a2526f669b892079ef1634a6c886d627e3d76682..df018de76a44847d85358628c021117a1f16f1b6 100644
 --- a/content/browser/utility_process_host.cc
 +++ b/content/browser/utility_process_host.cc
-@@ -271,6 +271,7 @@ bool UtilityProcessHost::StartProcess() {
+@@ -272,6 +272,7 @@ bool UtilityProcessHost::StartProcess() {
        switches::kEnableExperimentalWebPlatformFeatures,
        // These flags are used by the audio service:
        switches::kAudioBufferSize,
@@ -60,7 +60,7 @@ index f58ac1d55acac1895391579275a12b0f9802491d..9228c6ef6d7e05ac67bd3f9e97725eca
    if (buffer_size < minimum)
      buffer_size = minimum;
 diff --git a/media/base/media_switches.cc b/media/base/media_switches.cc
-index 039681128b9f9cee2bb565ec9ac393995dd06a14..13f077e700e561276c2ce85d4df3fba951e230b0 100644
+index 9b32170f896084ba22aa5901a961581a5bacb239..93ed2d58f274ea9ed88ae591743e7d8b440e7eba 100644
 --- a/media/base/media_switches.cc
 +++ b/media/base/media_switches.cc
 @@ -19,6 +19,10 @@
@@ -75,7 +75,7 @@ index 039681128b9f9cee2bb565ec9ac393995dd06a14..13f077e700e561276c2ce85d4df3fba9
  const char kAudioBufferSize[] = "audio-buffer-size";
  
 diff --git a/media/base/media_switches.h b/media/base/media_switches.h
-index 4a8a693426930e62b5d2d19aac1a5c4927076f36..330500692d9933509c2c50c16b2d7e3c4f33d551 100644
+index 4e79508bc27767e7ddf61929ead29a4baa85f3c8..38ebd21fd27d7bc9d330c31aca66822f20cb4fe4 100644
 --- a/media/base/media_switches.h
 +++ b/media/base/media_switches.h
 @@ -22,6 +22,8 @@ class CommandLine;

@@ -64,7 +64,7 @@ index 995ada6aa5d53f76f1672cb95040299722da8fd1..ad79d458028104c4a285c3abe88ca740
    virtual void OnHostMovedInPixels(WindowTreeHost* host,
                                     const gfx::Point& new_origin_in_pixels) {}
 diff --git a/ui/aura/window_tree_host_platform.cc b/ui/aura/window_tree_host_platform.cc
-index 95ffa4fef39b6df842cf543308cbb8a832af48ef..d1be5cc60bdf304b0087b30148f07e31e7822e84 100644
+index e793e0812cfaa765417c8da8afd13cae4ced0b64..4bea4ab9156f13cdfd3081c783f8f0a7a31778b2 100644
 --- a/ui/aura/window_tree_host_platform.cc
 +++ b/ui/aura/window_tree_host_platform.cc
 @@ -208,6 +208,16 @@ void WindowTreeHostPlatform::LockMouse(Window* window) {
@@ -85,7 +85,7 @@ index 95ffa4fef39b6df842cf543308cbb8a832af48ef..d1be5cc60bdf304b0087b30148f07e31
    // It's possible this function may be called recursively. Only notify
    // observers on initial entry. This way observers can safely assume that
 diff --git a/ui/aura/window_tree_host_platform.h b/ui/aura/window_tree_host_platform.h
-index 2969ac7aebf02b26cf750e0be506b084944aeb56..45136b4962fedc475a6dac0390c600c14db0bee4 100644
+index 22926f7506ea35e117baaa7a57123ba18dcada67..e845368c1d91f00a6c505daecf5a202ee0730dc2 100644
 --- a/ui/aura/window_tree_host_platform.h
 +++ b/ui/aura/window_tree_host_platform.h
 @@ -68,6 +68,12 @@ class AURA_EXPORT WindowTreeHostPlatform : public WindowTreeHost,
@@ -102,10 +102,10 @@ index 2969ac7aebf02b26cf750e0be506b084944aeb56..45136b4962fedc475a6dac0390c600c1
    void DispatchEvent(ui::Event* event) override;
    void OnCloseRequest() override;
 diff --git a/ui/platform_window/platform_window_delegate.h b/ui/platform_window/platform_window_delegate.h
-index d3e6ac9a54446acfa2b09c2332c4241117c3394e..6d9f81f7ff211403a9276d4b1573a75a9be2fc29 100644
+index 8055d383d26b9dd8e7079022153899dbfba28463..52195cb2157ffa173e81592333a1491fe0201db3 100644
 --- a/ui/platform_window/platform_window_delegate.h
 +++ b/ui/platform_window/platform_window_delegate.h
-@@ -68,6 +68,11 @@ class COMPONENT_EXPORT(PLATFORM_WINDOW) PlatformWindowDelegate {
+@@ -75,6 +75,11 @@ class COMPONENT_EXPORT(PLATFORM_WINDOW) PlatformWindowDelegate {
  
    virtual void OnBoundsChanged(const BoundsChange& change) = 0;
  
@@ -118,10 +118,10 @@ index d3e6ac9a54446acfa2b09c2332c4241117c3394e..6d9f81f7ff211403a9276d4b1573a75a
    // physical pixels.
    virtual void OnDamageRect(const gfx::Rect& damaged_region) = 0;
 diff --git a/ui/platform_window/x11/x11_window.cc b/ui/platform_window/x11/x11_window.cc
-index c3b1703f5d97fa414d2b8a92dbc62bc3a904e53b..818d6ac572ccb109c8b5130bfd0b00e8bfc230b4 100644
+index b8389ec9f2f6e6a6b411657a58a324aa5cd57925..a667c116d740662dbd0b7f4f3ea68eb97496d99f 100644
 --- a/ui/platform_window/x11/x11_window.cc
 +++ b/ui/platform_window/x11/x11_window.cc
-@@ -1317,6 +1317,14 @@ void X11Window::OnXWindowBoundsChanged(const gfx::Rect& bounds) {
+@@ -1331,6 +1331,14 @@ void X11Window::OnXWindowBoundsChanged(const gfx::Rect& bounds) {
    platform_window_delegate_->OnBoundsChanged(bounds);
  }
  
@@ -136,7 +136,7 @@ index c3b1703f5d97fa414d2b8a92dbc62bc3a904e53b..818d6ac572ccb109c8b5130bfd0b00e8
  void X11Window::OnXWindowCloseRequested() {
    platform_window_delegate_->OnCloseRequest();
  }
-@@ -2021,6 +2029,19 @@ void X11Window::HandleEvent(const x11::Event& xev) {
+@@ -2040,6 +2048,19 @@ void X11Window::HandleEvent(const x11::Event& xev) {
                                      expose->height);
      OnXWindowDamageEvent(damage_rect_in_pixels);
    } else if (auto* focus = xev.As<x11::FocusEvent>()) {
@@ -156,7 +156,7 @@ index c3b1703f5d97fa414d2b8a92dbc62bc3a904e53b..818d6ac572ccb109c8b5130bfd0b00e8
      OnFocusEvent(focus->opcode == x11::FocusEvent::In, focus->mode,
                   focus->detail);
    } else if (auto* configure = xev.As<x11::ConfigureNotifyEvent>()) {
-@@ -2251,6 +2272,13 @@ void X11Window::DelayedResize(const gfx::Rect& bounds_in_pixels) {
+@@ -2270,6 +2291,13 @@ void X11Window::DelayedResize(const gfx::Rect& bounds_in_pixels) {
                     ++current_counter_value_);
    }
  
@@ -171,10 +171,10 @@ index c3b1703f5d97fa414d2b8a92dbc62bc3a904e53b..818d6ac572ccb109c8b5130bfd0b00e8
    NotifyBoundsChanged(bounds_in_pixels);
  
 diff --git a/ui/platform_window/x11/x11_window.h b/ui/platform_window/x11/x11_window.h
-index bd1bf9411477ddf7ace9315b2deb4323230183bb..322e44e51190c775323ad3242cf068f238b123d1 100644
+index d3ac2c56bf88089063ef84b81e975911779d741c..e988c1e590d9cb3cc340862ca3a6500906f272e4 100644
 --- a/ui/platform_window/x11/x11_window.h
 +++ b/ui/platform_window/x11/x11_window.h
-@@ -142,6 +142,10 @@ class X11_WINDOW_EXPORT X11Window
+@@ -143,6 +143,10 @@ class X11_WINDOW_EXPORT X11Window
    void OnXWindowStateChanged();
    void OnXWindowDamageEvent(const gfx::Rect& damage_rect);
    void OnXWindowBoundsChanged(const gfx::Rect& size);
@@ -185,7 +185,7 @@ index bd1bf9411477ddf7ace9315b2deb4323230183bb..322e44e51190c775323ad3242cf068f2
    void OnXWindowCloseRequested();
    void OnXWindowIsActiveChanged(bool active);
    void OnXWindowWorkspaceChanged();
-@@ -480,6 +484,9 @@ class X11_WINDOW_EXPORT X11Window
+@@ -481,6 +485,9 @@ class X11_WINDOW_EXPORT X11Window
  
    base::CancelableOnceCallback<void(x11::Cursor)> on_cursor_loaded_;
  
@@ -196,10 +196,10 @@ index bd1bf9411477ddf7ace9315b2deb4323230183bb..322e44e51190c775323ad3242cf068f2
  
    DISALLOW_COPY_AND_ASSIGN(X11Window);
 diff --git a/ui/views/widget/desktop_aura/desktop_native_widget_aura.cc b/ui/views/widget/desktop_aura/desktop_native_widget_aura.cc
-index 2bef0c757b55aed994878f36074c3bee675adb73..192083db095794d6833c40c20e85c5930feed2d1 100644
+index 841458639c07c60be2b1b8a2c0c5edad717d7215..1cffc4e45955d9125df915e8760e548fd186492f 100644
 --- a/ui/views/widget/desktop_aura/desktop_native_widget_aura.cc
 +++ b/ui/views/widget/desktop_aura/desktop_native_widget_aura.cc
-@@ -1305,6 +1305,21 @@ void DesktopNativeWidgetAura::OnHostCloseRequested(aura::WindowTreeHost* host) {
+@@ -1308,6 +1308,21 @@ void DesktopNativeWidgetAura::OnHostCloseRequested(aura::WindowTreeHost* host) {
    GetWidget()->Close();
  }
  
@@ -239,10 +239,10 @@ index 80f29aad0f8155dfd00ece48d85336e81e9f63a2..79bf946f4393cb3dc2e98f825190888a
    void OnHostMovedInPixels(aura::WindowTreeHost* host,
                             const gfx::Point& new_origin_in_pixels) override;
 diff --git a/ui/views/widget/native_widget_delegate.h b/ui/views/widget/native_widget_delegate.h
-index 12e702107880b369532a2339e441e1b6c8625c2b..ba3a2a7b3231e1d5aad597f6afe65d1c3ac2e0bd 100644
+index fbfefa1e8e5bebdaab2a3073c9c5618113293755..45e26ea5ff143b57afed40b28be0d1cb3573b6bf 100644
 --- a/ui/views/widget/native_widget_delegate.h
 +++ b/ui/views/widget/native_widget_delegate.h
-@@ -93,6 +93,11 @@ class VIEWS_EXPORT NativeWidgetDelegate {
+@@ -87,6 +87,11 @@ class VIEWS_EXPORT NativeWidgetDelegate {
    // e.g. maximize.
    virtual void OnNativeWidgetSizeChanged(const gfx::Size& new_size) = 0;
  
@@ -255,10 +255,10 @@ index 12e702107880b369532a2339e441e1b6c8625c2b..ba3a2a7b3231e1d5aad597f6afe65d1c
    // workspaces state changes.
    virtual void OnNativeWidgetWorkspaceChanged() = 0;
 diff --git a/ui/views/widget/widget.cc b/ui/views/widget/widget.cc
-index 4b7f2bbe19abfbd707d34b645b5a7458522f9575..8d2366f95788cf8cdd0acf88cc9ab4b524b26d6c 100644
+index 37047c631afc37b46ed83c79d29050a693285911..a6f809e24408005b6840f9d902518abda526ecf5 100644
 --- a/ui/views/widget/widget.cc
 +++ b/ui/views/widget/widget.cc
-@@ -1374,6 +1374,25 @@ void Widget::OnNativeWidgetMove() {
+@@ -1435,6 +1435,25 @@ void Widget::OnNativeWidgetMove() {
      observer.OnWidgetBoundsChanged(this, GetWindowBoundsInScreen());
  }
  
@@ -285,10 +285,10 @@ index 4b7f2bbe19abfbd707d34b645b5a7458522f9575..8d2366f95788cf8cdd0acf88cc9ab4b5
    TRACE_EVENT0("ui", "Widget::OnNativeWidgetSizeChanged");
  
 diff --git a/ui/views/widget/widget.h b/ui/views/widget/widget.h
-index 4a1527951ae36a236749e021e7b72eb2c2d7923b..1e123e7c0ccf807ae1b0354ee93be5d844a3598b 100644
+index 6ab943e4b7319e4af2bc33212b633ce2b24b0f71..88a48c2df09805f2b570ef84127b1ff0330a1ea0 100644
 --- a/ui/views/widget/widget.h
 +++ b/ui/views/widget/widget.h
-@@ -994,6 +994,12 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
+@@ -1002,6 +1002,12 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
    gfx::Size GetMaximumSize() const override;
    void OnNativeWidgetMove() override;
    void OnNativeWidgetSizeChanged(const gfx::Size& new_size) override;
@@ -302,10 +302,10 @@ index 4a1527951ae36a236749e021e7b72eb2c2d7923b..1e123e7c0ccf807ae1b0354ee93be5d8
    void OnNativeWidgetWindowShowStateChanged() override;
    void OnNativeWidgetBeginUserBoundsChange() override;
 diff --git a/ui/views/widget/widget_observer.h b/ui/views/widget/widget_observer.h
-index 4050dd33db58b9957cd18470ddd1cf6328fd81f1..9c63abd77c9cf3ccbe27b343aea71094c1b2083f 100644
+index 32a27d0e03487e1aa9f91ae1ebad9ed646ba1891..adede394fde4f871fcbdb3c16f17c35ba6f41620 100644
 --- a/ui/views/widget/widget_observer.h
 +++ b/ui/views/widget/widget_observer.h
-@@ -49,6 +49,9 @@ class VIEWS_EXPORT WidgetObserver : public base::CheckedObserver {
+@@ -48,6 +48,9 @@ class VIEWS_EXPORT WidgetObserver : public base::CheckedObserver {
    virtual void OnWidgetBoundsChanged(Widget* widget,
                                       const gfx::Rect& new_bounds) {}
  

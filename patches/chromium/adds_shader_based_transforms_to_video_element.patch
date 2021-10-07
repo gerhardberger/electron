@@ -33,7 +33,7 @@ index cd63a69930e6a7b53599e594e5efccb45ee03820..c04f8a6c2719763f40ce98bdc5df4230
  
  }  // namespace viz
 diff --git a/components/viz/service/display/ca_layer_overlay.cc b/components/viz/service/display/ca_layer_overlay.cc
-index 060525de1cfa472349a3fe857bbcb8a2df61b681..58364115b6c603d471f573ec5874235f3f83a534 100644
+index 56425cb5faa91f33fb8910076aade5ffa64ab001..13db239f716843248cd3266379ce186880a7e32e 100644
 --- a/components/viz/service/display/ca_layer_overlay.cc
 +++ b/components/viz/service/display/ca_layer_overlay.cc
 @@ -258,6 +258,14 @@ class CALayerOverlayProcessorInternal {
@@ -79,7 +79,7 @@ index 22a9122f444f0dcde98e13963060bafe115bf237..d03b0ece3f588a9ac0cb0edb43c88e10
    friend class BspWalkActionDrawPolygon;
    friend class SkiaDelegatedInkRendererTest;
 diff --git a/components/viz/service/display/gl_renderer.cc b/components/viz/service/display/gl_renderer.cc
-index 1911003301766cbf05ce0f0b828b8faf971a1dbc..426e76308d2f8c395d71b34f23e21a66cd4b1514 100644
+index 22df5e1728e5dc2879c9b96911f6e7340d455b2a..cb67a4b829251d1a76026ba6eb8d6a7b6c584f47 100644
 --- a/components/viz/service/display/gl_renderer.cc
 +++ b/components/viz/service/display/gl_renderer.cc
 @@ -25,6 +25,7 @@
@@ -348,7 +348,7 @@ index 6186975bb8235bfcc044f6b49108668b7e13de6c..89dde6c5123b53c7f73bfa83f22f1c51
    // A cache for the coalesced quad data.
    std::vector<Float4> uv_xform_data;
 diff --git a/components/viz/service/display/program_binding.cc b/components/viz/service/display/program_binding.cc
-index 975d1d018453be249298de6f46771e01b60d82fa..a3618363c875efb96a6c313000237b1518c9609b 100644
+index 488151c358783eb0e8fdee57737c5efb73e4660e..8686e2f998dcdf5952c4876623e4376c98ab19ce 100644
 --- a/components/viz/service/display/program_binding.cc
 +++ b/components/viz/service/display/program_binding.cc
 @@ -36,7 +36,10 @@ bool ProgramKey::operator==(const ProgramKey& other) const {
@@ -1077,7 +1077,7 @@ index f64ae80494614b0dc8b2ff7ccb8d32730b6e689b..a7ec1d92a26f1e4a44e1bfe6aa339c54
    int resource_multiplier_location_ = -1;
    int resource_offset_location_ = -1;
 diff --git a/components/viz/service/display/skia_renderer.cc b/components/viz/service/display/skia_renderer.cc
-index 43d10d9654bf535210a5c6ab7eda032f4cc8e40e..6f3a0c8112dacd828f4a2e8d35cdef60be737d64 100644
+index 67d8f6b28a4edee1764660ede8eb48581c2b897e..ca5d2712764354cc5c1f0036039deb953388ce60 100644
 --- a/components/viz/service/display/skia_renderer.cc
 +++ b/components/viz/service/display/skia_renderer.cc
 @@ -84,6 +84,241 @@ namespace viz {
@@ -1410,7 +1410,7 @@ index b94ffe0bae845928db4f3dc05d71fef72e4b3523..7bec2e8c4db20f7e7905acfba2dd2737
  };
  
 diff --git a/components/viz/service/display/software_renderer.cc b/components/viz/service/display/software_renderer.cc
-index 64c2f6bdef41216cf0cd8c332db3b809ede432e0..8f455ac5f50d593851dbe135855e7ffdc766d003 100644
+index 0ef8e12fe088d27c6f9aadd74bc9c17b4fc5934c..48c4049910bca8df510649f041906a3f3291b637 100644
 --- a/components/viz/service/display/software_renderer.cc
 +++ b/components/viz/service/display/software_renderer.cc
 @@ -39,6 +39,7 @@
@@ -1713,10 +1713,10 @@ index 64c2f6bdef41216cf0cd8c332db3b809ede432e0..8f455ac5f50d593851dbe135855e7ffd
    // |resource_provider_| can be NULL in resourceless software draws, which
    // should never produce tile quads in the first place.
 diff --git a/components/viz/service/display/software_renderer.h b/components/viz/service/display/software_renderer.h
-index 2cb89405c9983a45351132ef369e8622f85b29c6..6dac3141dac6d8ae577a6a9bd7d58ef75d3b7571 100644
+index 3e123cda7e4324739bec96e14b00da5fc4ecf1a3..cdedec86dc262e040a61777938ff7174700d98cf 100644
 --- a/components/viz/service/display/software_renderer.h
 +++ b/components/viz/service/display/software_renderer.h
-@@ -16,6 +16,8 @@
+@@ -15,6 +15,8 @@
  #include "components/viz/service/viz_service_export.h"
  #include "ui/latency/latency_info.h"
  
@@ -1725,7 +1725,7 @@ index 2cb89405c9983a45351132ef369e8622f85b29c6..6dac3141dac6d8ae577a6a9bd7d58ef7
  namespace viz {
  class DebugBorderDrawQuad;
  class OutputSurface;
-@@ -127,6 +129,9 @@ class VIZ_SERVICE_EXPORT SoftwareRenderer : public DirectRenderer {
+@@ -126,6 +128,9 @@ class VIZ_SERVICE_EXPORT SoftwareRenderer : public DirectRenderer {
    SkSamplingOptions current_sampling_;
    std::unique_ptr<SkCanvas> current_framebuffer_canvas_;
  
@@ -1736,7 +1736,7 @@ index 2cb89405c9983a45351132ef369e8622f85b29c6..6dac3141dac6d8ae577a6a9bd7d58ef7
  };
  
 diff --git a/components/viz/service/display/surface_aggregator.cc b/components/viz/service/display/surface_aggregator.cc
-index 7efd27ef6b701251d0ab93d055d598596d0dafed..f41eedc761abd88e278e3a0cdb71e85a17842622 100644
+index 9b2cf238191075c870b995c70da9ebfbff37783c..397a4ff4a08f83ba26ce04a19d839bb08030cae0 100644
 --- a/components/viz/service/display/surface_aggregator.cc
 +++ b/components/viz/service/display/surface_aggregator.cc
 @@ -202,7 +202,9 @@ SharedQuadState* CopyAndScaleSharedQuadState(
@@ -1751,7 +1751,7 @@ index 7efd27ef6b701251d0ab93d055d598596d0dafed..f41eedc761abd88e278e3a0cdb71e85a
    return shared_quad_state;
  }
 diff --git a/media/base/video_frame.h b/media/base/video_frame.h
-index 82dc8ca69f91e46d8e6a20198aa3a216c8f1c558..1de2eb458e8c2f43f12a4b90d46d0fbc91964274 100644
+index 81c9ac7dc59cd7da2a1a902e1e58ae0d37a35791..5d2da40ba3756df4ecf267b3496927d841d2b193 100644
 --- a/media/base/video_frame.h
 +++ b/media/base/video_frame.h
 @@ -31,6 +31,7 @@
@@ -1762,7 +1762,7 @@ index 82dc8ca69f91e46d8e6a20198aa3a216c8f1c558..1de2eb458e8c2f43f12a4b90d46d0fbc
  #include "ui/gfx/geometry/size.h"
  #include "ui/gfx/hdr_metadata.h"
  
-@@ -615,6 +616,11 @@ class MEDIA_EXPORT VideoFrame : public base::RefCountedThreadSafe<VideoFrame> {
+@@ -621,6 +622,11 @@ class MEDIA_EXPORT VideoFrame : public base::RefCountedThreadSafe<VideoFrame> {
      ycbcr_info_ = ycbcr_info;
    }
  
@@ -1775,10 +1775,10 @@ index 82dc8ca69f91e46d8e6a20198aa3a216c8f1c558..1de2eb458e8c2f43f12a4b90d46d0fbc
    friend class base::RefCountedThreadSafe<VideoFrame>;
  
 diff --git a/media/renderers/video_resource_updater.cc b/media/renderers/video_resource_updater.cc
-index f819aed4a58d0b2be37cc0459ea182f3b067aed9..881e87438be776a0a2327aa147f6ec366429aa1d 100644
+index 80cb1a4575df6e69aa62718d69b48257d100167a..9e23f27c17ac38cd1fc20bde2f5ded1ef5bbfe8a 100644
 --- a/media/renderers/video_resource_updater.cc
 +++ b/media/renderers/video_resource_updater.cc
-@@ -550,7 +550,9 @@ void VideoResourceUpdater::AppendQuads(
+@@ -553,7 +553,9 @@ void VideoResourceUpdater::AppendQuads(
      absl::optional<gfx::Rect> clip_rect,
      bool contents_opaque,
      float draw_opacity,
@@ -1789,7 +1789,7 @@ index f819aed4a58d0b2be37cc0459ea182f3b067aed9..881e87438be776a0a2327aa147f6ec36
    DCHECK(frame.get());
  
    viz::SharedQuadState* shared_quad_state =
-@@ -559,6 +561,9 @@ void VideoResourceUpdater::AppendQuads(
+@@ -562,6 +564,9 @@ void VideoResourceUpdater::AppendQuads(
        transform, quad_rect, visible_quad_rect, mask_filter_info, clip_rect,
        contents_opaque, draw_opacity, SkBlendMode::kSrcOver, sorting_context_id);
  
@@ -1957,7 +1957,7 @@ index 53782ddd9d74d3fb59b400dedbffd53daefb9cee..7d1316060b089e4c70eecea0ceb551a5
    friend class WebMediaPlayerMSTest;
  
 diff --git a/third_party/blink/renderer/core/html/media/html_media_element.cc b/third_party/blink/renderer/core/html/media/html_media_element.cc
-index 169a05eab25696ed5dd2b641288e9457646e78d2..bbd6f11df9b35b307c24b8a1a22a4852a1cdd8e2 100644
+index cfcb19002a16a650b7af41fe882efee418f48aa0..753776fadb5077dad83fced9697b6fc973ca815f 100644
 --- a/third_party/blink/renderer/core/html/media/html_media_element.cc
 +++ b/third_party/blink/renderer/core/html/media/html_media_element.cc
 @@ -702,6 +702,57 @@ bool HTMLMediaElement::IsMouseFocusable() const {
@@ -2029,10 +2029,10 @@ index 169a05eab25696ed5dd2b641288e9457646e78d2..bbd6f11df9b35b307c24b8a1a22a4852
      // Deferred media loading is not part of the spec, but intuition is that
      // this should not hold up the Window's "load" event (similar to user
 diff --git a/third_party/blink/renderer/core/html/media/html_media_element.h b/third_party/blink/renderer/core/html/media/html_media_element.h
-index 8d14815d6ffd69cb4233718a78ad6301209b5efc..96eaa5a142bd1a0cd817e031eb19740f13f6c5c1 100644
+index 4af2fe7c1c04b23a41bca1166ce7b2306483a63d..1d3ce356f7e978436f63a4a85ef326069b029f31 100644
 --- a/third_party/blink/renderer/core/html/media/html_media_element.h
 +++ b/third_party/blink/renderer/core/html/media/html_media_element.h
-@@ -753,6 +753,12 @@ class CORE_EXPORT HTMLMediaElement
+@@ -755,6 +755,12 @@ class CORE_EXPORT HTMLMediaElement
  
    bool was_always_muted_ : 1;
  
@@ -2095,7 +2095,7 @@ index f1a5b76c1d0f3de445b3c796749795487d664def..49e5fdef36ba4bef9b604ae8524e3f8a
    // is created. In that case, we suspend the request, and wait until now to
    // reiniate it.
 diff --git a/third_party/blink/renderer/modules/mediastream/webmediaplayer_ms_compositor.cc b/third_party/blink/renderer/modules/mediastream/webmediaplayer_ms_compositor.cc
-index 9d4046378998104e11b19ee504a13ff764fea23f..634333251c1e177faebac656e61fb51592b8ef32 100644
+index 8f9b05c279d6123f682809e2de5da9103af76aa3..00c6dd500e8d9ec64ac14f7548efe15cee575900 100644
 --- a/third_party/blink/renderer/modules/mediastream/webmediaplayer_ms_compositor.cc
 +++ b/third_party/blink/renderer/modules/mediastream/webmediaplayer_ms_compositor.cc
 @@ -342,6 +342,10 @@ void WebMediaPlayerMSCompositor::EnqueueFrame(
@@ -2226,7 +2226,7 @@ index efaa452d2722ef18c67e7025b97f879b4520c74e..5e48e8d5fb21a07c3c6fa2100e8eef9d
  
  }  // namespace blink
 diff --git a/third_party/blink/renderer/platform/media/web_media_player_impl.cc b/third_party/blink/renderer/platform/media/web_media_player_impl.cc
-index ee4eab97faeb1456c2ee48af0d44bc1802169972..1fb51a5e857abbea5e8021dd5669ecb24242d854 100644
+index 18b3ef5fe312d655ef6dcb9eb517085d9a0cb10f..15eaf4c511337b2977c990550038c437c3a53949 100644
 --- a/third_party/blink/renderer/platform/media/web_media_player_impl.cc
 +++ b/third_party/blink/renderer/platform/media/web_media_player_impl.cc
 @@ -566,7 +566,10 @@ WebMediaPlayer::LoadTiming WebMediaPlayerImpl::Load(

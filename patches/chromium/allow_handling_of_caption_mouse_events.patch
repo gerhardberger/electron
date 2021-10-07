@@ -38,7 +38,7 @@ index 9043a181d4c0428950d566774d14b415fb3d33c2..d867f5c83a11b8634abf17f3bf849268
        break;
    }
 diff --git a/third_party/blink/renderer/core/layout/layout_object.cc b/third_party/blink/renderer/core/layout/layout_object.cc
-index 44ea5718dd68c7a2e3f4af39101cc7511677d2e9..b8f00f3fa337c6bc1eca5e90ef92e3287f7cdb7b 100644
+index 64e159fcea89bb6fae76de7675bb921dc3b058c8..cfd7be3827eb4463c56a3fea79395951dbb7127f 100644
 --- a/third_party/blink/renderer/core/layout/layout_object.cc
 +++ b/third_party/blink/renderer/core/layout/layout_object.cc
 @@ -2963,6 +2963,13 @@ void LayoutObject::StyleDidChange(StyleDifference diff,
@@ -274,7 +274,7 @@ index dc45bd8a5ca7353291ade41a4374654995176457..75fb8d17507a256f7e20649f5b320f47
  };
  
 diff --git a/ui/views/win/hwnd_message_handler.cc b/ui/views/win/hwnd_message_handler.cc
-index 41fa3c23b9a5d8596f2fb44d0957ab6e1f60a95a..cd2db2f20f49fef43988be94fbe01a36ce794d2f 100644
+index 18acd3724d486f7acdaa6aeedcd8ff3681729746..f9d1727e15b56d323b0686ad52d2ce7bf9be45cb 100644
 --- a/ui/views/win/hwnd_message_handler.cc
 +++ b/ui/views/win/hwnd_message_handler.cc
 @@ -835,8 +835,8 @@ void HWNDMessageHandler::ClearNativeFocus() {
@@ -288,7 +288,7 @@ index 41fa3c23b9a5d8596f2fb44d0957ab6e1f60a95a..cd2db2f20f49fef43988be94fbe01a36
  }
  
  void HWNDMessageHandler::ReleaseCapture() {
-@@ -3150,6 +3150,7 @@ LRESULT HWNDMessageHandler::HandleMouseEventInternal(UINT message,
+@@ -3146,6 +3146,7 @@ LRESULT HWNDMessageHandler::HandleMouseEventInternal(UINT message,
    // so use the weak ptr to check if destruction occurred or not.
    base::WeakPtr<HWNDMessageHandler> ref(msg_handler_weak_factory_.GetWeakPtr());
    bool handled = false;
@@ -296,7 +296,7 @@ index 41fa3c23b9a5d8596f2fb44d0957ab6e1f60a95a..cd2db2f20f49fef43988be94fbe01a36
  
    // Don't send right mouse button up to the delegate when displaying system
    // command menu. This prevents left clicking in the upper left hand corner of
-@@ -3158,9 +3159,17 @@ LRESULT HWNDMessageHandler::HandleMouseEventInternal(UINT message,
+@@ -3154,9 +3155,17 @@ LRESULT HWNDMessageHandler::HandleMouseEventInternal(UINT message,
    if (!handling_mouse_menu_ || message != WM_RBUTTONUP)
      handled = delegate_->HandleMouseEvent(&event);
  
@@ -314,7 +314,7 @@ index 41fa3c23b9a5d8596f2fb44d0957ab6e1f60a95a..cd2db2f20f49fef43988be94fbe01a36
    if (!handled && message == WM_NCLBUTTONDOWN && w_param != HTSYSMENU &&
        w_param != HTCAPTION &&
        delegate_->GetFrameMode() == FrameMode::CUSTOM_DRAWN) {
-@@ -3172,12 +3181,6 @@ LRESULT HWNDMessageHandler::HandleMouseEventInternal(UINT message,
+@@ -3168,12 +3177,6 @@ LRESULT HWNDMessageHandler::HandleMouseEventInternal(UINT message,
      handled = true;
    }
  

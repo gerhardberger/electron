@@ -99,10 +99,10 @@ index e50957475389e324c448ef75946da4b3edfdb0c0..3d474e6340ede72b64d4a894e0e6fa70
  }
  
 diff --git a/media/capture/mojom/video_capture_types_mojom_traits.h b/media/capture/mojom/video_capture_types_mojom_traits.h
-index 3e5f0efd1bec3d1e7f7c1dfe2724068583bdf71b..6e9d5af5ee0490ffa173e99882577fba7054bc35 100644
+index 0928e57198ebc119882650ff56d124c622ed2bbe..0c1f8f9386303f5385231682a2c540eb28ecd006 100644
 --- a/media/capture/mojom/video_capture_types_mojom_traits.h
 +++ b/media/capture/mojom/video_capture_types_mojom_traits.h
-@@ -178,6 +178,11 @@ struct COMPONENT_EXPORT(MEDIA_CAPTURE_MOJOM_TRAITS)
+@@ -177,6 +177,11 @@ struct COMPONENT_EXPORT(MEDIA_CAPTURE_MOJOM_TRAITS)
      return params.show_cursor;
    }
  
@@ -129,10 +129,10 @@ index df99d8cc0d6f9d46981f5fc87a24217073fe2c67..023ea75f995f3cf9ffa4dc2dc439a223
  bool VideoCaptureParams::IsValid() const {
    return requested_format.IsValid() &&
 diff --git a/media/capture/video_capture_types.h b/media/capture/video_capture_types.h
-index 33ae3dac33c2d5cbe9546bb780524b3d7e66fdee..18b8c6a968743cc799f48ca7d53a34b81665eafb 100644
+index 1c84e97c7334a069be248f20b6d055a059bc7cd8..92d0c6a3de55d207c906ae2e303016ad227bc54a 100644
 --- a/media/capture/video_capture_types.h
 +++ b/media/capture/video_capture_types.h
-@@ -320,6 +320,8 @@ struct CAPTURE_EXPORT VideoCaptureParams {
+@@ -319,6 +319,8 @@ struct CAPTURE_EXPORT VideoCaptureParams {
    bool enable_face_detection;
  
    bool show_cursor;
@@ -142,14 +142,14 @@ index 33ae3dac33c2d5cbe9546bb780524b3d7e66fdee..18b8c6a968743cc799f48ca7d53a34b8
  
  }  // namespace media
 diff --git a/third_party/blink/public/mojom/web_feature/web_feature.mojom b/third_party/blink/public/mojom/web_feature/web_feature.mojom
-index a49ed51f237e0da79a459f0fe345724cf826359d..ed438df58412a9e048e83bfd99548b514f992f03 100644
+index e7bafee7b81d2d56d005939ea3bff4f610e6951b..ac6cb47a8dd1e9350e91103c7035326d40e72eb5 100644
 --- a/third_party/blink/public/mojom/web_feature/web_feature.mojom
 +++ b/third_party/blink/public/mojom/web_feature/web_feature.mojom
-@@ -3278,6 +3278,7 @@ enum WebFeature {
-   kMediaStreamConstraintsAroundAudioProcessing = 3963,
-   kV8RTCRtpReceiver_BufferDrained_Method = 3964,
-   kV8RTCRtpReceiver_BufferRestored_Method = 3965,
-+  kMediaStreamConstraintsUsingAroundCapturer = 3966,
+@@ -3289,6 +3289,7 @@ enum WebFeature {
+   kMediaStreamConstraintsAroundAudioProcessing = 3976,
+   kV8RTCRtpReceiver_BufferDrained_Method = 3977,
+   kV8RTCRtpReceiver_BufferRestored_Method = 3978,
++  kMediaStreamConstraintsUsingAroundCapturer = 3979,
  
    // Add new features immediately above this line. Don't change assigned
    // numbers of any item, and don't reuse removed slots.
@@ -246,7 +246,7 @@ index 22966e6af699198bf88b99ffe766a9b661beeef9..e82dc4b0f62a1b7c47ad65093027d4be
      // Media Capture Depth Stream Extensions
      // https://w3c.github.io/mediacapture-depth
 diff --git a/third_party/blink/renderer/modules/mediastream/user_media_request.cc b/third_party/blink/renderer/modules/mediastream/user_media_request.cc
-index 03973de698d121600c66420f6307f86b85ae8216..989a97f3f7094ffec64d5ab3f3332b3d7e86984e 100644
+index b7c01a0961d9001b0981fa6007416a11f17fbf78..457c9fce27f37950fd95e82e2e79b51db54f7bf3 100644
 --- a/third_party/blink/renderer/modules/mediastream/user_media_request.cc
 +++ b/third_party/blink/renderer/modules/mediastream/user_media_request.cc
 @@ -225,6 +225,10 @@ void CountAudioConstraintUses(ExecutionContext* context,

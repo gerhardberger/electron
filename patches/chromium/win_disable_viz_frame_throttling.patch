@@ -14,10 +14,10 @@ requestAnimationFrame.
 Signed-off-by: gellert <gellert.hegyi@around.co>
 
 diff --git a/components/viz/service/frame_sinks/compositor_frame_sink_support.cc b/components/viz/service/frame_sinks/compositor_frame_sink_support.cc
-index 8c46a63b31f185a3adf3812e735f8f5b0ec9d347..6c7d20b40b5d7469eda0aaf68404eb58ee82cf1a 100644
+index 29482a0fc0976bb19544303b7e03bf44d60f07e9..8cbe71401fa733f0d2eb4f45b22df2689f83f5bc 100644
 --- a/components/viz/service/frame_sinks/compositor_frame_sink_support.cc
 +++ b/components/viz/service/frame_sinks/compositor_frame_sink_support.cc
-@@ -1055,6 +1055,11 @@ bool CompositorFrameSinkSupport::ShouldSendBeginFrame(
+@@ -1079,6 +1079,11 @@ bool CompositorFrameSinkSupport::ShouldSendBeginFrame(
    // index must be at least as large as our last drawn frame index.
    DCHECK_GE(active_frame_index, last_drawn_frame_index_);
  
@@ -29,7 +29,7 @@ index 8c46a63b31f185a3adf3812e735f8f5b0ec9d347..6c7d20b40b5d7469eda0aaf68404eb58
    // Throttle clients that have submitted too many undrawn frames.
    uint64_t num_undrawn_frames = active_frame_index - last_drawn_frame_index_;
    if (can_throttle_if_unresponsive_or_excessive &&
-@@ -1062,6 +1067,7 @@ bool CompositorFrameSinkSupport::ShouldSendBeginFrame(
+@@ -1086,6 +1091,7 @@ bool CompositorFrameSinkSupport::ShouldSendBeginFrame(
      RecordShouldSendBeginFrame("ThrottleUndrawnFrames");
      return false;
    }

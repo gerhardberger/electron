@@ -8,15 +8,15 @@ This patch adds onbufferdrained and onbufferrestored events to the fifo neteq im
 Signed-off-by: gellert <gellert.hegyi@around.co>
 
 diff --git a/third_party/blink/public/mojom/web_feature/web_feature.mojom b/third_party/blink/public/mojom/web_feature/web_feature.mojom
-index f7c78ac198c51fd8d8980c5471ea7fd678111256..a49ed51f237e0da79a459f0fe345724cf826359d 100644
+index 9bf11d973b7869a5c6f67ee432c9df7df5d593bc..e7bafee7b81d2d56d005939ea3bff4f610e6951b 100644
 --- a/third_party/blink/public/mojom/web_feature/web_feature.mojom
 +++ b/third_party/blink/public/mojom/web_feature/web_feature.mojom
-@@ -3276,6 +3276,8 @@ enum WebFeature {
-   kV8URLPattern_Exec_Method = 3961,
-   kSameSiteCookieInclusionChangedByCrossSiteRedirect = 3962,
-   kMediaStreamConstraintsAroundAudioProcessing = 3963,
-+  kV8RTCRtpReceiver_BufferDrained_Method = 3964,
-+  kV8RTCRtpReceiver_BufferRestored_Method = 3965,
+@@ -3287,6 +3287,8 @@ enum WebFeature {
+   kCanvasRenderingContext2DContextRestoredEvent = 3975,
+   kReadOrWriteWebDatabaseThirdPartyContext = 3985,
+   kMediaStreamConstraintsAroundAudioProcessing = 3976,
++  kV8RTCRtpReceiver_BufferDrained_Method = 3977,
++  kV8RTCRtpReceiver_BufferRestored_Method = 3978,
  
    // Add new features immediately above this line. Don't change assigned
    // numbers of any item, and don't reuse removed slots.
@@ -34,7 +34,7 @@ index fcb366c160ed427c478512d27707453d81b56f23..d00aa999b8e70a7654b00380ad18249d
      "cancel",
      "canmakepayment",
 diff --git a/third_party/blink/renderer/modules/peerconnection/rtc_peer_connection.cc b/third_party/blink/renderer/modules/peerconnection/rtc_peer_connection.cc
-index 5a1e99ea7a77ef8802650d0f43643610f4e47652..813d9252ec75bdfba9d5715da718ad3e1794e4ad 100644
+index 73f8554e487a23ea86f4cf643b756d5e9773036b..2e5bd763bbc97268790eb78766e8231b9af10b03 100644
 --- a/third_party/blink/renderer/modules/peerconnection/rtc_peer_connection.cc
 +++ b/third_party/blink/renderer/modules/peerconnection/rtc_peer_connection.cc
 @@ -3442,6 +3442,16 @@ void RTCPeerConnection::ClosePeerConnection() {

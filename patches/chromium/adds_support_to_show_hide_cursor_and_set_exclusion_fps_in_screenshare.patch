@@ -340,10 +340,10 @@ index c77bdd8148e92cded32fade3e0d0596bce9073ec..e50957475389e324c448ef75946da4b3
  }
  
 diff --git a/media/capture/mojom/video_capture_types_mojom_traits.h b/media/capture/mojom/video_capture_types_mojom_traits.h
-index aaaad37daa2dde3748ae784e49aca89a5dd4ce75..3e5f0efd1bec3d1e7f7c1dfe2724068583bdf71b 100644
+index 505481226d3326abf528e018237c27e8e36b6950..0928e57198ebc119882650ff56d124c622ed2bbe 100644
 --- a/media/capture/mojom/video_capture_types_mojom_traits.h
 +++ b/media/capture/mojom/video_capture_types_mojom_traits.h
-@@ -173,6 +173,11 @@ struct COMPONENT_EXPORT(MEDIA_CAPTURE_MOJOM_TRAITS)
+@@ -172,6 +172,11 @@ struct COMPONENT_EXPORT(MEDIA_CAPTURE_MOJOM_TRAITS)
      return params.enable_face_detection;
    }
  
@@ -385,10 +385,10 @@ index da8e8a046ba480dc2dfb19d8336085c6860953a5..df99d8cc0d6f9d46981f5fc87a242170
  bool VideoCaptureParams::IsValid() const {
    return requested_format.IsValid() &&
 diff --git a/media/capture/video_capture_types.h b/media/capture/video_capture_types.h
-index f3c2dfd0303df1eb614e499dc46e2e0e816b85a2..33ae3dac33c2d5cbe9546bb780524b3d7e66fdee 100644
+index 5cbc77670c3f1334cfe839bc04ca1b04e64a6f9e..1c84e97c7334a069be248f20b6d055a059bc7cd8 100644
 --- a/media/capture/video_capture_types.h
 +++ b/media/capture/video_capture_types.h
-@@ -318,6 +318,8 @@ struct CAPTURE_EXPORT VideoCaptureParams {
+@@ -317,6 +317,8 @@ struct CAPTURE_EXPORT VideoCaptureParams {
    // exposures around the face area. Currently only applicable on
    // Android platform with Camera2 driver support.
    bool enable_face_detection;
@@ -412,10 +412,10 @@ index 9c46503617ce976bf08127bab2f9202194eb798a..da33fd9ea31aa90f7844378476da252e
    // request. Thus, the caller cannot assume frame delivery will actually
    // stop. Even if frame delivery is suspended, this might not take effect
 diff --git a/third_party/blink/renderer/platform/video_capture/video_capture_impl.cc b/third_party/blink/renderer/platform/video_capture/video_capture_impl.cc
-index e520e42f87beb28cd6a632538337c5094a6361d3..95ee463b5fdc9d3ffc0eba62324520593e790840 100644
+index e6d0b0afd05970b796cd05c85ee204c964d64571..be23eec1df8a897c29dfc90eee09d30cba4e26f9 100644
 --- a/third_party/blink/renderer/platform/video_capture/video_capture_impl.cc
 +++ b/third_party/blink/renderer/platform/video_capture/video_capture_impl.cc
-@@ -615,6 +615,9 @@ void VideoCaptureImpl::SetGpuFactoriesHandleOnIOTaskRunner(
+@@ -616,6 +616,9 @@ void VideoCaptureImpl::SetGpuFactoriesHandleOnIOTaskRunner(
  
  VideoCaptureImpl::~VideoCaptureImpl() {
    DCHECK_CALLED_ON_VALID_THREAD(io_thread_checker_);
@@ -425,7 +425,7 @@ index e520e42f87beb28cd6a632538337c5094a6361d3..95ee463b5fdc9d3ffc0eba6232452059
    if ((state_ == VIDEO_CAPTURE_STATE_STARTING ||
         state_ == VIDEO_CAPTURE_STATE_STARTED) &&
        GetVideoCaptureHost())
-@@ -638,6 +641,8 @@ void VideoCaptureImpl::StartCapture(
+@@ -639,6 +642,8 @@ void VideoCaptureImpl::StartCapture(
    DCHECK_CALLED_ON_VALID_THREAD(io_thread_checker_);
    OnLog("VideoCaptureImpl got request to start capture.");
  
@@ -434,7 +434,7 @@ index e520e42f87beb28cd6a632538337c5094a6361d3..95ee463b5fdc9d3ffc0eba6232452059
    ClientInfo client_info;
    client_info.params = params;
    client_info.state_update_cb = state_update_cb;
-@@ -693,6 +698,8 @@ void VideoCaptureImpl::StopCapture(int client_id) {
+@@ -694,6 +699,8 @@ void VideoCaptureImpl::StopCapture(int client_id) {
      RemoveClient(client_id, &clients_);
    }
  
@@ -443,7 +443,7 @@ index e520e42f87beb28cd6a632538337c5094a6361d3..95ee463b5fdc9d3ffc0eba6232452059
    if (!clients_.empty())
      return;
    DVLOG(1) << "StopCapture: No more client, stopping ...";
-@@ -706,6 +713,16 @@ void VideoCaptureImpl::RequestRefreshFrame() {
+@@ -707,6 +714,16 @@ void VideoCaptureImpl::RequestRefreshFrame() {
    GetVideoCaptureHost()->RequestRefreshFrame(device_id_);
  }
  
@@ -460,7 +460,7 @@ index e520e42f87beb28cd6a632538337c5094a6361d3..95ee463b5fdc9d3ffc0eba6232452059
  void VideoCaptureImpl::GetDeviceSupportedFormats(
      VideoCaptureDeviceFormatsCallback callback) {
    DCHECK_CALLED_ON_VALID_THREAD(io_thread_checker_);
-@@ -1133,6 +1150,30 @@ void VideoCaptureImpl::RecordStartOutcomeUMA(VideoCaptureStartOutcome outcome) {
+@@ -1134,6 +1151,30 @@ void VideoCaptureImpl::RecordStartOutcomeUMA(VideoCaptureStartOutcome outcome) {
    }
  }
  
@@ -492,10 +492,10 @@ index e520e42f87beb28cd6a632538337c5094a6361d3..95ee463b5fdc9d3ffc0eba6232452059
  void VideoCaptureImpl::DidFinishConsumingFrame(
      BufferFinishedCallback callback_to_io_thread) {
 diff --git a/third_party/blink/renderer/platform/video_capture/video_capture_impl.h b/third_party/blink/renderer/platform/video_capture/video_capture_impl.h
-index 0e6b779963a6ea80fbbad226a9ee0798ccfbdec2..034cc0017f91cef2d53b9ff48eff381c761257d1 100644
+index e454fe18181a0b21c48d408ff0e1c410f5d1bc82..e56a3c14e53e2550d37ddaa7f6b00ab20862fd36 100644
 --- a/third_party/blink/renderer/platform/video_capture/video_capture_impl.h
 +++ b/third_party/blink/renderer/platform/video_capture/video_capture_impl.h
-@@ -21,6 +21,7 @@
+@@ -22,6 +22,7 @@
  #include "mojo/public/cpp/bindings/remote.h"
  #include "third_party/blink/public/common/media/video_capture.h"
  #include "third_party/blink/renderer/platform/platform_export.h"
@@ -503,7 +503,7 @@ index 0e6b779963a6ea80fbbad226a9ee0798ccfbdec2..034cc0017f91cef2d53b9ff48eff381c
  
  namespace base {
  class SequencedTaskRunner;
-@@ -55,7 +56,8 @@ enum class VideoCaptureStartOutcome {
+@@ -56,7 +57,8 @@ enum class VideoCaptureStartOutcome {
  // captured VideoFrames. VideoCaptureImpl is created in the main Renderer thread
  // but otherwise operates on |io_task_runner_|, which is usually the IO thread.
  class PLATFORM_EXPORT VideoCaptureImpl
@@ -513,7 +513,7 @@ index 0e6b779963a6ea80fbbad226a9ee0798ccfbdec2..034cc0017f91cef2d53b9ff48eff381c
   public:
    VideoCaptureImpl(media::VideoCaptureSessionId session_id,
                     scoped_refptr<base::SequencedTaskRunner> main_task_runner,
-@@ -84,6 +86,10 @@ class PLATFORM_EXPORT VideoCaptureImpl
+@@ -85,6 +87,10 @@ class PLATFORM_EXPORT VideoCaptureImpl
    // picture loss or quality issues).
    void RequestRefreshFrame();
  
@@ -524,7 +524,7 @@ index 0e6b779963a6ea80fbbad226a9ee0798ccfbdec2..034cc0017f91cef2d53b9ff48eff381c
    // Get capturing formats supported by this device.
    // |callback| will be invoked with the results.
    //
-@@ -125,6 +131,8 @@ class PLATFORM_EXPORT VideoCaptureImpl
+@@ -126,6 +132,8 @@ class PLATFORM_EXPORT VideoCaptureImpl
    static constexpr base::TimeDelta kCaptureStartTimeout =
        base::TimeDelta::FromSeconds(10);
  

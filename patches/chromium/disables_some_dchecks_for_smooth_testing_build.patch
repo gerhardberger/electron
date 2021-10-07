@@ -51,20 +51,20 @@ index bd35955cb3716e425c2cbdb713e78ca7f2388407..864c570925475774064db8ed97e38ee7
  #endif
  
 diff --git a/third_party/blink/renderer/modules/webgl/webgl2_rendering_context_base.cc b/third_party/blink/renderer/modules/webgl/webgl2_rendering_context_base.cc
-index d706480b2ce4c7d3da4c22784da9d040df0dfe20..2dcfac64b9cc9ae20674cad712cc11e78186dbc6 100644
+index 2f3348e5bd8c089de9e0ffeb0e603da2ef8ec578..43a081281aa1da54c13dcb8bc56a848f82fc016e 100644
 --- a/third_party/blink/renderer/modules/webgl/webgl2_rendering_context_base.cc
 +++ b/third_party/blink/renderer/modules/webgl/webgl2_rendering_context_base.cc
-@@ -837,7 +837,7 @@ void WebGL2RenderingContextBase::readPixels(GLint x,
+@@ -838,7 +838,7 @@ void WebGL2RenderingContextBase::readPixels(GLint x,
  
    // Due to WebGL's same-origin restrictions, it is not possible to
    // taint the origin using the WebGL API.
--  DCHECK(canvas()->OriginClean());
-+  // DCHECK(canvas()->OriginClean());
+-  DCHECK(Host()->OriginClean());
++  // DCHECK(Host()->OriginClean());
  
    if (!ValidateValueFitNonNegInt32("readPixels", "offset", offset))
      return;
 diff --git a/third_party/blink/renderer/platform/mediastream/media_stream_audio_processor_options.cc b/third_party/blink/renderer/platform/mediastream/media_stream_audio_processor_options.cc
-index 146ab1f1443f1e9ce253c44f3eaf731b1d9ce4dd..3a132d3bf0cc95a9b7fd947bc171c8ab2a319c79 100644
+index 393ecbcff86344bfb0d540462d17264b36aa0579..2cbfffdd31d373740dd81aabd31fa4dd955d96e5 100644
 --- a/third_party/blink/renderer/platform/mediastream/media_stream_audio_processor_options.cc
 +++ b/third_party/blink/renderer/platform/mediastream/media_stream_audio_processor_options.cc
 @@ -191,8 +191,7 @@ bool AudioProcessingProperties::HasSameReconfigurableSettings(
@@ -78,12 +78,12 @@ index 146ab1f1443f1e9ce253c44f3eaf731b1d9ce4dd..3a132d3bf0cc95a9b7fd947bc171c8ab
           goog_experimental_echo_cancellation ==
               other.goog_experimental_echo_cancellation &&
 diff --git a/third_party/blink/renderer/platform/mediastream/webaudio_media_stream_source.cc b/third_party/blink/renderer/platform/mediastream/webaudio_media_stream_source.cc
-index 30800b44aa008300949b1c329f71ef627c014204..7161a963eb33792fc614c12682438c72bc7e484a 100644
+index 61a966d15a0e6de00f6465d1ec4ac722128f3bc2..18a7b274a6eaa99fee421f93ebe9af6e8cb1f9d3 100644
 --- a/third_party/blink/renderer/platform/mediastream/webaudio_media_stream_source.cc
 +++ b/third_party/blink/renderer/platform/mediastream/webaudio_media_stream_source.cc
 @@ -31,7 +31,7 @@ WebAudioMediaStreamSource::~WebAudioMediaStreamSource() {
  
- void WebAudioMediaStreamSource::SetFormat(size_t number_of_channels,
+ void WebAudioMediaStreamSource::SetFormat(int number_of_channels,
                                            float sample_rate) {
 -  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 +  // DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);

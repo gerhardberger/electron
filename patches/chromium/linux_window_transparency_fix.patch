@@ -6,10 +6,10 @@ Subject: linux window transparency fix
 This patch allows the frameless window to be transparent on windows.
 
 diff --git a/ui/base/x/x11_util.cc b/ui/base/x/x11_util.cc
-index 4c9f54fe411134342b9119e39171afc75a8a9694..8d0e86130bd6f81b33427311dfa3a86f8c03bdab 100644
+index 47bc0b93c92b61d4d8a081d2d284add1907fa2ab..19dfe144c6492a8b79692798b95ac6fd085d372d 100644
 --- a/ui/base/x/x11_util.cc
 +++ b/ui/base/x/x11_util.cc
-@@ -1098,6 +1098,10 @@ void XVisualManager::ChooseVisualForWindow(bool want_argb_visual,
+@@ -1084,6 +1084,10 @@ void XVisualManager::ChooseVisualForWindow(bool want_argb_visual,
    bool use_argb = want_argb_visual && ArgbVisualAvailable();
    x11::VisualId visual = use_argb ? transparent_visual_id_ : opaque_visual_id_;
  

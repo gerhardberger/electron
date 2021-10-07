@@ -7,10 +7,10 @@ Subject: Add switches to disable Around audio processing, set opus complexity
 Add switches to disable Around audio processing, set opus complexity and disable audio encoder queue.
 
 diff --git a/content/browser/renderer_host/render_process_host_impl.cc b/content/browser/renderer_host/render_process_host_impl.cc
-index d844e60f0bed9489c0c104defff314417b40b4d4..7cc235e569c75729724a9982aa8e92fa7552f125 100644
+index e4761990dda4501bb99416b8cfe2571cbccbf0dd..b4af152edd9dc1f924296ce9f938cb1afb18ea58 100644
 --- a/content/browser/renderer_host/render_process_host_impl.cc
 +++ b/content/browser/renderer_host/render_process_host_impl.cc
-@@ -3444,6 +3444,9 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
+@@ -3404,6 +3404,9 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
      switches::kAndroidFontsPath,
      switches::kAudioBufferSize,
      switches::kAudioLatencyFactor,
@@ -21,10 +21,10 @@ index d844e60f0bed9489c0c104defff314417b40b4d4..7cc235e569c75729724a9982aa8e92fa
      switches::kMojoCoreLibraryPath,
      switches::kDisable2dCanvasImageChromium,
 diff --git a/content/browser/utility_process_host.cc b/content/browser/utility_process_host.cc
-index 9e44fe6591569487a23d650cca13f19e6c7a3582..288a4f082e79b7aee18b88caa2d8dfd8e2721a09 100644
+index df018de76a44847d85358628c021117a1f16f1b6..05d8c8509bc9064c60bcd58146ddf56fc472bec5 100644
 --- a/content/browser/utility_process_host.cc
 +++ b/content/browser/utility_process_host.cc
-@@ -272,6 +272,9 @@ bool UtilityProcessHost::StartProcess() {
+@@ -273,6 +273,9 @@ bool UtilityProcessHost::StartProcess() {
        // These flags are used by the audio service:
        switches::kAudioBufferSize,
        switches::kAudioLatencyFactor,
@@ -35,7 +35,7 @@ index 9e44fe6591569487a23d650cca13f19e6c7a3582..288a4f082e79b7aee18b88caa2d8dfd8
        switches::kDisableAudioOutput,
        switches::kFailAudioStreamCreation,
 diff --git a/media/base/media_switches.cc b/media/base/media_switches.cc
-index 13f077e700e561276c2ce85d4df3fba951e230b0..93d5acf4f2530107b3620dfb92accde52ae36aca 100644
+index 93ed2d58f274ea9ed88ae591743e7d8b440e7eba..f9ed300ca34f0e41b3b63add3191ce3be05eea38 100644
 --- a/media/base/media_switches.cc
 +++ b/media/base/media_switches.cc
 @@ -23,6 +23,15 @@ namespace switches {
@@ -55,7 +55,7 @@ index 13f077e700e561276c2ce85d4df3fba951e230b0..93d5acf4f2530107b3620dfb92accde5
  const char kAudioBufferSize[] = "audio-buffer-size";
  
 diff --git a/media/base/media_switches.h b/media/base/media_switches.h
-index 330500692d9933509c2c50c16b2d7e3c4f33d551..cabecd4af7387215783000cf4a35c05672b5e406 100644
+index 38ebd21fd27d7bc9d330c31aca66822f20cb4fe4..ddf82f52d50f8a46dac818a7d636b3a88cdbd27d 100644
 --- a/media/base/media_switches.h
 +++ b/media/base/media_switches.h
 @@ -23,6 +23,9 @@ class CommandLine;
@@ -69,7 +69,7 @@ index 330500692d9933509c2c50c16b2d7e3c4f33d551..cabecd4af7387215783000cf4a35c056
  MEDIA_EXPORT extern const char kAudioBufferSize[];
  
 diff --git a/third_party/blink/renderer/modules/mediastream/media_stream_audio_processor.cc b/third_party/blink/renderer/modules/mediastream/media_stream_audio_processor.cc
-index f5747e7b987f6a22f349fc477a5b5d685fb7f1a8..9834091a7179bdcdf67e5dd5ac3f9b33fa6f0295 100644
+index e4e7d7e38ffb6699cef682437358a41aff99d638..46c1a5e1bb693728dfcd4ccc2e4918fa52deb0aa 100644
 --- a/third_party/blink/renderer/modules/mediastream/media_stream_audio_processor.cc
 +++ b/third_party/blink/renderer/modules/mediastream/media_stream_audio_processor.cc
 @@ -27,6 +27,7 @@
@@ -80,7 +80,7 @@ index f5747e7b987f6a22f349fc477a5b5d685fb7f1a8..9834091a7179bdcdf67e5dd5ac3f9b33
  #include "media/webrtc/helpers.h"
  #include "third_party/abseil-cpp/absl/types/optional.h"
  #include "third_party/blink/public/common/features.h"
-@@ -576,6 +577,12 @@ void MediaStreamAudioProcessor::InitializeCaptureFifo(
+@@ -577,6 +578,12 @@ void MediaStreamAudioProcessor::InitializeCaptureFifo(
    // The output channels from the fifo is normally the same as input.
    int fifo_output_channels = input_format.channels();
  
