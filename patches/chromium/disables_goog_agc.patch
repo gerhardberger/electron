@@ -8,10 +8,10 @@ Disables experimental AGC1 mode in MediaStreamAudioProcessor.
 Signed-off-by: gellert <gellert.hegyi@around.co>
 
 diff --git a/third_party/blink/renderer/platform/mediastream/media_stream_audio_processor_options.cc b/third_party/blink/renderer/platform/mediastream/media_stream_audio_processor_options.cc
-index 2cbfffdd31d373740dd81aabd31fa4dd955d96e5..d35b9f2305adb2e828fee2dedb5fa752d6a094ba 100644
+index e82ef6505b0e63d8c092199305932d191ba7e51f..617d93add620f955f275d787f00cf6cd3680b182 100644
 --- a/third_party/blink/renderer/platform/mediastream/media_stream_audio_processor_options.cc
 +++ b/third_party/blink/renderer/platform/mediastream/media_stream_audio_processor_options.cc
-@@ -438,7 +438,9 @@ rtc::scoped_refptr<webrtc::AudioProcessing> CreateWebRtcAudioProcessingModule(
+@@ -439,7 +439,9 @@ rtc::scoped_refptr<webrtc::AudioProcessing> CreateWebRtcAudioProcessingModule(
      experimental_agc->digital_adaptive_disabled =
          hybrid_agc_params.has_value() && !hybrid_agc_params->dry_run;
      config.Set<webrtc::ExperimentalAgc>(experimental_agc);
@@ -22,7 +22,7 @@ index 2cbfffdd31d373740dd81aabd31fa4dd955d96e5..d35b9f2305adb2e828fee2dedb5fa752
    } else {
      // Do not use the analog controller.
      // This should likely be done on non-Chromecast platforms as well, but care
-@@ -446,7 +448,7 @@ rtc::scoped_refptr<webrtc::AudioProcessing> CreateWebRtcAudioProcessingModule(
+@@ -447,7 +449,7 @@ rtc::scoped_refptr<webrtc::AudioProcessing> CreateWebRtcAudioProcessingModule(
      // https://crbug.com/918677#c4
      config.Set<webrtc::ExperimentalAgc>(
          new webrtc::ExperimentalAgc(/*enabled=*/false));
