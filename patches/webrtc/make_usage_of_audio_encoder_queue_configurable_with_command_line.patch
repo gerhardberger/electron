@@ -22,7 +22,7 @@ index 200f9f4038592ab8e24bc6ffb4988aaf47fe46a3..587c10892508f22cec0af11511258d02
      "../api:call_api",
      "../api:frame_transformer_interface",
 diff --git a/audio/channel_send.cc b/audio/channel_send.cc
-index 06e9238ce81b805a5ec990e7965cb60a1f0811a0..725dff1f3d12f9f9b55e4823cfb5a06168e245ff 100644
+index ee6f0c54cde66db3c1027f0f86c14e5949c5be47..bbfffef1a1fd2c9f3e5d894925a83bd67ff04c30 100644
 --- a/audio/channel_send.cc
 +++ b/audio/channel_send.cc
 @@ -24,8 +24,11 @@
@@ -62,7 +62,7 @@ index 06e9238ce81b805a5ec990e7965cb60a1f0811a0..725dff1f3d12f9f9b55e4823cfb5a061
    const bool fixing_timestamp_stall_;
  
    mutable Mutex rtcp_counter_mutex_;
-@@ -516,6 +530,10 @@ ChannelSend::ChannelSend(
+@@ -518,6 +532,10 @@ ChannelSend::ChannelSend(
    RTC_DCHECK_EQ(0, error);
    if (frame_transformer)
      InitFrameTransformerDelegate(std::move(frame_transformer));
@@ -73,7 +73,7 @@ index 06e9238ce81b805a5ec990e7965cb60a1f0811a0..725dff1f3d12f9f9b55e4823cfb5a061
  }
  
  ChannelSend::~ChannelSend() {
-@@ -814,57 +832,91 @@ void ChannelSend::ProcessAndEncodeAudio(
+@@ -816,57 +834,91 @@ void ChannelSend::ProcessAndEncodeAudio(
    RTC_DCHECK_GT(audio_frame->samples_per_channel_, 0);
    RTC_DCHECK_LE(audio_frame->num_channels_, 8);
  

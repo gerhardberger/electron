@@ -25,12 +25,12 @@ index 68b8655b1cb6f21ae552e7295c7097153bb1c7b5..95d2deb058c2315e9c940290943c86e4
    // List of streams, one per screen.
    std::vector<CGDisplayStreamRef> display_streams_;
 diff --git a/modules/desktop_capture/mac/screen_capturer_mac.mm b/modules/desktop_capture/mac/screen_capturer_mac.mm
-index a79384c7a3a65078823a398c52100b7065d3339b..4f8acf4230b7d8383ebf2ba89d4a4f8ed6456d62 100644
+index 29d2017356365bb90e72c24530fd39db47b76d14..db703f72cd0b59fa6505392b17adddc9749f5bd0 100644
 --- a/modules/desktop_capture/mac/screen_capturer_mac.mm
 +++ b/modules/desktop_capture/mac/screen_capturer_mac.mm
 @@ -61,8 +61,13 @@ void CopyRect(const uint8_t* src_plane,
  // Returns an array of CGWindowID for all the on-screen windows except
- // |window_to_exclude|, or NULL if the window is not found or it fails. The
+ // `window_to_exclude`, or NULL if the window is not found or it fails. The
  // caller should release the returned CFArrayRef.
 -CFArrayRef CreateWindowListWithExclusion(CGWindowID window_to_exclude) {
 -  if (!window_to_exclude) return nullptr;

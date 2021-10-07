@@ -20,7 +20,7 @@ index 95d2deb058c2315e9c940290943c86e48ccb35c3..70148b66bb3374db84d06b5c818228af
  
  #include <memory>
 diff --git a/modules/desktop_capture/mac/screen_capturer_mac.mm b/modules/desktop_capture/mac/screen_capturer_mac.mm
-index a6876f5b98fe642c9d168a79854cc82def07a31e..5921702b40afb29a01d24c25befbee973cc848bb 100644
+index c339b00eaa4d85c6258cd0a89e7b416d478f5db0..9f047b40091a3864c723d5cd25ba90e5cdc823cf 100644
 --- a/modules/desktop_capture/mac/screen_capturer_mac.mm
 +++ b/modules/desktop_capture/mac/screen_capturer_mac.mm
 @@ -12,6 +12,7 @@
@@ -51,15 +51,7 @@ index a6876f5b98fe642c9d168a79854cc82def07a31e..5921702b40afb29a01d24c25befbee97
      if (pid == own_pid) {
        if (
          layer == floating_layer || // screen share overlay
-@@ -117,6 +124,7 @@ CFArrayRef CreateWindowListWithExclusion(std::vector<CGWindowID>* windows_to_exc
-   return returned_array;
- }
- 
-+
- // Returns the bounds of |window| in physical pixels, enlarged by a small amount
- // on four edges to take account of the border/shadow effects.
- DesktopRect GetExcludedWindowPixelBounds(CGWindowID window, float dip_to_pixel_scale) {
-@@ -293,7 +301,18 @@ DesktopRect GetExcludedWindowPixelBounds(CGWindowID window, float dip_to_pixel_s
+@@ -293,7 +300,18 @@ DesktopRect GetExcludedWindowPixelBounds(CGWindowID window, float dip_to_pixel_s
  
    new_frame->set_capture_time_ms((rtc::TimeNanos() - capture_start_time_nanos) /
                                   rtc::kNumNanosecsPerMillisec);
@@ -80,11 +72,11 @@ index a6876f5b98fe642c9d168a79854cc82def07a31e..5921702b40afb29a01d24c25befbee97
  
  void ScreenCapturerMac::SetExcludedWindow(WindowId window) {
 diff --git a/modules/desktop_capture/window_capturer_mac.mm b/modules/desktop_capture/window_capturer_mac.mm
-index cbbc500613636ebaca432aa3b645ab4b382786db..7a1e634701cfbc6f88457c4bac780d02e2f6d889 100644
+index de15d65ac5123e497caafbcf59bbb3e552480b38..8164f808c0458bdc062904c8a3fd7215edb493f5 100644
 --- a/modules/desktop_capture/window_capturer_mac.mm
 +++ b/modules/desktop_capture/window_capturer_mac.mm
 @@ -26,8 +26,92 @@
- #include "modules/desktop_capture/window_finder_mac.h"
+ #include "rtc_base/checks.h"
  #include "rtc_base/constructor_magic.h"
  #include "rtc_base/logging.h"
 +#include "rtc_base/time_utils.h"

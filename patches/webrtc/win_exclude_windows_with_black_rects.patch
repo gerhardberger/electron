@@ -23,7 +23,7 @@ index 25b92bed45ec52838394ebf61e25d5aea9cf3340..d2a0a9a71230f81b133f11a36e4146eb
        "win/cursor.h",
        "win/d3d_device.cc",
 diff --git a/modules/desktop_capture/desktop_capture_options.h b/modules/desktop_capture/desktop_capture_options.h
-index a693803aa02227cbe8f58583de9009fbcac9b444..3881ff18cb246023e0917e567a1fd602efbdaead 100644
+index 26eb0f535fcb095ee8388d4d151a422888f446ce..f0615acdb398d2a16e040852ca75f9ed1e125c39 100644
 --- a/modules/desktop_capture/desktop_capture_options.h
 +++ b/modules/desktop_capture/desktop_capture_options.h
 @@ -129,6 +129,12 @@ class RTC_EXPORT DesktopCaptureOptions {
@@ -48,7 +48,7 @@ index a693803aa02227cbe8f58583de9009fbcac9b444..3881ff18cb246023e0917e567a1fd602
  #if defined(WEBRTC_USE_X11)
    bool use_update_notifications_ = false;
 diff --git a/modules/desktop_capture/screen_capturer_win.cc b/modules/desktop_capture/screen_capturer_win.cc
-index be6d8a5275c9a1960f8026909921d4c4283c45f9..e8c65b069359034829107a5b9600a4631642c0fd 100644
+index b5935dc3162a2084d44d0b001b18969b0335538b..ee2334b75ac02a96afaa89fe712e7d5e7fe3d771 100644
 --- a/modules/desktop_capture/screen_capturer_win.cc
 +++ b/modules/desktop_capture/screen_capturer_win.cc
 @@ -16,6 +16,7 @@

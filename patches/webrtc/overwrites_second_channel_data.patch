@@ -8,7 +8,7 @@ This patch overwrites the second channel data using the first channel when sendi
 Signed-off-by: gellert <gellert.hegyi@around.co>
 
 diff --git a/pc/rtp_sender.cc b/pc/rtp_sender.cc
-index aa268cef4594abdd2cb3a4a657d2d912a9c913c7..e0ecb80eefc8a360d908290da9f6e3a6572321b9 100644
+index d4286371be9513f38ad79b8739a4badf47e2beda..2c3d31bddf2c88972d0b71a5cd6b357da577a056 100644
 --- a/pc/rtp_sender.cc
 +++ b/pc/rtp_sender.cc
 @@ -406,6 +406,20 @@ void LocalAudioSinkAdapter::OnData(

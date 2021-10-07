@@ -8,7 +8,7 @@ This patch sets a flag that will prevent window exclusion while in preview when 
 Signed-off-by: gellert <gellert.hegyi@around.co>
 
 diff --git a/modules/desktop_capture/desktop_and_cursor_composer.cc b/modules/desktop_capture/desktop_and_cursor_composer.cc
-index 69b8b40c7329bd3b6c24c19e68a7b19d1d82e1ac..1fa186f02ecaa60cee5f992b1d894287fc704c1a 100644
+index 7be8982abeaa9d14d031e761868e68e225ee717c..400cf19ed863430f4f8499978b71236a6ad045e7 100644
 --- a/modules/desktop_capture/desktop_and_cursor_composer.cc
 +++ b/modules/desktop_capture/desktop_and_cursor_composer.cc
 @@ -169,6 +169,7 @@ void DesktopAndCursorComposer::Start(DesktopCapturer::Callback* callback) {
@@ -20,11 +20,11 @@ index 69b8b40c7329bd3b6c24c19e68a7b19d1d82e1ac..1fa186f02ecaa60cee5f992b1d894287
  }
  
 diff --git a/modules/desktop_capture/desktop_capturer.h b/modules/desktop_capture/desktop_capturer.h
-index 64339c0ca623b57f0b3367403986fde5aef1ed02..15b749c91ddd762201f05d51326bf1809ee33c32 100644
+index 8a65e5759cc927c8cf53f874cb604403df4aa26e..6617c69e351bc7fd1e22cb8bc53c8b19dbf4c0f9 100644
 --- a/modules/desktop_capture/desktop_capturer.h
 +++ b/modules/desktop_capture/desktop_capturer.h
 @@ -80,6 +80,7 @@ class RTC_EXPORT DesktopCapturer {
-   // Called at the beginning of a capturing session. |callback| must remain
+   // Called at the beginning of a capturing session. `callback` must remain
    // valid until capturer is destroyed.
    virtual void Start(Callback* callback) = 0;
 +  bool should_exclude_ = false;
@@ -32,18 +32,10 @@ index 64339c0ca623b57f0b3367403986fde5aef1ed02..15b749c91ddd762201f05d51326bf180
    // Sets SharedMemoryFactory that will be used to create buffers for the
    // captured frames. The factory can be invoked on a thread other than the one
 diff --git a/modules/desktop_capture/mac/screen_capturer_mac.mm b/modules/desktop_capture/mac/screen_capturer_mac.mm
-index 4f8acf4230b7d8383ebf2ba89d4a4f8ed6456d62..a6876f5b98fe642c9d168a79854cc82def07a31e 100644
+index db703f72cd0b59fa6505392b17adddc9749f5bd0..c339b00eaa4d85c6258cd0a89e7b416d478f5db0 100644
 --- a/modules/desktop_capture/mac/screen_capturer_mac.mm
 +++ b/modules/desktop_capture/mac/screen_capturer_mac.mm
-@@ -326,7 +326,6 @@ DesktopRect GetExcludedWindowPixelBounds(CGWindowID window, float dip_to_pixel_s
- }
- 
- bool ScreenCapturerMac::CgBlit(const DesktopFrame& frame, const DesktopRegion& region) {
--
-   MacDisplayConfigurations displays_to_capture;
-   if (current_display_) {
-     // Capturing a single screen. Note that the screen id may change when
-@@ -368,16 +367,18 @@ DesktopRect GetExcludedWindowPixelBounds(CGWindowID window, float dip_to_pixel_s
+@@ -368,16 +368,18 @@ DesktopRect GetExcludedWindowPixelBounds(CGWindowID window, float dip_to_pixel_s
      // Translate the region to be copied into display-relative coordinates.
      copy_region.Translate(-display_bounds.left(), -display_bounds.top());
  
@@ -70,7 +62,7 @@ index 4f8acf4230b7d8383ebf2ba89d4a4f8ed6456d62..a6876f5b98fe642c9d168a79854cc82d
        for(std::vector<CGWindowID>::size_type i = 0; i < excluded_windows_.size(); i++) {
          CGWindowID excluded_window = excluded_windows_[i];
  
-@@ -429,35 +430,38 @@ DesktopRect GetExcludedWindowPixelBounds(CGWindowID window, float dip_to_pixel_s
+@@ -429,35 +431,37 @@ DesktopRect GetExcludedWindowPixelBounds(CGWindowID window, float dip_to_pixel_s
                 i.rect());
      }
  
@@ -84,14 +76,14 @@ index 4f8acf4230b7d8383ebf2ba89d4a4f8ed6456d62..a6876f5b98fe642c9d168a79854cc82d
 +        rtc::ScopedCFTypeRef<CGImageRef> excluded_image = excluded_images_[i];
 +        rtc::ScopedCFTypeRef<CFDataRef> excluded_image_data = excluded_image_data_list_[i];
  
--      if (!excluded_image_data.get()) {
+       if (!excluded_image_data.get()) {
 -        continue;
 -      }
 -      RTC_DCHECK(excluded_image_data);
 -      display_base_address = CFDataGetBytePtr(excluded_image_data.get());
 -      src_bytes_per_row = CGImageGetBytesPerRow(excluded_image.get());
 -
--      // Translate the bounds relative to the desktop, because |frame| data
+-      // Translate the bounds relative to the desktop, because `frame` data
 -      // starts from the desktop top-left corner.
 -      DesktopRect window_bounds_relative_to_desktop(excluded_window_bounds);
 -      window_bounds_relative_to_desktop.Translate(-screen_pixel_bounds_.left(),
@@ -108,15 +100,13 @@ index 4f8acf4230b7d8383ebf2ba89d4a4f8ed6456d62..a6876f5b98fe642c9d168a79854cc82d
 -                 frame.stride(),
 -                 DesktopFrame::kBytesPerPixel,
 -                 rect_to_copy);
-+        if (!excluded_image_data.get()) {
 +          continue;
 +        }
-+
 +        RTC_DCHECK(excluded_image_data);
 +        display_base_address = CFDataGetBytePtr(excluded_image_data.get());
 +        src_bytes_per_row = CGImageGetBytesPerRow(excluded_image.get());
 +
-+        // Translate the bounds relative to the desktop, because |frame| data
++        // Translate the bounds relative to the desktop, because `frame` data
 +        // starts from the desktop top-left corner.
 +        DesktopRect window_bounds_relative_to_desktop(excluded_window_bounds);
 +        window_bounds_relative_to_desktop.Translate(-screen_pixel_bounds_.left(),

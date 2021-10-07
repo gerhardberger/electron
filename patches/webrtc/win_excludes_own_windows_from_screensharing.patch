@@ -63,7 +63,7 @@ index 214eb0e463617c943b2e105b3271788287163a56..dae26f57fb40fb6a89ab9b612b5ac8af
    // TODO(jiayl): support capturing sources with pixel formats other than RGBA.
    int captured_bytes_per_pixel = header.cbSize / header.width / header.height;
 diff --git a/modules/desktop_capture/win/screen_capturer_win_magnifier.h b/modules/desktop_capture/win/screen_capturer_win_magnifier.h
-index 19202a75e97596ff9dfb4f2a2180478ffa38e80e..5f8e9fd0f3a6b25cecb7d156aa8cc7a791fc5b87 100644
+index 29966e9535635ae3ee5d684ba14d1c1f091f705f..e0c92841fa737210ca2dc0b2f28aac41cc0bb927 100644
 --- a/modules/desktop_capture/win/screen_capturer_win_magnifier.h
 +++ b/modules/desktop_capture/win/screen_capturer_win_magnifier.h
 @@ -103,6 +103,9 @@ class ScreenCapturerWinMagnifier : public DesktopCapturer {

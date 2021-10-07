@@ -8,10 +8,10 @@ Make Opus complexity configurable with command line switch
 Signed-off-by: gellert <gellert.hegyi@around.co>
 
 diff --git a/audio/channel_send.cc b/audio/channel_send.cc
-index 725dff1f3d12f9f9b55e4823cfb5a06168e245ff..46bce3d73429ed4e6b6a4e1a8f0f092e0242af38 100644
+index bbfffef1a1fd2c9f3e5d894925a83bd67ff04c30..bae1dee0077af23ca60342f4043353df475513a8 100644
 --- a/audio/channel_send.cc
 +++ b/audio/channel_send.cc
-@@ -534,6 +534,7 @@ ChannelSend::ChannelSend(
+@@ -536,6 +536,7 @@ ChannelSend::ChannelSend(
        HasSwitch(switches::kDisableEncoderQueue)) {
      use_encoder_queue_ = false;
    }
@@ -20,7 +20,7 @@ index 725dff1f3d12f9f9b55e4823cfb5a06168e245ff..46bce3d73429ed4e6b6a4e1a8f0f092e
  
  ChannelSend::~ChannelSend() {
 diff --git a/modules/audio_coding/BUILD.gn b/modules/audio_coding/BUILD.gn
-index b6ed45ab7892c764288786388a56e3526d641c69..93b478b1cad97d1b5efcc2df4be42830d02bba10 100644
+index 3ca2e9915389bed7669b6335b6b63cff43244899..cee23a5d09c2dd6f4318bea26d2d2c8c63fbdeaf 100644
 --- a/modules/audio_coding/BUILD.gn
 +++ b/modules/audio_coding/BUILD.gn
 @@ -745,6 +745,7 @@ rtc_library("webrtc_opus") {
@@ -32,7 +32,7 @@ index b6ed45ab7892c764288786388a56e3526d641c69..93b478b1cad97d1b5efcc2df4be42830
      ":audio_network_adaptor",
      "../../api:array_view",
 diff --git a/modules/audio_coding/codecs/opus/audio_encoder_opus.cc b/modules/audio_coding/codecs/opus/audio_encoder_opus.cc
-index ffea8bc7551dc487dee3294c6635d859083cb9b4..130e1b3fed10204e763be37adfbf5593f45d7937 100644
+index 5b3b7dab19d6d44e79276ddc3c934ad44414c34a..c72e0d92cbbdcc54a591db4dfd0dc620e6323db2 100644
 --- a/modules/audio_coding/codecs/opus/audio_encoder_opus.cc
 +++ b/modules/audio_coding/codecs/opus/audio_encoder_opus.cc
 @@ -17,6 +17,9 @@

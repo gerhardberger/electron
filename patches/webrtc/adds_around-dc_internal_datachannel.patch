@@ -8,7 +8,7 @@ This patch adds support for an internal data channel labeled around-dc which pro
 Signed-off-by: gellert <gellert.hegyi@around.co>
 
 diff --git a/pc/data_channel_controller.cc b/pc/data_channel_controller.cc
-index 7a6fd3c1681793a4ecd93b7491f2190c404253e9..fc5d9725ed3a582c367d31f4b5b5d727c8393eea 100644
+index e11647f2cab3d0f0ece967b6c9a506eb8fdbb69a..983dbd5e7598d8cb3d81f505758f8670773f1ba4 100644
 --- a/pc/data_channel_controller.cc
 +++ b/pc/data_channel_controller.cc
 @@ -23,8 +23,35 @@
@@ -196,7 +196,7 @@ index 7a6fd3c1681793a4ecd93b7491f2190c404253e9..fc5d9725ed3a582c367d31f4b5b5d727
 +
  }  // namespace webrtc
 diff --git a/pc/data_channel_controller.h b/pc/data_channel_controller.h
-index 7b1ff26690d5d8563a35b034c5a4f8113a0c7bc0..2a574b5391e1b52c13afb5700cb2af3f3dc9cde6 100644
+index af0e06353f304dab08cf5a0aa760234733ca0398..d3b7988c95a672bb2681212c379b234d49df4b34 100644
 --- a/pc/data_channel_controller.h
 +++ b/pc/data_channel_controller.h
 @@ -28,8 +28,10 @@
@@ -295,7 +295,7 @@ index 7b1ff26690d5d8563a35b034c5a4f8113a0c7bc0..2a574b5391e1b52c13afb5700cb2af3f
  
  }  // namespace webrtc
 diff --git a/pc/sctp_data_channel.h b/pc/sctp_data_channel.h
-index b0df48758b49a58217fe02e87b11fa31170db2bd..e78042b38e5b91b27b06ff06ad54c76a0f36fa37 100644
+index 0c3b95a225fbbb333f177762a1b117c85ff4ddac..eaf9b38320304dff7f504d1c63766042cd4472f6 100644
 --- a/pc/sctp_data_channel.h
 +++ b/pc/sctp_data_channel.h
 @@ -221,6 +221,8 @@ class SctpDataChannel : public DataChannelInterface,

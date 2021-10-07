@@ -8,7 +8,7 @@ This patch adds a new NetEq implemetation using a FIFO buffer that will be used 
 Signed-off-by: gellert <gellert.hegyi@around.co>
 
 diff --git a/api/audio/audio_mixer.h b/api/audio/audio_mixer.h
-index b290cfacf08d7890cce009708e0615891ee52267..47408bc72c7e6f5f1b38ca36b0b8ff9a658bc347 100644
+index 3483df22bc1f723cdf806a93d8d2de7b4e99d915..f3a11fafaf7ec4625413035c1145ff5e339516e4 100644
 --- a/api/audio/audio_mixer.h
 +++ b/api/audio/audio_mixer.h
 @@ -18,6 +18,10 @@
@@ -41,7 +41,7 @@ index b290cfacf08d7890cce009708e0615891ee52267..47408bc72c7e6f5f1b38ca36b0b8ff9a
    // twice. Addition and removal can happen on different threads.
    virtual bool AddSource(Source* audio_source) = 0;
 diff --git a/api/neteq/neteq.h b/api/neteq/neteq.h
-index ea7079e369589a1b23dac0c500cd7c8b318a1387..4600605e0d5a1c434281ebc929e82d7db9ab3953 100644
+index dbfa0718e48d8c419b26f83e4379f2db082e2ff8..39d013cd7ae8a83022b9999669e5362c59d9eaee 100644
 --- a/api/neteq/neteq.h
 +++ b/api/neteq/neteq.h
 @@ -30,6 +30,7 @@ namespace webrtc {
@@ -67,7 +67,7 @@ index ea7079e369589a1b23dac0c500cd7c8b318a1387..4600605e0d5a1c434281ebc929e82d7d
  
  }  // namespace webrtc
 diff --git a/api/peer_connection_interface.h b/api/peer_connection_interface.h
-index 5499b7d87c08cf6d626db4164af96deef2a3336c..2b09b4eb5213af47410e419d1416dea95bbb76ae 100644
+index a3c420f80b45d50738b5087ebaf284d3fe32c612..752f418177982aacf74e68c79480edcec088c2a6 100644
 --- a/api/peer_connection_interface.h
 +++ b/api/peer_connection_interface.h
 @@ -1322,6 +1322,9 @@ class PeerConnectionObserver {
@@ -81,7 +81,7 @@ index 5499b7d87c08cf6d626db4164af96deef2a3336c..2b09b4eb5213af47410e419d1416dea9
  
  // PeerConnectionDependencies holds all of PeerConnections dependencies.
 diff --git a/api/rtp_packet_info.h b/api/rtp_packet_info.h
-index 605620d6381f5f93bb823d7a1ab27cca36878b74..05b3fc51e5477bf9400a98ae1386503f4103acf7 100644
+index bc9839f479d7c844462f9aa993eeede0e838a557..b64e1bee7d4f43aab45fd97d6d7d356baf954d2f 100644
 --- a/api/rtp_packet_info.h
 +++ b/api/rtp_packet_info.h
 @@ -19,6 +19,7 @@
@@ -92,13 +92,15 @@ index 605620d6381f5f93bb823d7a1ab27cca36878b74..05b3fc51e5477bf9400a98ae1386503f
  
  namespace webrtc {
  
-@@ -74,6 +75,10 @@ class RTC_EXPORT RtpPacketInfo {
+@@ -74,6 +75,12 @@ class RTC_EXPORT RtpPacketInfo {
        const absl::optional<AbsoluteCaptureTime>& value) {
      absolute_capture_time_ = value;
    }
 +  int64_t get_absolute_capture_time_ms() const {
-+    return absolute_capture_time_.has_value() ? 
-+      UQ32x32ToInt64Ms(absolute_capture_time_->absolute_capture_timestamp) : 0;
++    return absolute_capture_time_.has_value()
++               ? UQ32x32ToInt64Ms(
++                     absolute_capture_time_->absolute_capture_timestamp)
++               : 0;
 +  }
  
    const absl::optional<int64_t>& local_capture_clock_offset() const {
@@ -119,10 +121,10 @@ index 61ebc2719f589200de43213527a437c70b8b12db..fdd1e3b36816783b8facc644b829abf9
    AudioState* audio_state() const;
  
 diff --git a/audio/audio_send_stream.cc b/audio/audio_send_stream.cc
-index 62dd53d33788c8beabfc3bbea9bf61b24fc338c3..a625a218d217a634f190b779e72d773dd77ed37f 100644
+index 455bb84e04ef5c0ea0779f885fe48ed76502e817..a3b6a4f23675a4587137bcfab3f6c31115ca26c1 100644
 --- a/audio/audio_send_stream.cc
 +++ b/audio/audio_send_stream.cc
-@@ -833,7 +833,7 @@ void AudioSendStream::ConfigureBitrateObserver() {
+@@ -835,7 +835,7 @@ void AudioSendStream::ConfigureBitrateObserver() {
    // This either updates the current observer or adds a new observer.
    // TODO(srte): Add overhead compensation here.
    auto constraints = GetMinMaxBitrateConstraints();
@@ -132,7 +134,7 @@ index 62dd53d33788c8beabfc3bbea9bf61b24fc338c3..a625a218d217a634f190b779e72d773d
    DataRate priority_bitrate = allocation_settings_.priority_bitrate;
    if (send_side_bwe_with_overhead_) {
 diff --git a/audio/channel_receive.cc b/audio/channel_receive.cc
-index 57269cd19363ccc49ee24f8c794abc274444c079..bd07046aa0328f2f8605784e978cf202e925ea45 100644
+index b741a8c1cadc66298eda0bd5652a85ce5556e4b9..de9f29eaf05d5d79218dfcb3b3765170c62f5d46 100644
 --- a/audio/channel_receive.cc
 +++ b/audio/channel_receive.cc
 @@ -27,7 +27,6 @@
@@ -191,10 +193,10 @@ index 6f47127f309b27389511bda82ed6c448096b6c3e..f1f2245374d5b887bef017f62ddd75e7
  
  class VideoEngineInterface : public RtpHeaderExtensionQueryInterface {
 diff --git a/media/engine/webrtc_voice_engine.cc b/media/engine/webrtc_voice_engine.cc
-index c25c0483b5bf6329390af2013f8ae218873a2ecc..e829734682501f9401cabfc883a46236f5842eb3 100644
+index dbe895968d79e590b6cc00813e0d2744981920bb..aaa37567a2ceea73ce6a24b9c00ccfdda332fb95 100644
 --- a/media/engine/webrtc_voice_engine.cc
 +++ b/media/engine/webrtc_voice_engine.cc
-@@ -661,7 +661,8 @@ WebRtcVoiceEngine::GetRtpHeaderExtensions() const {
+@@ -664,7 +664,8 @@ WebRtcVoiceEngine::GetRtpHeaderExtensions() const {
          webrtc::RtpExtension::kAbsSendTimeUri,
          webrtc::RtpExtension::kTransportSequenceNumberUri,
          webrtc::RtpExtension::kMidUri, webrtc::RtpExtension::kRidUri,
@@ -220,7 +222,7 @@ index 147688b0e0da9107231cdbe608e6746a8d95f674..534c911c259e248cfa7d8f66f5023921
    // Every option that is "set" will be applied. Every option not "set" will be
    // ignored. This allows us to selectively turn on and off different options
 diff --git a/modules/audio_coding/BUILD.gn b/modules/audio_coding/BUILD.gn
-index d1d17267e565e3284d112f48fbf5b7698589853d..b6ed45ab7892c764288786388a56e3526d641c69 100644
+index 79148063b9b5443ed1cd38ec1fcc040bcab43eaa..3ca2e9915389bed7669b6335b6b63cff43244899 100644
 --- a/modules/audio_coding/BUILD.gn
 +++ b/modules/audio_coding/BUILD.gn
 @@ -958,6 +958,8 @@ rtc_library("neteq") {
@@ -233,7 +235,7 @@ index d1d17267e565e3284d112f48fbf5b7698589853d..b6ed45ab7892c764288786388a56e352
      "neteq/neteq_impl.h",
      "neteq/normal.cc",
 diff --git a/modules/audio_coding/acm2/acm_receiver.h b/modules/audio_coding/acm2/acm_receiver.h
-index 19dc57758ee46e78e7d0c83b1234f45d91a250cb..806325f6b9aa4130f8e75bf4e4d66dbcf414217b 100644
+index 18b662aed0feb9f4af894f2448e7c89313f5ee24..47b8a7ab12f8d7e87464e2b7169fa1d0eb5170e5 100644
 --- a/modules/audio_coding/acm2/acm_receiver.h
 +++ b/modules/audio_coding/acm2/acm_receiver.h
 @@ -203,6 +203,10 @@ class AcmReceiver {
@@ -248,20 +250,20 @@ index 19dc57758ee46e78e7d0c83b1234f45d91a250cb..806325f6b9aa4130f8e75bf4e4d66dbc
    struct DecoderInfo {
      int payload_type;
 diff --git a/modules/audio_coding/acm2/call_statistics.cc b/modules/audio_coding/acm2/call_statistics.cc
-index e97e52968851a4a17c3964706b041501626716d9..8280ca201f89b67fe53e561c18587d8c4052bf60 100644
+index 0aad594f97c746c0f6d742327cd6726e0fc991ff..6d10ba8ad04270610b4a77967d31daad3ae7956d 100644
 --- a/modules/audio_coding/acm2/call_statistics.cc
 +++ b/modules/audio_coding/acm2/call_statistics.cc
 @@ -45,7 +45,7 @@ void CallStatistics::DecodedByNetEq(AudioFrame::SpeechType speech_type,
      }
      case AudioFrame::kUndefined: {
-       // If the audio is decoded by NetEq, |kUndefined| is not an option.
+       // If the audio is decoded by NetEq, `kUndefined` is not an option.
 -      RTC_NOTREACHED();
 +      // RTC_NOTREACHED();
      }
    }
  }
 diff --git a/modules/audio_coding/codecs/opus/audio_encoder_opus.cc b/modules/audio_coding/codecs/opus/audio_encoder_opus.cc
-index 7c62e98c5b725221c4ca748137d157aed2dbfe30..ffea8bc7551dc487dee3294c6635d859083cb9b4 100644
+index e4d3b9e2b54a039021b4d69496bd75d4d92ecd87..5b3b7dab19d6d44e79276ddc3c934ad44414c34a 100644
 --- a/modules/audio_coding/codecs/opus/audio_encoder_opus.cc
 +++ b/modules/audio_coding/codecs/opus/audio_encoder_opus.cc
 @@ -56,10 +56,10 @@ constexpr int kDefaultMaxPlaybackRate = 48000;
@@ -1606,7 +1608,7 @@ index 0000000000000000000000000000000000000000..8bf008675f870e8d0b0fca3522ae250d
 +}  // namespace webrtc
 +#endif  // MODULES_AUDIO_CODING_NETEQ_NETEQ_IMPL_H_
 diff --git a/modules/audio_coding/neteq/packet_buffer.cc b/modules/audio_coding/neteq/packet_buffer.cc
-index 86ae8475ce796827785d01ac9d1bdd7355f4e74c..5a2d526aa8ad0f7359387f0438253d726c1f9348 100644
+index f6b5a476c9a565c16f3a9d59587c9f29d97f15c7..fbff24f376208d31dfcb09d96339b043330c4339 100644
 --- a/modules/audio_coding/neteq/packet_buffer.cc
 +++ b/modules/audio_coding/neteq/packet_buffer.cc
 @@ -390,6 +390,16 @@ size_t PacketBuffer::GetSpanSamples(size_t last_decoded_length,
@@ -1627,7 +1629,7 @@ index 86ae8475ce796827785d01ac9d1bdd7355f4e74c..5a2d526aa8ad0f7359387f0438253d72
      const DecoderDatabase* decoder_database) const {
    RTC_DCHECK(decoder_database);
 diff --git a/modules/audio_coding/neteq/packet_buffer.h b/modules/audio_coding/neteq/packet_buffer.h
-index cd2adf711144a518615ed165c9298ab316c5ff91..4f327e84e203e8ef47768cb6506f0b360dea2180 100644
+index 20a053323ab52cfb19a93f588df938f482015ada..c95e20784fcc20e241a16ea714dd0ad2fbfbb223 100644
 --- a/modules/audio_coding/neteq/packet_buffer.h
 +++ b/modules/audio_coding/neteq/packet_buffer.h
 @@ -150,6 +150,8 @@ class PacketBuffer {
@@ -1672,10 +1674,10 @@ index f66202efee649eab26599b4de6193b9ceae1791c..31684b0b1325db8b8069f51ceed353e8
    AudioMixerImpl(std::unique_ptr<OutputRateCalculator> output_rate_calculator,
                   bool use_limiter,
 diff --git a/pc/sdp_offer_answer.cc b/pc/sdp_offer_answer.cc
-index 533bd84dbec98ea8f3d3ab16cf6958d4cc516253..6f40b95c4b5ab6d95d4d5f2df2f1cb7df778193c 100644
+index 82f13ee95737a667ef9585c1be5c749bb49368bf..13cdd25d795698b7455153c1f0835f4f665542b7 100644
 --- a/pc/sdp_offer_answer.cc
 +++ b/pc/sdp_offer_answer.cc
-@@ -27,6 +27,7 @@
+@@ -28,6 +28,7 @@
  #include "api/rtp_receiver_interface.h"
  #include "api/rtp_sender_interface.h"
  #include "api/video/builtin_video_bitrate_allocator_factory.h"
@@ -1683,7 +1685,7 @@ index 533bd84dbec98ea8f3d3ab16cf6958d4cc516253..6f40b95c4b5ab6d95d4d5f2df2f1cb7d
  #include "media/base/codec.h"
  #include "media/base/media_engine.h"
  #include "media/base/rid_description.h"
-@@ -1874,6 +1875,23 @@ RTCError SdpOfferAnswerHandler::ApplyRemoteDescription(
+@@ -1875,6 +1876,23 @@ RTCError SdpOfferAnswerHandler::ApplyRemoteDescription(
      local_ice_credentials_to_replace_->ClearIceCredentials();
    }
  

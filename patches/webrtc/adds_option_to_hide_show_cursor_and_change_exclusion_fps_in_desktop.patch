@@ -7,7 +7,7 @@ Subject: adds option to hide show cursor and change exclusion fps in desktop
 This patch adds the ability to the desktop capturerer to hide and show cursor and change exclusion fps in desktop screensharing.
 
 diff --git a/modules/desktop_capture/desktop_and_cursor_composer.cc b/modules/desktop_capture/desktop_and_cursor_composer.cc
-index 1fa186f02ecaa60cee5f992b1d894287fc704c1a..6e48851c2fed1d0a9f2a8320b4c9a24d84175497 100644
+index 400cf19ed863430f4f8499978b71236a6ad045e7..fb1afcd37924f6e3b0960e580135e79f88c42900 100644
 --- a/modules/desktop_capture/desktop_and_cursor_composer.cc
 +++ b/modules/desktop_capture/desktop_and_cursor_composer.cc
 @@ -69,7 +69,8 @@ class DesktopFrameWithCursor : public DesktopFrame {
@@ -78,7 +78,7 @@ index 1fa186f02ecaa60cee5f992b1d894287fc704c1a..6e48851c2fed1d0a9f2a8320b4c9a24d
        cursor_changed_ = false;
        frame = std::move(frame_with_cursor);
 diff --git a/modules/desktop_capture/desktop_capturer.h b/modules/desktop_capture/desktop_capturer.h
-index 15b749c91ddd762201f05d51326bf1809ee33c32..eba5daa2dd586071a2dd5c596f7dcc8a0b7563eb 100644
+index 6617c69e351bc7fd1e22cb8bc53c8b19dbf4c0f9..be9fbf47da5ab2c212bad639fb1e6343e39205d1 100644
 --- a/modules/desktop_capture/desktop_capturer.h
 +++ b/modules/desktop_capture/desktop_capturer.h
 @@ -81,6 +81,8 @@ class RTC_EXPORT DesktopCapturer {
@@ -91,7 +91,7 @@ index 15b749c91ddd762201f05d51326bf1809ee33c32..eba5daa2dd586071a2dd5c596f7dcc8a
    // Sets SharedMemoryFactory that will be used to create buffers for the
    // captured frames. The factory can be invoked on a thread other than the one
 diff --git a/modules/desktop_capture/mac/screen_capturer_mac.mm b/modules/desktop_capture/mac/screen_capturer_mac.mm
-index 5921702b40afb29a01d24c25befbee973cc848bb..93670c410c2d2bc45d95294a6696af2ebbf4a034 100644
+index 9f047b40091a3864c723d5cd25ba90e5cdc823cf..4505b8c9c5582085ad49d5597b455697fdc6634b 100644
 --- a/modules/desktop_capture/mac/screen_capturer_mac.mm
 +++ b/modules/desktop_capture/mac/screen_capturer_mac.mm
 @@ -387,8 +387,7 @@ DesktopRect GetExcludedWindowPixelBounds(CGWindowID window, float dip_to_pixel_s

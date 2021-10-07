@@ -8,10 +8,10 @@ Subject: adds around runner test executable
 Signed-off-by: gellert <gellert.hegyi@around.co>
 
 diff --git a/modules/audio_processing/BUILD.gn b/modules/audio_processing/BUILD.gn
-index 814e2831ab7bbc8a057ddc6a75cc7bf6a5a55eda..b24ed10a44844e4aa5aff6ead467e72933888769 100644
+index 4774f79c78f4c5fccdad7d09539c792e006b2c43..5bca2628eaf876275c15f7832ab8a311d1cb2231 100644
 --- a/modules/audio_processing/BUILD.gn
 +++ b/modules/audio_processing/BUILD.gn
-@@ -619,3 +619,41 @@ rtc_library("audioproc_test_utils") {
+@@ -621,3 +621,41 @@ rtc_library("audioproc_test_utils") {
    ]
    absl_deps = [ "//third_party/abseil-cpp/absl/types:optional" ]
  }
