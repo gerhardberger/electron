@@ -64,7 +64,7 @@ index 2f3348e5bd8c089de9e0ffeb0e603da2ef8ec578..43a081281aa1da54c13dcb8bc56a848f
    if (!ValidateValueFitNonNegInt32("readPixels", "offset", offset))
      return;
 diff --git a/third_party/blink/renderer/platform/mediastream/media_stream_audio_processor_options.cc b/third_party/blink/renderer/platform/mediastream/media_stream_audio_processor_options.cc
-index 7b679035dab7d0abd3db121fb3202a6af44f5403..e82ef6505b0e63d8c092199305932d191ba7e51f 100644
+index e6a937299187b4875d8792f1a03d198df21e30e7..46902069ce04dd42b28e259d75282de9c4ed23be 100644
 --- a/third_party/blink/renderer/platform/mediastream/media_stream_audio_processor_options.cc
 +++ b/third_party/blink/renderer/platform/mediastream/media_stream_audio_processor_options.cc
 @@ -191,8 +191,7 @@ bool AudioProcessingProperties::HasSameReconfigurableSettings(

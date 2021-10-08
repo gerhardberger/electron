@@ -609,7 +609,7 @@ index 34f3d0f888e65fe612490a37937927a297a8396c..82bb80d6717211048d9058cf0cae846f
    BooleanConstraint goog_experimental_noise_suppression;
    BooleanConstraint goog_audio_mirroring;
 diff --git a/third_party/blink/renderer/platform/mediastream/media_stream_audio_processor_options.cc b/third_party/blink/renderer/platform/mediastream/media_stream_audio_processor_options.cc
-index 2a4238dd2674bace467d4cb2dc164756afed9687..7b679035dab7d0abd3db121fb3202a6af44f5403 100644
+index 2a4238dd2674bace467d4cb2dc164756afed9687..e6a937299187b4875d8792f1a03d198df21e30e7 100644
 --- a/third_party/blink/renderer/platform/mediastream/media_stream_audio_processor_options.cc
 +++ b/third_party/blink/renderer/platform/mediastream/media_stream_audio_processor_options.cc
 @@ -168,6 +168,7 @@ void AudioProcessingProperties::DisableDefaultProperties() {
@@ -634,19 +634,22 @@ index 2a4238dd2674bace467d4cb2dc164756afed9687..7b679035dab7d0abd3db121fb3202a6a
    // system effects are activated?
    out.transient_noise_suppression = goog_experimental_noise_suppression;
  
-+  out.around_audio_processing = around_audio_processing
-+                             ? media::AroundAudioProcessingType::kDefault
-+                             : media::AroundAudioProcessingType::kDisabled;
++  out.around_audio_processing =
++      around_audio_processing ? media::AroundAudioProcessingType::kDefault
++                              : media::AroundAudioProcessingType::kDisabled;
 +
    out.automatic_gain_control =
        goog_auto_gain_control && !system_gain_control_activated;
    out.experimental_automatic_gain_control = goog_experimental_auto_gain_control;
-@@ -392,6 +398,9 @@ void PopulateApmConfig(
+@@ -392,6 +398,12 @@ void PopulateApmConfig(
    apm_config->noise_suppression.level =
        noise_suppression_level.value_or(NoiseSuppression::kHigh);
  
 +  apm_config->around_audio_processing.enabled =
-+      settings.around_audio_processing;
++      settings.around_audio_processing ==
++              media::AroundAudioProcessingType::kDefault
++          ? true
++          : false;
 +
    apm_config->echo_canceller.enabled = settings.echo_cancellation;
  #if defined(OS_ANDROID)
