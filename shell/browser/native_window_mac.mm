@@ -491,11 +491,15 @@ void NativeWindowMac::Close() {
   // Ensure it's closed before calling [window_ performClose:nil].
   SetEnabled(true);
 
+  // Evaluate this condition before performing the close below to
+  // ensure object state is all valid.
+  bool mustNotify = is_modal() && parent() && IsVisible();
+
   [window_ performClose:nil];
 
   // Closing a sheet doesn't trigger windowShouldClose,
   // so we need to manually call it ourselves here.
-  if (is_modal() && parent() && IsVisible()) {
+  if (mustNotify) {
     NotifyWindowCloseButtonClicked();
   }
 }
