@@ -8,7 +8,7 @@ This patch adds mixes webaudio output into echo canceller
 Signed-off-by: gellert <gellert.hegyi@around.co>
 
 diff --git a/third_party/blink/renderer/modules/mediastream/media_stream_renderer_factory.cc b/third_party/blink/renderer/modules/mediastream/media_stream_renderer_factory.cc
-index 8d320bd56f5a8b652c07f4ca43902c9f9573faa3..7bd81dfafa76851322bcf0f7b3a9e7d1126940ef 100644
+index 8d320bd56f5a8b652c07f4ca43902c9f9573faa3..5b1fec3f5f569137335c228d7c23f8832e8985aa 100644
 --- a/third_party/blink/renderer/modules/mediastream/media_stream_renderer_factory.cc
 +++ b/third_party/blink/renderer/modules/mediastream/media_stream_renderer_factory.cc
 @@ -19,6 +19,7 @@
@@ -19,34 +19,39 @@ index 8d320bd56f5a8b652c07f4ca43902c9f9573faa3..7bd81dfafa76851322bcf0f7b3a9e7d1
  #include "third_party/blink/renderer/platform/mediastream/media_stream_audio_track.h"
  #include "third_party/blink/renderer/platform/mediastream/media_stream_descriptor.h"
  #include "third_party/blink/renderer/platform/webrtc/peer_connection_remote_audio_source.h"
-@@ -133,6 +134,30 @@ MediaStreamRendererFactory::GetAudioRenderer(
+@@ -132,7 +133,34 @@ MediaStreamRendererFactory::GetAudioRenderer(
+     SendLogMessage(String::Format(
          "%s => (creating TrackAudioRenderer for %s audio track)", __func__,
          audio_track->is_local_track() ? "local" : "remote"));
- 
-+    // @AROUND: WebRtcExternalAudioSourceRenderer allows mixing playback into
-+    // the echo cancelled stream. However we must wait until the WebRtcAudioRenderer
-+    // is created otherwise WebAudio playback cannot be heard.
-+    WebRtcAudioDeviceImpl* audio_device =
-+        PeerConnectionDependencyFactory::From(*frame->DomWindow()).GetWebRtcAudioDevice();
-+    DCHECK(audio_device);
+-
++    auto* source = audio_components[0].Get()->Source();
++    auto label = source ? source->Id() : "";
++    // In case of debug_sync the WebRtcExternalAudioSourceRenderer does crash in resetting resampler.
++    if (label != "debug_sync") {
++      // @AROUND: WebRtcExternalAudioSourceRenderer allows mixing playback into
++      // the echo cancelled stream. However we must wait until the WebRtcAudioRenderer
++      // is created otherwise WebAudio playback cannot be heard.
++      WebRtcAudioDeviceImpl* audio_device =
++          PeerConnectionDependencyFactory::From(*frame->DomWindow()).GetWebRtcAudioDevice();
++      DCHECK(audio_device);
 +
-+    webrtc::AudioMixer* audio_mixer = PeerConnectionDependencyFactory::From(*frame->DomWindow()).GetWebRtcAudioMixer();
++      webrtc::AudioMixer* audio_mixer = PeerConnectionDependencyFactory::From(*frame->DomWindow()).GetWebRtcAudioMixer();
 +
-+    if (audio_device->renderer()) {
-+      // TODO(xians): Add support for the case where the media stream contains
-+      // multiple audio tracks.
-+      DVLOG(1) << "Creating WebRtcExternalAudioSourceRenderer for remote track.";
-+      return new WebRtcExternalAudioSourceRenderer(
-+          audio_components[0].Get(),
-+          web_frame,
-+          /*session_id=*/base::UnguessableToken(),
-+          String(device_id),
-+          audio_mixer);
++      if (audio_device->renderer()) {
++        // TODO(xians): Add support for the case where the media stream contains
++        // multiple audio tracks.
++        DVLOG(1) << "Creating WebRtcExternalAudioSourceRenderer for remote track.";
++        return new WebRtcExternalAudioSourceRenderer(
++            audio_components[0].Get(),
++            web_frame,
++            /*session_id=*/base::UnguessableToken(),
++            String(device_id),
++            audio_mixer);
++      }
++
++      frame = To<LocalFrame>(WebLocalFrame::ToCoreFrame(*web_frame));
++      DCHECK(frame);
 +    }
-+
-+    frame = To<LocalFrame>(WebLocalFrame::ToCoreFrame(*web_frame));
-+    DCHECK(frame);
-+
      return new TrackAudioRenderer(audio_components[0].Get(), *frame,
                                    /*session_id=*/base::UnguessableToken(),
                                    String(device_id),
