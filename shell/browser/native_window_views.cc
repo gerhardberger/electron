@@ -32,6 +32,7 @@
 #include "shell/common/options_switches.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/base/hit_test.h"
+#include "ui/gfx/geometry/resize_utils.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/views/background.h"
@@ -1504,7 +1505,8 @@ void NativeWindowViews::OnWidgetWillResize(views::Widget* changed_widget,
     return;
 
   bool prevent_default = false;
-  NotifyWindowWillResize(new_bounds, &prevent_default);
+  NotifyWindowWillResize(new_bounds, gfx::ResizeEdge::kBottomRight,
+                         &prevent_default);
 }
 
 void NativeWindowViews::OnWidgetDidResize(views::Widget* changed_widget) {
