@@ -143,7 +143,7 @@ build:linux:
     - echo 'export PATH="$PATH:/home/ubuntu/depot_tools"' >> $BASH_ENV
     - source $BASH_ENV
     - gclient config  --name "src/electron"  --unmanaged  $GCLIENT_EXTRA_ARGS  "$CI_REPOSITORY_URL"
-    - ulimit -s 65536
+    - ulimit -S -s unlimited
     - ulimit -s
     - gclient sync --ignore_locks -v --with_branch_heads --with_tags -f
     - cd src
