@@ -139,7 +139,8 @@ build:linux:
     - git checkout . && git clean -fdx
     - mkdir -p $SCCACHE_DIR && mkdir -p $GIT_CACHE_PATH
     - cd ../..
-    - "{ rm -rf src/third_party/depot_tools && git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git src/third_party/depot_tools ; } || git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git src/third_party/depot_tools"
+    - rm -rf src/third_party/depot_tools
+    - git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git src/third_party/depot_tools
     - echo 'export PATH="$PATH:'"$PWD"'/src/third_party/depot_tools"' >> $BASH_ENV
     - source $BASH_ENV
     - gclient config  --name "src/electron"  --unmanaged  $GCLIENT_EXTRA_ARGS  "$CI_REPOSITORY_URL"
