@@ -140,7 +140,7 @@ build:linux:
     - mkdir -p $SCCACHE_DIR && mkdir -p $GIT_CACHE_PATH
     - cd ../..
     - "{ git -C src/third_party/depot_tools fetch origin && git -C src/third_party/depot_tools reset --hard origin/main ; } || git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git src/third_party/depot_tools"
-    - export PATH="$PATH:/home/ubuntu/depot_tools"
+    - export PATH="$PATH:$PWD/src/third_party/depot_tools"
     # - source $BASH_ENV
     - gclient config  --name "src/electron"  --unmanaged  $GCLIENT_EXTRA_ARGS  "$CI_REPOSITORY_URL"
     - ulimit -s
