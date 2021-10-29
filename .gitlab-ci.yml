@@ -146,7 +146,7 @@ build:linux:
     - ulimit -s
     - cp /home/ubuntu/depot_tools/vpython src/third_party/depot_tools/vpython
     - git -C src/third_party/depot_tools add vpython
-    - git -C src/third_party/depot_tools commit -m 'debug'
+    - git -C src/third_party/depot_tools commit -m 'debug2'
     - gclient sync --ignore_locks -vvvv --with_branch_heads --with_tags
     - cd src
     - rm -rf out/Release/dist.zip out/Release/breakpad_symbols out/Release/symbols.zip
