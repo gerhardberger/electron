@@ -145,7 +145,7 @@ build:linux:
     - gclient config  --name "src/electron"  --unmanaged  $GCLIENT_EXTRA_ARGS  "$CI_REPOSITORY_URL"
     - ulimit -s
     - cp /home/ubuntu/depot_tools/vpython src/third_party/depot_tools/vpython
-    - git -C src/third_party/depot_tools add src/third_party/depot_tools/vpython
+    - git -C src/third_party/depot_tools add vpython
     - git -C src/third_party/depot_tools commit -m 'debug'
     - gclient sync --ignore_locks -vvvv --with_branch_heads --with_tags
     - cd src
