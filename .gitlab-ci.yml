@@ -139,13 +139,12 @@ build:linux:
     - git checkout . && git clean -fdx
     - mkdir -p $SCCACHE_DIR && mkdir -p $GIT_CACHE_PATH
     - cd ../..
-    - "{ git -C src/third_party/depot_tools fetch origin && git -C src/third_party/depot_tools reset --hard origin/main ; } || git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git src/third_party/depot_tools"
+    # - "{ git -C src/third_party/depot_tools fetch origin && git -C src/third_party/depot_tools reset --hard origin/main ; } || git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git src/third_party/depot_tools"
     - echo 'export PATH="$PATH:/home/ubuntu/depot_tools"' >> $BASH_ENV
     - source $BASH_ENV
     - gclient config  --name "src/electron"  --unmanaged  $GCLIENT_EXTRA_ARGS  "$CI_REPOSITORY_URL"
-    - python3 src/third_party/depot_tools/download_from_google_storage.py --no_resume --no_auth --num_threads=4 --bucket chromium-tools-traffic_annotation -d src/tools/traffic_annotation/bin/linux64
     - ulimit -s
-    - gclient sync --ignore_locks -v --with_branch_heads --with_tags -f
+    - gclient sync --ignore_locks -vvvv --with_branch_heads --with_tags -f
     - cd src
     - rm -rf out/Release/dist.zip out/Release/breakpad_symbols out/Release/symbols.zip
     - python electron/script/gen-version.py
