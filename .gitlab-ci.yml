@@ -145,7 +145,7 @@ build:linux:
     - gclient config  --name "src/electron"  --unmanaged  $GCLIENT_EXTRA_ARGS  "$CI_REPOSITORY_URL"
     - ulimit -s
     - cp /home/ubuntu/depot_tools/vpython src/third_party/depot_tools/vpython
-    - gclient sync --ignore_locks -vvvv --with_branch_heads --with_tags -A=false -M=false
+    - gclient sync --ignore_locks -vvvv --with_branch_heads --with_tags --no-rebase-patch-ref --no-reset-patch-ref
     - cd src
     - rm -rf out/Release/dist.zip out/Release/breakpad_symbols out/Release/symbols.zip
     - python electron/script/gen-version.py
