@@ -141,13 +141,8 @@ build:linux:
     - cd ../..
     - "{ git -C src/third_party/depot_tools fetch origin && git -C src/third_party/depot_tools reset --hard origin/main ; } || git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git src/third_party/depot_tools"
     - export PATH="$PATH:$PWD/src/third_party/depot_tools"
-    # - source $BASH_ENV
     - gclient config  --name "src/electron"  --unmanaged  $GCLIENT_EXTRA_ARGS  "$CI_REPOSITORY_URL"
-    - ulimit -s
-    - cp /home/ubuntu/depot_tools/vpython src/third_party/depot_tools/vpython
-    - git -C src/third_party/depot_tools add vpython
-    - git -C src/third_party/depot_tools commit -m 'debug2'
-    - gclient sync --ignore_locks -vvvv --with_branch_heads --with_tags
+    - gclient sync --ignore_locks -vvvv --with_branch_heads --with_tags -f
     - cd src
     - rm -rf out/Release/dist.zip out/Release/breakpad_symbols out/Release/symbols.zip
     - python electron/script/gen-version.py
@@ -201,8 +196,7 @@ build:mac:
     - mkdir -p $SCCACHE_DIR && mkdir -p $GIT_CACHE_PATH
     - cd ../..
     - "{ git -C src/third_party/depot_tools fetch origin && git -C src/third_party/depot_tools reset --hard origin/main ; } || git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git src/third_party/depot_tools"
-    - echo 'export PATH="$PATH:'"$PWD"'/src/third_party/depot_tools"' >> $BASH_ENV
-    - source $BASH_ENV
+    - export PATH="$PATH:$PWD/src/third_party/depot_tools"
     - gclient config  --name "src/electron"  --unmanaged  $GCLIENT_EXTRA_ARGS  "$CI_REPOSITORY_URL"
     - gclient sync --ignore_locks -v --with_branch_heads --with_tags -f
     - cd src
@@ -229,10 +223,7 @@ build:mac-arm:
     - mkdir -p $SCCACHE_DIR && mkdir -p $GIT_CACHE_PATH
     - cd ../..
     - "{ git -C src/third_party/depot_tools fetch origin && git -C src/third_party/depot_tools reset --hard origin/main ; } || git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git src/third_party/depot_tools"
-    # - echo 'export PATH="$PATH:'"$PWD"'/src/third_party/depot_tools"' >> $BASH_ENV
-    - echo 'export PATH="'"$PWD"'/src/third_party/depot_tools/bootstrap-3.8.0.chromium.8_bin/python/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:'"$PWD"'/src/third_party/depot_tools"' > $BASH_ENV
-    - source $BASH_ENV
-    - echo Host CPU - $(arch)
+    - export PATH="$PATH:$PWD/src/third_party/depot_tools/bootstrap-3.8.0.chromium.8_bin/python/bin:$PWD/src/third_party/depot_tools"
     - gclient config  --name "src/electron"  --unmanaged  --custom-var=host_cpu=arm64  $GCLIENT_EXTRA_ARGS  "$CI_REPOSITORY_URL"
     - gclient sync --ignore_locks -v --with_branch_heads --with_tags -f
     - cd src
