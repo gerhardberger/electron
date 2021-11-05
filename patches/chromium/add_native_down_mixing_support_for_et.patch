@@ -334,10 +334,15 @@ index 0000000000000000000000000000000000000000..c80ec5641100b5a31bfa29c4b8a717c5
 +
 +#endif  //THIRD_PARTY_BLINK_RENDERER_MODULES_MEDIASTREAM_AROUND_AUDIO_MIXER_H
 diff --git a/third_party/blink/renderer/modules/mediastream/media_stream.cc b/third_party/blink/renderer/modules/mediastream/media_stream.cc
-index e010f2b3f75a321670510035a09c1f1399cd68f9..726cb52580322ed548bc9042359d56db1ef785e4 100644
+index e010f2b3f75a321670510035a09c1f1399cd68f9..4650549d67ea852f4b28a7ceb3f4263cc726d17a 100644
 --- a/third_party/blink/renderer/modules/mediastream/media_stream.cc
 +++ b/third_party/blink/renderer/modules/mediastream/media_stream.cc
-@@ -28,14 +28,37 @@
+@@ -25,17 +25,66 @@
+ 
+ #include "third_party/blink/renderer/modules/mediastream/media_stream.h"
+ 
++#include "base/command_line.h"
++#include "media/base/media_switches.h"
  #include "third_party/blink/public/platform/task_type.h"
  #include "third_party/blink/renderer/core/execution_context/execution_context.h"
  #include "third_party/blink/renderer/core/frame/deprecation.h"
@@ -356,32 +361,56 @@ index e010f2b3f75a321670510035a09c1f1399cd68f9..726cb52580322ed548bc9042359d56db
  
 +namespace {
 +
++// @AROUND: added for native ET mixing.
 +const char* kGroupInputLabel = "group_capture";
 +const char* kGroupOutputLabel = "group_playback";
 +// For debugging microphone sync.
 +const char* kDebugGroupInputLabel = "debug_sync";
 +
-+const int kLocalCaptureDelay = 20;      //200ms
-+#if defined(_WIN32)
-+// 160ms, On Windows audio engine typically adds 30-40ms of extra delay,
-+// which has to be subtracted from 200.
-+const int kLocalPlaybackDelay = 16;
-+#else
-+const int kLocalPlaybackDelay = 20;     //200ms
++// Returns certainly known audio latency in local audio pipeline.
++// @return int - latency in 10ms units
++static int getKnownAudioLatency(bool forPlayback) {
++#if defined(OS_MAC)
++  const base::CommandLine* cmd_line = base::CommandLine::ForCurrentProcess();
++  int audio_latency_factor = 0;
++  std::string audio_latency_factor_str(cmd_line->GetSwitchValueASCII(
++      switches::kAudioLatencyFactor));
++  if (base::StringToInt(audio_latency_factor_str, &audio_latency_factor) && audio_latency_factor > 0) {
++    return audio_latency_factor - 1;              // 1 - 10ms, this doesn't add any extra latency yet.
++  }
 +#endif
++#if defined(_WIN32)
++  if (forPlayback) {
++    return 4;     //On Windows audio engine typically adds 30-40ms of extra delay.
++  }
++#endif
++  return 0;
++}
++
++static int getLocalCaptureDelayForPrimary() {
++  int latency = 20 - getKnownAudioLatency(false);      // 20 - 200ms base delay.
++  DCHECK(latency >= 0);
++  return latency;
++}
++
++static int getLocalPlaybackDelayForPrimary() {
++  int latency = 20 - getKnownAudioLatency(true);
++  DCHECK(latency >= 0);
++  return latency;
++}
 +
 +}
 +
  static bool ContainsSource(MediaStreamTrackVector& track_vector,
                             MediaStreamSource* source) {
    for (MediaStreamTrack* track : track_vector) {
-@@ -289,6 +312,27 @@ void MediaStream::addTrack(MediaStreamTrack* track,
+@@ -289,6 +338,27 @@ void MediaStream::addTrack(MediaStreamTrack* track,
  
    switch (track->Component()->Source()->GetType()) {
      case MediaStreamSource::kTypeAudio:
 +      if (track->label() == kGroupOutputLabel) {
 +        PeerConnectionDependencyFactory::From(*GetExecutionContext()).GetWebRtcAudioDevice()->
-+          SetAroundPrimaryPlayoutSink(MediaStreamAudioSource::From(track->Component()->Source()), kLocalPlaybackDelay);
++          SetAroundPrimaryPlayoutSink(MediaStreamAudioSource::From(track->Component()->Source()), getLocalPlaybackDelayForPrimary());
 +      } else if (track->label() == kGroupInputLabel) {
 +        // Init the mixer and connect destination track.
 +        auto* mixer = static_cast<AroundAudioMixer*>(PeerConnectionDependencyFactory::From(*GetExecutionContext()).GetWebRtcAudioMixer());
@@ -395,7 +424,7 @@ index e010f2b3f75a321670510035a09c1f1399cd68f9..726cb52580322ed548bc9042359d56db
 +        mixer->ConnectDestination(MediaStreamAudioSource::From(track->Component()->Source()), device);
 +      } else if (audio_tracks_.size() == 1 && audio_tracks_[0]->label() == kGroupInputLabel) {
 +        auto* mixer = static_cast<AroundAudioMixer*>(PeerConnectionDependencyFactory::From(*GetExecutionContext()).GetWebRtcAudioMixer());
-+        mixer->ConnectLocalMicrophone(WebMediaStreamTrack(track->Component()), kLocalCaptureDelay);
++        mixer->ConnectLocalMicrophone(WebMediaStreamTrack(track->Component()), getLocalCaptureDelayForPrimary());
 +      } else if (track->label() == kDebugGroupInputLabel) {
 +        auto* mixer = static_cast<AroundAudioMixer*>(PeerConnectionDependencyFactory::From(*GetExecutionContext()).GetWebRtcAudioMixer());
 +        mixer->ConnectDestination(MediaStreamAudioSource::From(track->Component()->Source()), nullptr);
@@ -403,7 +432,7 @@ index e010f2b3f75a321670510035a09c1f1399cd68f9..726cb52580322ed548bc9042359d56db
        audio_tracks_.push_back(track);
        break;
      case MediaStreamSource::kTypeVideo:
-@@ -320,8 +364,20 @@ void MediaStream::removeTrack(MediaStreamTrack* track,
+@@ -320,8 +390,20 @@ void MediaStream::removeTrack(MediaStreamTrack* track,
    switch (track->Component()->Source()->GetType()) {
      case MediaStreamSource::kTypeAudio:
        pos = audio_tracks_.Find(track);
@@ -425,7 +454,7 @@ index e010f2b3f75a321670510035a09c1f1399cd68f9..726cb52580322ed548bc9042359d56db
        break;
      case MediaStreamSource::kTypeVideo:
        pos = video_tracks_.Find(track);
-@@ -356,7 +412,41 @@ MediaStreamTrack* MediaStream::getTrackById(String id) {
+@@ -356,7 +438,41 @@ MediaStreamTrack* MediaStream::getTrackById(String id) {
      if ((*iter)->id() == id)
        return iter->Get();
    }
