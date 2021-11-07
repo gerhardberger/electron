@@ -1077,7 +1077,7 @@ index f64ae80494614b0dc8b2ff7ccb8d32730b6e689b..a7ec1d92a26f1e4a44e1bfe6aa339c54
    int resource_multiplier_location_ = -1;
    int resource_offset_location_ = -1;
 diff --git a/components/viz/service/display/skia_renderer.cc b/components/viz/service/display/skia_renderer.cc
-index 67d8f6b28a4edee1764660ede8eb48581c2b897e..303ddfa52f2fb87b14dfcae2ac2f064aca018ec2 100644
+index 67d8f6b28a4edee1764660ede8eb48581c2b897e..ab732f75042e299e4601556e9edc76bb62a9979c 100644
 --- a/components/viz/service/display/skia_renderer.cc
 +++ b/components/viz/service/display/skia_renderer.cc
 @@ -84,6 +84,241 @@ namespace viz {
@@ -1338,14 +1338,14 @@ index 67d8f6b28a4edee1764660ede8eb48581c2b897e..303ddfa52f2fb87b14dfcae2ac2f064a
  
 -  if (needs_color_conversion_filter) {
 +  if (quad->is_video_frame) {
-+    SetAroundFilter(paint, image, quad->shared_quad_state->filter_id, quad->shared_quad_state->bounding_box, params->rect, false);
++    SetAroundFilter(paint, image, quad->shared_quad_state->filter_id, quad->shared_quad_state->bounding_box, gfx::RectF(quad->rect), false);
 +  }
 +
 +  if (needs_color_conversion_filter && src_color_space.IsHDR()) {
      // Skia won't perform color conversion.
      const gfx::ColorSpace dst_color_space = CurrentRenderPassColorSpace();
      DCHECK(SkColorSpace::Equals(image->colorSpace(),
-@@ -2096,6 +2334,43 @@ void SkiaRenderer::DrawTextureQuad(const TextureDrawQuad* quad,
+@@ -2096,6 +2334,61 @@ void SkiaRenderer::DrawTextureQuad(const TextureDrawQuad* quad,
    DrawSingleImage(image, valid_texel_bounds, rpdq_params, &paint, params);
  }
  
@@ -1361,15 +1361,33 @@ index 67d8f6b28a4edee1764660ede8eb48581c2b897e..303ddfa52f2fb87b14dfcae2ac2f064a
 +    around_shader_cache_ = SkRuntimeEffect::MakeForShader(SkString(kAroundShader), options).effect;
 +  }
 +
++  float image_width = image->width();
++  float image_height = image->height();
++  float zoom = fmax(bounding_box.width(), bounding_box.height());
++
++  // Calculating the scaled image sizes for UV calculations. To not have
++  // drastic UV gradients, we are only allowing video ratios to a certain
++  // extent.
++  if (rect.width() > rect.height()) {
++    image_height = image_width * fmax(rect.height() / rect.width(), 0.75f);
++  } else {
++    image_width = image_height * fmax(rect.width() / rect.height(), 0.75f);
++  }
++
 +  AroundShaderInput uniforms;
 +  uniforms.filter_id = filter_id;
-+  uniforms.offset_x = bounding_box.x() * image->width();
-+  uniforms.offset_y = bounding_box.y() * image->height();
-+  uniforms.zoom = fmax(
-+    bounding_box.width() * (image->width() / rect.width()),
-+    bounding_box.height() * (image->height() / rect.height()));
-+  uniforms.width = rect.width();
-+  uniforms.height = rect.height();
++
++  // Because shader calculations are applied to a bigger part of the screen
++  // compared to what the cropped part is, we have to adjust the x, y
++  // coordinates of the bounding box to compensate for zoom.
++  uniforms.offset_x = bounding_box.x() * image_width -
++    (((image->width() - image_width) / 2.0f) * (1.0f - 1.0f / zoom)) / 2.0f;
++  uniforms.offset_y = bounding_box.y() * image_height -
++    (((image->height() - image_height) / 2.0f) * (1.0f - 1.0f / zoom)) / 2.0f;
++
++  uniforms.zoom = zoom;
++  uniforms.width = image_width;
++  uniforms.height = image_height;
 +  uniforms.is_yuv = is_yuv ? 1 : 0;
 +
 +  sk_sp<SkData> data = SkData::MakeWithCopy(&uniforms, sizeof(uniforms));
@@ -1389,11 +1407,11 @@ index 67d8f6b28a4edee1764660ede8eb48581c2b897e..303ddfa52f2fb87b14dfcae2ac2f064a
  void SkiaRenderer::DrawTileDrawQuad(const TileDrawQuad* quad,
                                      const DrawRPDQParams* rpdq_params,
                                      DrawQuadParams* params) {
-@@ -2201,6 +2476,8 @@ void SkiaRenderer::DrawYUVVideoQuad(const YUVVideoDrawQuad* quad,
+@@ -2201,6 +2494,8 @@ void SkiaRenderer::DrawYUVVideoQuad(const YUVVideoDrawQuad* quad,
    // entire YUV image.
    SkPaint paint = params->paint(color_filter);
  
-+  SetAroundFilter(paint, image, quad->shared_quad_state->filter_id, quad->shared_quad_state->bounding_box, params->rect, true);
++  SetAroundFilter(paint, image, quad->shared_quad_state->filter_id, quad->shared_quad_state->bounding_box, gfx::RectF(quad->rect), true);
 +
    DrawSingleImage(image, quad->ya_tex_coord_rect, rpdq_params, &paint, params);
  }
@@ -2154,15 +2172,26 @@ index 5267862f11b3de3c234980ae81955c4336e44526..0b6fc3ce97092b0860f1581e0de2376f
    friend class WTF::ThreadSafeRefCounted<WebMediaPlayerMSCompositor,
                                           WebMediaPlayerMSCompositorTraits>;
 diff --git a/third_party/blink/renderer/platform/graphics/video_frame_resource_provider.cc b/third_party/blink/renderer/platform/graphics/video_frame_resource_provider.cc
-index 7fff6982941a10272e671e182d4a3ddbbd1731da..035aa60c52f60dd95d0dde6326f86879343f5178 100644
+index 7fff6982941a10272e671e182d4a3ddbbd1731da..a7b8ed98344a1cf5a441a5fc34e5c047dc9a1759 100644
 --- a/third_party/blink/renderer/platform/graphics/video_frame_resource_provider.cc
 +++ b/third_party/blink/renderer/platform/graphics/video_frame_resource_provider.cc
-@@ -119,10 +119,67 @@ void VideoFrameResourceProvider::AppendQuads(
+@@ -119,10 +119,81 @@ void VideoFrameResourceProvider::AppendQuads(
    float draw_opacity = 1.0f;
    int sorting_context_id = 0;
  
++  int filter_id = media_transform.filter_id;
++  gfx::RectF bounding_box = media_transform.bounding_box;
++
 +  if (media_transform.circle_crop) {
-+    gfx::RectF bounds(quad_rect);
++    gfx::RectF visible_rect(frame->visible_rect());
++    gfx::RectF bounds = gfx::RectF(quad_rect);
++
++    if (media_transform.rotation == media::VIDEO_ROTATION_90 || media_transform.rotation == media::VIDEO_ROTATION_270) {
++      float height = bounds.height();
++      bounds.set_height(bounds.width());
++      bounds.set_width(height);
++    }
++
 +    if (bounds.width() > bounds.height()) {
 +      bounds.set_x((bounds.width() - bounds.height()) / 2);
 +      bounds.set_width(bounds.height());
@@ -2171,11 +2200,14 @@ index 7fff6982941a10272e671e182d4a3ddbbd1731da..035aa60c52f60dd95d0dde6326f86879
 +      bounds.set_height(bounds.width());
 +    }
 +
-+    mask_filter_info = gfx::MaskFilterInfo(gfx::RRectF(bounds, bounds.width() / 2));
-+  }
++    mask_filter_info = gfx::MaskFilterInfo(gfx::RRectF(bounds, bounds.height() / 2));
 +
-+  int filter_id = media_transform.filter_id;
-+  gfx::RectF bounding_box = media_transform.bounding_box;
++    // AROUND: Image filters in Skia are scaling up videos as video resolution
++    // gets smaller, so we're adjusting the texture here so it always remains in
++    // the bounds of the video element.
++    transform.Scale(quad_rect.width() / visible_rect.width(), quad_rect.height() / visible_rect.height());
++    transform.Translate(-visible_rect.x(), -visible_rect.y());
++  }
 +
 +  if (bounding_box_ != bounding_box || previous_bounding_box_.IsEmpty()) {
 +    bounding_box_ = bounding_box;
@@ -2253,6 +2285,24 @@ index efaa452d2722ef18c67e7025b97f879b4520c74e..5e48e8d5fb21a07c3c6fa2100e8eef9d
  };
  
  }  // namespace blink
+diff --git a/third_party/blink/renderer/platform/graphics/video_frame_submitter.cc b/third_party/blink/renderer/platform/graphics/video_frame_submitter.cc
+index c7424e0dc518feb8710e0f454ff22504b7d3a59c..dcd7fd48138c2936815009077bcce000265ab7e9 100644
+--- a/third_party/blink/renderer/platform/graphics/video_frame_submitter.cc
++++ b/third_party/blink/renderer/platform/graphics/video_frame_submitter.cc
+@@ -586,6 +586,13 @@ bool VideoFrameSubmitter::SubmitFrame(
+ 
+   // Prefer the frame level transform if set.
+   auto transform = video_frame->metadata().transformation.value_or(transform_);
++
++  // AROUND: Making sure we carry over the custom parameters to the final
++  // transform object.
++  transform.circle_crop = transform_.circle_crop;
++  transform.filter_id = transform_.filter_id;
++  transform.bounding_box = transform_.bounding_box;
++
+   if (transform.rotation == media::VIDEO_ROTATION_90 ||
+       transform.rotation == media::VIDEO_ROTATION_270) {
+     frame_size = gfx::Size(frame_size.height(), frame_size.width());
 diff --git a/third_party/blink/renderer/platform/media/web_media_player_impl.cc b/third_party/blink/renderer/platform/media/web_media_player_impl.cc
 index 18b3ef5fe312d655ef6dcb9eb517085d9a0cb10f..15eaf4c511337b2977c990550038c437c3a53949 100644
 --- a/third_party/blink/renderer/platform/media/web_media_player_impl.cc
