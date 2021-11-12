@@ -6,7 +6,7 @@ Subject: adds thread priority feature flags
 This patch adds two new base::Feature flags that allow setting the thread priority of Media and RealtimeAudioWorklet threads to NORMAL instead of REALTIME_AUDIO
 
 diff --git a/content/renderer/render_thread_impl.cc b/content/renderer/render_thread_impl.cc
-index 0e0f65b5dbe530cd7b06d2d2e7eeca842813a4a0..d3662eab0f4d7a2f4dc5255bafa2170bf3d5978d 100644
+index 24f33cfffa7871a280bc4c9c5aa823c90b3b61d8..b0370b50e519f0250b46797e61da46bc62fc24cd 100644
 --- a/content/renderer/render_thread_impl.cc
 +++ b/content/renderer/render_thread_impl.cc
 @@ -47,6 +47,7 @@
@@ -17,7 +17,7 @@ index 0e0f65b5dbe530cd7b06d2d2e7eeca842813a4a0..d3662eab0f4d7a2f4dc5255bafa2170b
  #include "build/build_config.h"
  #include "build/chromeos_buildflags.h"
  #include "cc/base/histograms.h"
-@@ -196,6 +197,13 @@ namespace content {
+@@ -197,6 +198,13 @@ namespace content {
  
  namespace {
  
@@ -31,7 +31,7 @@ index 0e0f65b5dbe530cd7b06d2d2e7eeca842813a4a0..d3662eab0f4d7a2f4dc5255bafa2170b
  using ::base::PassKey;
  using ::base::ThreadRestrictions;
  using ::blink::WebDocument;
-@@ -1766,6 +1774,13 @@ RenderThreadImpl::GetMediaThreadTaskRunner() {
+@@ -1777,6 +1785,13 @@ RenderThreadImpl::GetMediaThreadTaskRunner() {
  #else
      base::Thread::Options options;
  #endif

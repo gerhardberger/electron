@@ -20,12 +20,14 @@ index 108eb4cbfe26bb833e78ba32b36eeb985488001d..1f303dd09da91523c320d23140ee3440
      "dom_window_media_stream.h",
 diff --git a/third_party/blink/renderer/modules/mediastream/around_audio_mixer.cc b/third_party/blink/renderer/modules/mediastream/around_audio_mixer.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..f110515ba69c38e383b377d0df947201ffbc96c4
+index 0000000000000000000000000000000000000000..9dcd56ecf9944cbd34acc56654410ab0c4bc0c49
 --- /dev/null
 +++ b/third_party/blink/renderer/modules/mediastream/around_audio_mixer.cc
-@@ -0,0 +1,220 @@
+@@ -0,0 +1,243 @@
 +#include "third_party/blink/renderer/modules/mediastream/around_audio_mixer.h"
 +
++#include "base/logging.h"
++#include "rtc_base/checks.h"
 +#include "third_party/blink/renderer/core/execution_context/execution_context.h"
 +#include "third_party/blink/renderer/modules/peerconnection/peer_connection_dependency_factory.h"
 +#include "third_party/blink/renderer/modules/webrtc/webrtc_audio_device_impl.h"
@@ -161,8 +163,7 @@ index 0000000000000000000000000000000000000000..f110515ba69c38e383b377d0df947201
 +      debug_sync_mode_ = false;
 +      playback_device_ = audio_device;
 +      microphone_mixer_ = webrtc::AudioMixerImpl::Create();
-+      // todo:: just in case scan playback mixer for sources with fifo buffer indicator.
-+      // Maybe it is possible that source from secondaries get added before this method is called?
++      MayMoveSecondarySourcesToMicMixer();
 +      audio_bus_ = media::AudioBus::Create(1, 480);
 +      DriveWithPlayback(true);
 +    } else {
@@ -243,13 +244,35 @@ index 0000000000000000000000000000000000000000..f110515ba69c38e383b377d0df947201
 +  DeliverToDestination();
 +}
 +
++void AroundAudioMixer::MayMoveSecondarySourcesToMicMixer() {
++  // At the time of mic mixer creation, some secondary mic sources may have been added to
++  // playback mixer. Move these to the proper mixer.
++  RTC_DCHECK(playback_mixer_);
++  RTC_DCHECK(microphone_mixer_);
++
++  // Note that audio_sources() returns a vector copied from playback_mixer_'s internal
++  // array. Therefore we can modify mixer sources without affecting iteration.
++  bool sources_moved = false;
++  auto sources = playback_mixer_->audio_sources();
++  std::for_each(sources.begin(), sources.end(), [&](auto& x){
++    auto* maybe_receive_stream = static_cast<webrtc::internal::AudioReceiveStream*>(x);
++    if (maybe_receive_stream->config().jitter_buffer_max_packets == kFifoBufferIndicator) {
++      playback_mixer_->RemoveSource(x);
++      microphone_mixer_->AddSource(x);
++      sources_moved = true;
++    }
++  });
++
++  LOG_IF(WARNING, sources_moved) << "Sources have been moved from playback to mic mixer";
++}
++
 +}
 diff --git a/third_party/blink/renderer/modules/mediastream/around_audio_mixer.h b/third_party/blink/renderer/modules/mediastream/around_audio_mixer.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..c80ec5641100b5a31bfa29c4b8a717c5710ad704
+index 0000000000000000000000000000000000000000..c854808cc2735499e65a1f1c6ca20facfe6a8dd1
 --- /dev/null
 +++ b/third_party/blink/renderer/modules/mediastream/around_audio_mixer.h
-@@ -0,0 +1,83 @@
+@@ -0,0 +1,84 @@
 +#ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_MEDIASTREAM_AROUND_AUDIO_MIXER_H
 +#define THIRD_PARTY_BLINK_RENDERER_MODULES_MEDIASTREAM_AROUND_AUDIO_MIXER_H
 +
@@ -315,6 +338,7 @@ index 0000000000000000000000000000000000000000..c80ec5641100b5a31bfa29c4b8a717c5
 +  void MixMicrophoneInputsAndDeliverToDestination();
 +  void DeliverToDestination();
 +  void DeliverMicrophoneInputsToDestination();
++  void MayMoveSecondarySourcesToMicMixer();
 +
 +  MediaStreamAudioSource* destination_ = nullptr;
 +  bool have_set_destination_format_ = false;
