@@ -8,7 +8,7 @@ This patch limits webrtc audio processing sample rate to 48kHz.
 Signed-off-by: gellert <gellert.hegyi@around.co>
 
 diff --git a/modules/audio_processing/audio_processing_impl.cc b/modules/audio_processing/audio_processing_impl.cc
-index ebcdc18940ceedfcd5d7084f979bc16d4ff3a18c..c50820c23c8e3a0c9a9c5e93c5c4d7fe88ded140 100644
+index dc1818c6d0aa410a51764305439242a490b1d4f2..e2c0d143100824dd220f501570bfda8fe57d5e9b 100644
 --- a/modules/audio_processing/audio_processing_impl.cc
 +++ b/modules/audio_processing/audio_processing_impl.cc
 @@ -91,7 +91,10 @@ int SuitableProcessRate(int minimum_rate,

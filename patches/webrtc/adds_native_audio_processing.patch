@@ -432,14 +432,16 @@ index 0000000000000000000000000000000000000000..a277a204037e9d9c3a586f42b026ded3
 +]
 diff --git a/modules/audio_processing/around_denoise/around_denoise.cc b/modules/audio_processing/around_denoise/around_denoise.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..6a51dcec08fa4b92e9cabb8bdaec2d07393269a9
+index 0000000000000000000000000000000000000000..d0142827b62757027b88fbf709dda1a4ebe4ab8f
 --- /dev/null
 +++ b/modules/audio_processing/around_denoise/around_denoise.cc
-@@ -0,0 +1,172 @@
+@@ -0,0 +1,474 @@
 +#include <array>
 +#include <math.h>
 +
 +#include "api/array_view.h"
++#include "common_audio/include/audio_util.h"
++#include "common_audio/window_generator.h"
 +#include "modules/audio_processing/around_denoise/around_denoise.h"
 +#include "modules/audio_processing/audio_buffer.h"
 +#include "modules/audio_processing/include/audio_frame_view.h"
@@ -448,16 +450,166 @@ index 0000000000000000000000000000000000000000..6a51dcec08fa4b92e9cabb8bdaec2d07
 +
 +namespace webrtc {
 +
-+const int VAD_DISABLE_TIMEOUT_MS = 1500;
-+const float VAD_DISABLE_THRESHOLD_PCT = 0.75;
-+const float VAD_ENABLED_THRESHOLD_PCT = 0.9;
-+const float VAD_SMOOTHING_WEMA_ALPHA = 0.09;
-+const float VAD_MUTED_SMOOTHING_WEMA_ALPHA = 0.05;
++#define DRR_ORDER 10
++#define DRR_COMMUNICATION_SLOWDOWN_THRESHOLD 4
++
++static const int VAD_DISABLE_TIMEOUT_MS = 1500;
++static const float VAD_DISABLE_THRESHOLD_PCT = 0.75;
++static const float VAD_ENABLED_THRESHOLD_PCT = 0.9;
++static const float VAD_SMOOTHING_WEMA_ALPHA = 0.09;
++static const float VAD_MUTED_SMOOTHING_WEMA_ALPHA = 0.05;
++static const size_t kDrrRingBufferSize = DRR_FRAME_SIZE * 2;
 +
 +float compute_wema(float prev_value, float new_data_point, float alpha) {
-+  return prev_value > 0.0
-+    ? (1.0 - alpha) * prev_value + alpha * new_data_point
++  return prev_value > 0.0f
++    ? (1.0f - alpha) * prev_value + alpha * new_data_point
 +    : new_data_point;
++}
++
++double wema_update(double alpha, double current_wema, double new_data_point) {
++  if (current_wema) {
++    double redistributed_mean = (1.0 - alpha) * current_wema;
++    double mean_increment = alpha * new_data_point;
++
++    return redistributed_mean + mean_increment;
++  } else {
++    return new_data_point;
++  }
++}
++
++double mean(double *signal, size_t signal_len) {
++  double sum = 0.0;
++  for (size_t i = 0; i < signal_len; ++i) {
++    sum += signal[i];
++  }
++  return sum / static_cast<double>(signal_len);
++}
++
++double normalize(double val, double min, double max) {
++  double res = (val - min) / (max - min);
++  return fmax(0.0, fmin(1.0, res));
++}
++
++double kurtosis(double *signal, size_t signal_len) {
++  double m = mean(signal, signal_len);
++  int n = static_cast<int>(signal_len);
++
++  double numerator = 0.0;
++  double denominator = 0.0;
++
++  for (int s = 0; s < n; ++s) {
++    double sample = signal[s];
++    double squared = (sample - m) * (sample - m);
++
++    denominator += squared;
++    numerator += squared * squared;
++  }
++
++  numerator = (1.0 / n) * numerator;
++  denominator = ((1.0 / n) * denominator) * ((1.0 / n) * denominator);
++
++  return numerator / denominator;
++}
++
++void filter(float *signal, size_t signal_len, double *ff, size_t ff_len, double fb, double *filtered) {
++  double inverse_fb = 1.0 / fb;
++
++  for (size_t sample = 0; sample < signal_len; ++sample) {
++    filtered[sample] = 0.0;
++
++    for (size_t ff_ix = 0; ff_ix < std::min(ff_len, sample + 1); ++ff_ix) {
++      filtered[sample] += ff[ff_ix] * signal[sample - ff_ix];
++    }
++
++    filtered[sample] *= inverse_fb;
++  }
++}
++
++void auto_correlation(const float* in_vector,
++                      size_t in_vector_length,
++                      size_t max_lags,
++                      double* result) {
++  double sum = 0.0;
++
++  for (size_t lag = 0; lag <= max_lags; ++lag) {
++    sum = 0;
++
++    for (size_t j = 0; j < in_vector_length - lag; ++j) {
++      sum += in_vector[j + lag] * in_vector[j];
++    }
++
++    result[lag] = sum;
++  }
++}
++
++void fix_autocorrelation(double *ac) {
++  // Dirty trick to ensure we don't get division by 0 in Levinson-Durbin. This
++  // should have minimal impact on the results.
++  if (ac[0] == 0.0f) {
++    ac[0] = ac[0] + fmax(0.5f * fabs(ac[1] - ac[0]),
++      std::numeric_limits<double>::epsilon());
++  }
++  // In the very unlikely event that epsilon makes the second coefficient equal
++  // to the first, we have to keep increasing the second coeff.
++  while (fabs(ac[0]) == fabs(ac[1])) {
++    ac[1] = ac[1] + fmax(0.5 * fabs(ac[1] - ac[0]),
++      std::numeric_limits<double>::epsilon());
++  }
++}
++
++double levinson_durbin(double *ac_coef, double *lpc_coef) {
++  double lpc_coef_temp[DRR_ORDER];
++  double lpc_error = ac_coef[0];
++
++  for (size_t i = 0; i < DRR_ORDER + 1; ++i) {
++    lpc_coef[i] = 0.0;
++  }
++
++  for (size_t i = 0; i < DRR_ORDER; ++i) {
++    lpc_coef_temp[i] = 0.0;
++  }
++
++  lpc_coef[0] = 1.0;
++  lpc_coef_temp[0] = 1.0;
++
++  for (size_t coeff_ix = 1; coeff_ix < DRR_ORDER + 1; ++coeff_ix) {
++    // Compute reflection coefficient.
++    double refl_coef = ac_coef[coeff_ix];
++
++    for (size_t ref_ix = 1; ref_ix < coeff_ix; ref_ix++) {
++      refl_coef += lpc_coef[ref_ix] * ac_coef[coeff_ix - ref_ix];
++    }
++
++    refl_coef /= lpc_error;
++
++    // Update coefficients.
++    lpc_coef[coeff_ix] = -1 * refl_coef;
++    for (size_t update_ix = 1; update_ix < coeff_ix; ++update_ix) {
++      lpc_coef_temp[update_ix] = lpc_coef[update_ix] -
++        refl_coef * lpc_coef[coeff_ix - update_ix];
++    }
++
++    for (size_t update_ix = 1; update_ix < coeff_ix; ++update_ix) {
++      lpc_coef[update_ix] = lpc_coef_temp[update_ix];
++    }
++
++    lpc_error *= 1 - refl_coef * refl_coef;
++  }
++
++  return fabs(lpc_error);
++}
++
++void lpr(float *signal, size_t signal_len, double *filtered) {
++  double ac_coef[DRR_ORDER + 2];
++
++  auto_correlation(signal, signal_len, DRR_ORDER + 1, ac_coef);
++
++  fix_autocorrelation(ac_coef);
++
++  double lpc_coef[DRR_ORDER + 1];
++  double lpc_error = levinson_durbin(ac_coef, lpc_coef);
++
++  filter(signal, signal_len, lpc_coef, DRR_ORDER + 1, sqrt(lpc_error), filtered);
 +}
 +
 +AroundDenoiser::AroundDenoiser() = default;
@@ -468,6 +620,13 @@ index 0000000000000000000000000000000000000000..6a51dcec08fa4b92e9cabb8bdaec2d07
 +void AroundDenoiser::Initialize() {
 +  RTC_LOG(LS_INFO) << "@AROUND: initialising denoiser";
 +  denoise_state = rnnoise_create(NULL);
++  drr_buffer_ = WebRtc_CreateBuffer(kDrrRingBufferSize, sizeof(float));
++  running_avg_rms_buffer_ = WebRtc_CreateBuffer(settings_.averaging_window, sizeof(float));
++  running_avg_res_buffer_ = WebRtc_CreateBuffer(settings_.averaging_window, sizeof(double));
++  prev_kurtosis_ = 0.0;
++  drr_results_ = (double*)malloc(DRR_COMMUNICATION_SLOWDOWN_THRESHOLD * sizeof(double));
++  drr_results_index_ = 0;
++  WindowGenerator::Hanning(DRR_FRAME_SIZE, hanning_window_);
 +}
 +
 +void AroundDenoiser::Denoise(AudioBuffer* audioBuffer, float noise_suppression_db) {
@@ -522,6 +681,143 @@ index 0000000000000000000000000000000000000000..6a51dcec08fa4b92e9cabb8bdaec2d07
 +    sum += pow(sample, 2);
 +  }
 +  audio_features.rms = sqrt(sum / signal.size());
++}
++
++float AroundDenoiser::ProcessDRREstimation(AudioBuffer* audioBuffer) {
++  AudioFrameView<float> frame(audioBuffer->channels_f(),
++                              audioBuffer->num_channels(),
++                              audioBuffer->num_frames());
++  float drr_to_emit = 0.0f;
++
++  if (is_microphone_on_ && frame.num_channels() > 0) {
++    rtc::ArrayView<float> signal = frame.channel(0);
++    float* signal_data = signal.data();
++    float analysis_data[DRR_FRAME_SIZE];
++    float vad = audio_features.vad_probability;
++
++    WebRtc_WriteBuffer(drr_buffer_, signal_data, signal.size());
++
++    size_t buffered_frame_length = WebRtc_available_read(drr_buffer_) / DRR_FRAME_SIZE;
++
++    while (buffered_frame_length > 0) {
++      if (is_in_group_ && drr_enabled_ && vad > VAD_DISABLE_THRESHOLD_PCT) {
++        WebRtc_ReadBuffer(drr_buffer_, NULL, analysis_data, DRR_FRAME_SIZE);
++        WebRtc_MoveReadPtr(drr_buffer_, -(DRR_FRAME_SIZE / 2));
++
++        float rms = FloatS16ToFloat(audio_features.rms);
++        double drr = FullPipelineV2Normalized(analysis_data, DRR_FRAME_SIZE, rms);
++
++        if (drr_results_index_ < DRR_COMMUNICATION_SLOWDOWN_THRESHOLD) {
++          drr_results_[drr_results_index_++] = drr;
++        }
++      } else {
++        WebRtc_MoveReadPtr(drr_buffer_, DRR_FRAME_SIZE);
++      }
++      buffered_frame_length = WebRtc_available_read(drr_buffer_) / DRR_FRAME_SIZE;
++    }
++  }
++
++  if (drr_results_index_ == DRR_COMMUNICATION_SLOWDOWN_THRESHOLD) {
++    float sum = 0.0f;
++    for (size_t i = 0; i < DRR_COMMUNICATION_SLOWDOWN_THRESHOLD; ++i) {
++      sum += drr_results_[i];
++    }
++
++    drr_to_emit = sum / DRR_COMMUNICATION_SLOWDOWN_THRESHOLD;
++    drr_results_index_ = 0;
++  }
++
++  return drr_to_emit;
++}
++
++AroundDenoiser::FullPipeline2Result AroundDenoiser::FullPipelineV2(float *analysis_data, size_t analysis_data_len, float rms) {
++  for (size_t i = 0; i < analysis_data_len; ++i) {
++    analysis_data[i] = FloatS16ToFloat(analysis_data[i]) * hanning_window_[i];
++  }
++
++  double filtered[analysis_data_len];
++  lpr(analysis_data, analysis_data_len, filtered);
++
++  double residual_kurtosis = kurtosis(filtered, analysis_data_len);
++
++  if (residual_kurtosis > 0 && prev_kurtosis_ &&
++      (residual_kurtosis - prev_kurtosis_) > settings_.extractors_residual_kurtosis_peak_threshold) {
++    // Prevent some unwanted kurtosis peaks that tend to skew the results
++    residual_kurtosis = prev_kurtosis_;
++  }
++
++  return AroundDenoiser::FullPipeline2Result{ rms, residual_kurtosis };
++}
++
++void AroundDenoiser::ResetDRR() {
++  drr_wema_ = 0.0f;
++  WebRtc_InitBuffer(running_avg_rms_buffer_);
++  WebRtc_InitBuffer(running_avg_res_buffer_);
++}
++
++double AroundDenoiser::FullPipelineV2Normalized(float *analysis_data, size_t analysis_data_len, float rms) {
++  AroundDenoiser::FullPipeline2Result result = FullPipelineV2(analysis_data, analysis_data_len, rms);
++
++  WebRtc_WriteBuffer(running_avg_rms_buffer_, &result.rms, 1);
++  WebRtc_WriteBuffer(running_avg_res_buffer_, &result.residual_kurtosis, 1);
++
++  size_t rms_size = WebRtc_available_read(running_avg_rms_buffer_);
++  size_t res_size = WebRtc_available_read(running_avg_res_buffer_);
++
++  float rms_window[rms_size];
++  double res_window[res_size];
++  WebRtc_ReadBuffer(running_avg_rms_buffer_, NULL, rms_window, rms_size);
++  WebRtc_ReadBuffer(running_avg_res_buffer_, NULL, res_window, res_size);
++
++  WebRtc_MoveReadPtr(running_avg_rms_buffer_,
++    rms_size < settings_.averaging_window ? -rms_size : 1 - rms_size);
++  WebRtc_MoveReadPtr(running_avg_res_buffer_,
++    res_size < settings_.averaging_window ? -res_size : 1 - res_size);
++
++  float rms_sum = 0.0f;
++  for (size_t i = 0; i < rms_size; ++i) {
++    rms_sum += rms_window[i];
++  }
++
++  double res_sum = 0.0f;
++  for (size_t i = 0; i < res_size; ++i) {
++    res_sum += res_window[i];
++  }
++
++  double rms_avg = rms_sum / rms_size;
++  double res_avg = res_sum / res_size;
++  double rms_normalized = normalize(rms_avg, settings_.normalization_rms_low, settings_.normalization_rms_high);
++  double res_normalized = normalize(res_avg, settings_.residual_kurtosis_low, settings_.residual_kurtosis_high);
++
++  // Residual Kurtosis often returns a series of 0-s out of a sudden. Let's try
++  // to ignore these to reduce to saw-tooth effect on the resulting data
++  if (rms_normalized > 0.0) {
++    last_valid_residual_kurtosis_ = rms_normalized;
++    last_valid_residual_kurtosis_distance_ = 0;
++  } else if (last_valid_residual_kurtosis_ > 0.0) {
++    last_valid_residual_kurtosis_distance_++;
++    if (
++      last_valid_residual_kurtosis_distance_ <=
++      kLastValidResidualKurtosisMaxConsideredDistance
++    ) {
++      rms_normalized = last_valid_residual_kurtosis_;
++    } else {
++      last_valid_residual_kurtosis_ = 0.0;
++    }
++  }
++
++  double drr = fmax(0.0, fmin(1.0,
++    res_normalized * settings_.extractors_residual_kurtosis_weight +
++    rms_normalized * settings_.extractors_rms_weight
++  ));
++
++  drr_wema_ = wema_update(
++    drr > drr_wema_ ? settings_.wema_inc_alpha : settings_.wema_dec_alpha,
++    drr_wema_,
++    drr
++  );
++
++  return drr_wema_;
 +}
 +
 +void AroundDenoiser::EncodeFeaturesToSignal(AudioBuffer* audioBuffer) {
@@ -594,6 +890,7 @@ index 0000000000000000000000000000000000000000..6a51dcec08fa4b92e9cabb8bdaec2d07
 +
 +void AroundDenoiser::SetAudioStatus(std::map<std::string, std::string> params) {
 +  bool is_microphone_on = params["is_microphone_on"] == "true";
++  bool is_in_group = params["is_in_group"] == "true";
 +
 +  if (is_microphone_on_ && !is_microphone_on) {
 +    vad_wema_ = 0.0;
@@ -605,32 +902,40 @@ index 0000000000000000000000000000000000000000..6a51dcec08fa4b92e9cabb8bdaec2d07
 +  }
 +
 +  is_microphone_on_ = is_microphone_on;
++  is_in_group_ = is_in_group;
++}
++
++void AroundDenoiser::SetDRREnabled(bool enabled) {
++  drr_enabled_ = enabled;
 +}
 +
 +} // namespace webrtc
 diff --git a/modules/audio_processing/around_denoise/around_denoise.h b/modules/audio_processing/around_denoise/around_denoise.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..aab27886cd480212a8794db5cdc64ce3fc3d57d3
+index 0000000000000000000000000000000000000000..8fb7563319fbd6844dad20f4111805549b8187dc
 --- /dev/null
 +++ b/modules/audio_processing/around_denoise/around_denoise.h
-@@ -0,0 +1,75 @@
+@@ -0,0 +1,132 @@
 +#ifndef MODULES_AUDIO_PROCESSING_AROUND_DENOISE_H_
 +#define MODULES_AUDIO_PROCESSING_AROUND_DENOISE_H_
 +
 +#include "common_audio/resampler/include/push_resampler.h"
 +#include "modules/audio_processing/include/audio_processing.h"
-+#include "modules/audio_processing/include/audio_processing.h"
 +#include "rtc_base/constructor_magic.h"
 +
 +extern "C" {
++#include "common_audio/ring_buffer.h"
 +#include "third_party/rnnoise_full/include/rnnoise.h"
 +}
 +
 +namespace webrtc {
 +
++#define DRR_FRAME_SIZE 1024
++
 +constexpr size_t kRNNoiseFrameSize = 480;
 +constexpr size_t kRNNoiseSampleRate = 48000;
 +constexpr float kAroundDefaultDenoiserVADThreshold = 0.5;
++constexpr float kLastValidResidualKurtosisMaxConsideredDistance = 10;
 +
 +// Custom Denoiser module which uses the full RNNoise model.
 +class AroundDenoiser {
@@ -638,6 +943,27 @@ index 0000000000000000000000000000000000000000..aab27886cd480212a8794db5cdc64ce3
 +  struct AudioFeatures {
 +    float vad_probability;
 +    float rms;
++  };
++
++  struct FullPipeline2Result {
++    float rms;
++    double residual_kurtosis;
++  };
++
++  struct FeatureExtractorSettings {
++    size_t averaging_window;
++    float wema_inc_alpha;
++    float wema_dec_alpha;
++    float normalization_rms_low;
++    float normalization_rms_high;
++    float residual_kurtosis_low;
++    float residual_kurtosis_high;
++    float spectral_difference_skewness_low;
++    float spectral_difference_skewness_high;
++    bool spectral_difference_skewness_flip;
++    float extractors_residual_kurtosis_peak_threshold;
++    float extractors_residual_kurtosis_weight;
++    float extractors_rms_weight;
 +  };
 +
 +  enum VADState { Started, Stopped, Sustained, MutedStarted, MutedStopped };
@@ -655,6 +981,10 @@ index 0000000000000000000000000000000000000000..aab27886cd480212a8794db5cdc64ce3
 +  void CalculateRMS(AudioBuffer* audioBuffer);
 +  // encodes stored features into the given signal
 +  void EncodeFeaturesToSignal(AudioBuffer* audioBuffer);
++
++  float ProcessDRREstimation(AudioBuffer* audioBuffer);
++  void SetDRREnabled(bool enabled);
++  void ResetDRR();
 +
 +  AudioFeatures* getCurrentFeatures();
 +
@@ -675,13 +1005,42 @@ index 0000000000000000000000000000000000000000..aab27886cd480212a8794db5cdc64ce3
 +  VADState vad_state_ = Stopped;
 +  int64_t vad_disable_timeout_ = 0;
 +  int64_t muted_vad_disable_timeout_ = 0;
-+  float vad_wema_ = 0.0;
++  float vad_wema_ = 0.0f;
++  double drr_wema_ = 0.0;
 +  bool is_microphone_on_ = true;
++  bool is_in_group_ = false;
++  bool drr_enabled_ = false;
++  double prev_kurtosis_ = 0.0;
++  double last_valid_residual_kurtosis_ = 0.0;
++  int last_valid_residual_kurtosis_distance_ = 0;
++  size_t drr_results_index_ = 0;
++  double* drr_results_ = NULL;
++  float hanning_window_[DRR_FRAME_SIZE];
++  RingBuffer* drr_buffer_ = NULL;
++  RingBuffer* running_avg_rms_buffer_ = NULL;
++  RingBuffer* running_avg_res_buffer_ = NULL;
++  FeatureExtractorSettings settings_ = FeatureExtractorSettings{
++    20,
++    0.6f,
++    0.1f,
++    0.0f,
++    0.2f,
++    5.2f,
++    6.0f,
++    0.0f,
++    1.5f,
++    true,
++    20.0f,
++    0.25f,
++    0.75f
++  };
 +
 +  void InitializeResamplersIfNeeded(int sample_rate_hz);
 +
 +  void ProcessVADState(float vad, int64_t now);
 +  void ProcessMutedSpeakingState(float vad, int64_t now);
++  FullPipeline2Result FullPipelineV2(float *analysis_data, size_t analysis_data_len, float rms);
++  double FullPipelineV2Normalized(float *analysis_data, size_t analysis_data_len, float rms);
 +
 +  RTC_DISALLOW_COPY_AND_ASSIGN(AroundDenoiser);
 +};
@@ -690,7 +1049,7 @@ index 0000000000000000000000000000000000000000..aab27886cd480212a8794db5cdc64ce3
 +
 +#endif
 diff --git a/modules/audio_processing/audio_processing_impl.cc b/modules/audio_processing/audio_processing_impl.cc
-index 7facd25c12aabc988deb83db273c487138965b0d..ebcdc18940ceedfcd5d7084f979bc16d4ff3a18c 100644
+index 7facd25c12aabc988deb83db273c487138965b0d..dc1818c6d0aa410a51764305439242a490b1d4f2 100644
 --- a/modules/audio_processing/audio_processing_impl.cc
 +++ b/modules/audio_processing/audio_processing_impl.cc
 @@ -39,6 +39,8 @@
@@ -772,7 +1131,7 @@ index 7facd25c12aabc988deb83db273c487138965b0d..ebcdc18940ceedfcd5d7084f979bc16d
    if (submodules_.gain_control) {
      // TODO(peah): Add reporting from AEC3 whether there is echo.
      RETURN_ON_ERR(submodules_.gain_control->ProcessCaptureAudio(
-@@ -1427,10 +1461,66 @@ int AudioProcessingImpl::ProcessCaptureStreamLocked() {
+@@ -1427,10 +1461,80 @@ int AudioProcessingImpl::ProcessCaptureStreamLocked() {
    }
    capture_.capture_output_used_last_frame = capture_.capture_output_used;
  
@@ -793,8 +1152,14 @@ index 7facd25c12aabc988deb83db273c487138965b0d..ebcdc18940ceedfcd5d7084f979bc16d
 +
 +    submodules_.around_denoiser->EncodeFeaturesToSignal(capture_buffer);
 +
++    float drr_to_emit = submodules_.around_denoiser->ProcessDRREstimation(capture_buffer);
++
 +    AroundDenoiser::VADState vad_state = submodules_.around_denoiser->GetCurrentVADState();
 +    if (vad_state != previous_vad_state_) {
++      if (vad_state == AroundDenoiser::Stopped) {
++        submodules_.around_denoiser->ResetDRR();
++      }
++
 +      DataChannelController* data_channel_controller = DataChannelController::GetSharedDataChannelController();
 +      if (data_channel_controller != NULL) {
 +        std::string vad_message("vad-stopped");
@@ -805,6 +1170,14 @@ index 7facd25c12aabc988deb83db273c487138965b0d..ebcdc18940ceedfcd5d7084f979bc16d
 +
 +        data_channel_controller->SendAroundMessage(vad_message);
 +        previous_vad_state_ = vad_state;
++      }
++    }
++
++    if (drr_to_emit != 0.0f) {
++      DataChannelController* data_channel_controller = DataChannelController::GetSharedDataChannelController();
++      if (data_channel_controller != NULL) {
++        std::string drr_state = "drr-data;" + std::to_string(drr_to_emit);
++        data_channel_controller->SendAroundMessage(drr_state);
 +      }
 +    }
 +  }
@@ -839,7 +1212,7 @@ index 7facd25c12aabc988deb83db273c487138965b0d..ebcdc18940ceedfcd5d7084f979bc16d
  int AudioProcessingImpl::AnalyzeReverseStream(
      const float* const* data,
      const StreamConfig& reverse_config) {
-@@ -2224,4 +2314,32 @@ void AudioProcessingImpl::ApmStatsReporter::UpdateStatistics(
+@@ -2224,4 +2328,36 @@ void AudioProcessingImpl::ApmStatsReporter::UpdateStatistics(
    static_cast<void>(stats_message_passed);
  }
  
@@ -868,6 +1241,10 @@ index 7facd25c12aabc988deb83db273c487138965b0d..ebcdc18940ceedfcd5d7084f979bc16d
 +        config_.around_audio_processing.mask_compensation) {
 +      submodules_.around_mask_compensation->Reset();
 +    }
++  }
++
++  if (command == "enable_drr") {
++    submodules_.around_denoiser->SetDRREnabled(params["enabled"] == "true");
 +  }
 +}
 +

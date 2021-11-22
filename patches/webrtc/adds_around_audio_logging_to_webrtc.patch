@@ -375,7 +375,7 @@ index 0000000000000000000000000000000000000000..0b0741c7262d0fe0c986e108099f8e8d
 +
 +#endif
 diff --git a/modules/audio_processing/audio_processing_impl.cc b/modules/audio_processing/audio_processing_impl.cc
-index c50820c23c8e3a0c9a9c5e93c5c4d7fe88ded140..400b615a19eb025e4eb26545f23829fdd6857582 100644
+index e2c0d143100824dd220f501570bfda8fe57d5e9b..b9705726b13862f68941fa216f883c19440ebdfd 100644
 --- a/modules/audio_processing/audio_processing_impl.cc
 +++ b/modules/audio_processing/audio_processing_impl.cc
 @@ -274,6 +274,8 @@ AudioProcessingImpl::AudioProcessingImpl(
@@ -695,7 +695,7 @@ index c50820c23c8e3a0c9a9c5e93c5c4d7fe88ded140..400b615a19eb025e4eb26545f23829fd
    if (submodules_.capture_levels_adjuster) {
      submodules_.capture_levels_adjuster->ApplyPostLevelAdjustment(
          *capture_buffer);
-@@ -1474,13 +1584,21 @@ int AudioProcessingImpl::ProcessCaptureStreamLocked() {
+@@ -1474,15 +1584,23 @@ int AudioProcessingImpl::ProcessCaptureStreamLocked() {
      // Always call this since user-VAD is computed within.
      submodules_.around_denoiser->Denoise(capture_buffer, config_.around_audio_processing.noise_suppression_db);
  
@@ -712,12 +712,14 @@ index c50820c23c8e3a0c9a9c5e93c5c4d7fe88ded140..400b615a19eb025e4eb26545f23829fd
 +
      submodules_.around_denoiser->EncodeFeaturesToSignal(capture_buffer);
  
+     float drr_to_emit = submodules_.around_denoiser->ProcessDRREstimation(capture_buffer);
+ 
 +    processing_time_stats_.AddMeasurement("AroundNS", tc.Elapsed(true).count(), false);
 +
      AroundDenoiser::VADState vad_state = submodules_.around_denoiser->GetCurrentVADState();
      if (vad_state != previous_vad_state_) {
-       DataChannelController* data_channel_controller = DataChannelController::GetSharedDataChannelController();
-@@ -1497,7 +1615,26 @@ int AudioProcessingImpl::ProcessCaptureStreamLocked() {
+       if (vad_state == AroundDenoiser::Stopped) {
+@@ -1511,7 +1629,26 @@ int AudioProcessingImpl::ProcessCaptureStreamLocked() {
      }
    }
  
@@ -744,7 +746,7 @@ index c50820c23c8e3a0c9a9c5e93c5c4d7fe88ded140..400b615a19eb025e4eb26545f23829fd
    return kNoError;
  }
  
-@@ -2325,17 +2462,34 @@ void AudioProcessingImpl::OnCommandReceived(std::string command, std::map<std::s
+@@ -2339,17 +2476,34 @@ void AudioProcessingImpl::OnCommandReceived(std::string command, std::map<std::s
    if (command == "noise_suppression") {
      absl::optional<float> value = rtc::StringToNumber<float>(params["level"]);
      if (!value.has_value()) {
