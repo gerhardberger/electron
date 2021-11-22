@@ -193,7 +193,7 @@ index 6f47127f309b27389511bda82ed6c448096b6c3e..f1f2245374d5b887bef017f62ddd75e7
  
  class VideoEngineInterface : public RtpHeaderExtensionQueryInterface {
 diff --git a/media/engine/webrtc_voice_engine.cc b/media/engine/webrtc_voice_engine.cc
-index dbe895968d79e590b6cc00813e0d2744981920bb..aaa37567a2ceea73ce6a24b9c00ccfdda332fb95 100644
+index dbe895968d79e590b6cc00813e0d2744981920bb..10861091bc676ffbc59c27e7de3fe0779ddc6b84 100644
 --- a/media/engine/webrtc_voice_engine.cc
 +++ b/media/engine/webrtc_voice_engine.cc
 @@ -664,7 +664,8 @@ WebRtcVoiceEngine::GetRtpHeaderExtensions() const {
@@ -206,6 +206,17 @@ index dbe895968d79e590b6cc00813e0d2744981920bb..aaa37567a2ceea73ce6a24b9c00ccfdd
      result.emplace_back(uri, id++, webrtc::RtpTransceiverDirection::kSendRecv);
    }
    return result;
+@@ -1960,7 +1961,9 @@ bool WebRtcVoiceMediaChannel::AddRecvStream(const StreamParams& sp) {
+       ssrc, receiver_reports_ssrc_, recv_transport_cc_enabled_,
+       recv_nack_enabled_, sp.stream_ids(), recv_rtp_extensions_, this,
+       engine()->decoder_factory_, decoder_map_, codec_pair_id_,
+-      engine()->audio_jitter_buffer_max_packets_,
++      options_.audio_jitter_buffer_max_packets ?
++        options_.audio_jitter_buffer_max_packets.value() :
++        engine()->audio_jitter_buffer_max_packets_,
+       engine()->audio_jitter_buffer_fast_accelerate_,
+       engine()->audio_jitter_buffer_min_delay_ms_,
+       engine()->audio_jitter_buffer_enable_rtx_handling_,
 diff --git a/media/engine/webrtc_voice_engine.h b/media/engine/webrtc_voice_engine.h
 index 147688b0e0da9107231cdbe608e6746a8d95f674..534c911c259e248cfa7d8f66f5023921134e504e 100644
 --- a/media/engine/webrtc_voice_engine.h
