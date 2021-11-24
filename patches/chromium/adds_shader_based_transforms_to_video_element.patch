@@ -33,20 +33,27 @@ index cd63a69930e6a7b53599e594e5efccb45ee03820..c04f8a6c2719763f40ce98bdc5df4230
  
  }  // namespace viz
 diff --git a/components/viz/service/display/ca_layer_overlay.cc b/components/viz/service/display/ca_layer_overlay.cc
-index 56425cb5faa91f33fb8910076aade5ffa64ab001..13db239f716843248cd3266379ce186880a7e32e 100644
+index 56425cb5faa91f33fb8910076aade5ffa64ab001..c3aaadc850e4bf78a28af2bd2ca956b19055cae3 100644
 --- a/components/viz/service/display/ca_layer_overlay.cc
 +++ b/components/viz/service/display/ca_layer_overlay.cc
-@@ -258,6 +258,14 @@ class CALayerOverlayProcessorInternal {
+@@ -251,6 +251,13 @@ class CALayerOverlayProcessorInternal {
+       return CA_LAYER_SUCCESS;
+     }
+ 
++    // @AROUND: If filter ID is set or bounding box is used always used,
++    // always force a CA layer fail, because those features are implenented
++    // in GL shader level, which in this case are not used.
++    if (quad->shared_quad_state->filter_id > 0 || !quad->shared_quad_state->bounding_box.IsEmpty()) {
++      return CA_LAYER_FAILED_QUAD_ROUNDED_CORNER_NOT_UNIFORM;
++    }
++
+     // Support rounded corner bounds when they have the same rect as the clip
+     // rect, and all corners have the same radius. Note that it is entirely
+     // possible to make rounded corner rects independent of clip rect (by adding
+@@ -258,6 +265,7 @@ class CALayerOverlayProcessorInternal {
      // but requires APIs not supported on all macOS versions.
      if (quad->shared_quad_state->mask_filter_info.HasRoundedCorners()) {
        DCHECK(quad->shared_quad_state->clip_rect);
-+
-+      // @AROUND: If filter ID is set or bounding box is used always used,
-+      // always force a CA layer fail, because those features are implenented
-+      // in GL shader level, which in this case are not used.
-+      if (quad->shared_quad_state->filter_id > 0 || !quad->shared_quad_state->bounding_box.IsEmpty()) {
-+        return CA_LAYER_FAILED_QUAD_ROUNDED_CORNER_NOT_UNIFORM;
-+      }
 +
        if (quad->shared_quad_state->mask_filter_info.rounded_corner_bounds()
                .GetType() > gfx::RRectF::Type::kSingle) {
@@ -1094,7 +1101,7 @@ index f64ae80494614b0dc8b2ff7ccb8d32730b6e689b..a7ec1d92a26f1e4a44e1bfe6aa339c54
    int resource_multiplier_location_ = -1;
    int resource_offset_location_ = -1;
 diff --git a/components/viz/service/display/skia_renderer.cc b/components/viz/service/display/skia_renderer.cc
-index 67d8f6b28a4edee1764660ede8eb48581c2b897e..ab732f75042e299e4601556e9edc76bb62a9979c 100644
+index 67d8f6b28a4edee1764660ede8eb48581c2b897e..bc6e55e81b10e33c33557da10ae5ace3e07a995e 100644
 --- a/components/viz/service/display/skia_renderer.cc
 +++ b/components/viz/service/display/skia_renderer.cc
 @@ -84,6 +84,241 @@ namespace viz {
@@ -1349,26 +1356,41 @@ index 67d8f6b28a4edee1764660ede8eb48581c2b897e..ab732f75042e299e4601556e9edc76bb
  
    ScopedSkImageBuilder builder(
        this, quad->resource_id(), /*maybe_concurrent_reads=*/true,
-@@ -2077,7 +2311,11 @@ void SkiaRenderer::DrawTextureQuad(const TextureDrawQuad* quad,
+@@ -2077,7 +2311,13 @@ void SkiaRenderer::DrawTextureQuad(const TextureDrawQuad* quad,
      paint.setColorFilter(std::move(cf));
    }
  
 -  if (needs_color_conversion_filter) {
 +  if (quad->is_video_frame) {
-+    SetAroundFilter(paint, image, quad->shared_quad_state->filter_id, quad->shared_quad_state->bounding_box, gfx::RectF(quad->rect), false);
++    SetAroundFilter(paint, image, quad->shared_quad_state->filter_id,
++      quad->shared_quad_state->bounding_box, gfx::RectF(quad->rect), false,
++      uv_rect, params);
 +  }
 +
 +  if (needs_color_conversion_filter && src_color_space.IsHDR()) {
      // Skia won't perform color conversion.
      const gfx::ColorSpace dst_color_space = CurrentRenderPassColorSpace();
      DCHECK(SkColorSpace::Equals(image->colorSpace(),
-@@ -2096,6 +2334,61 @@ void SkiaRenderer::DrawTextureQuad(const TextureDrawQuad* quad,
+@@ -2096,6 +2336,74 @@ void SkiaRenderer::DrawTextureQuad(const TextureDrawQuad* quad,
    DrawSingleImage(image, valid_texel_bounds, rpdq_params, &paint, params);
  }
  
-+void SkiaRenderer::SetAroundFilter(SkPaint& paint, const SkImage* image, int filter_id, gfx::RectF bounding_box, gfx::RectF rect, bool is_yuv) {
++void SkiaRenderer::SetAroundFilter(SkPaint& paint, const SkImage* image, int filter_id, gfx::RectF bounding_box, gfx::RectF rect, bool is_yuv, gfx::RectF clip_bounds, DrawQuadParams* params) {
 +  if (filter_id == 0 && bounding_box.IsEmpty()) {
 +    return;
++  }
++
++  // When Around filter or facetracking is used and we don't crop to a circle,
++  // we still need to clip the video in order to prevent bleeding.
++  if (!params->rounded_corner_bounds.has_value()) {
++    gfx::RectF bounds = clip_bounds;
++    params->content_device_transform.TransformRect(&bounds);
++    params->scissor_rect = gfx::Rect(
++      static_cast<int>(bounds.x()),
++      static_cast<int>(bounds.y()),
++      static_cast<int>(bounds.width()),
++      static_cast<int>(bounds.height())
++    );
 +  }
 +
 +  if (!around_shader_cache_) {
@@ -1424,24 +1446,26 @@ index 67d8f6b28a4edee1764660ede8eb48581c2b897e..ab732f75042e299e4601556e9edc76bb
  void SkiaRenderer::DrawTileDrawQuad(const TileDrawQuad* quad,
                                      const DrawRPDQParams* rpdq_params,
                                      DrawQuadParams* params) {
-@@ -2201,6 +2494,8 @@ void SkiaRenderer::DrawYUVVideoQuad(const YUVVideoDrawQuad* quad,
+@@ -2201,6 +2509,10 @@ void SkiaRenderer::DrawYUVVideoQuad(const YUVVideoDrawQuad* quad,
    // entire YUV image.
    SkPaint paint = params->paint(color_filter);
  
-+  SetAroundFilter(paint, image, quad->shared_quad_state->filter_id, quad->shared_quad_state->bounding_box, gfx::RectF(quad->rect), true);
++  SetAroundFilter(paint, image, quad->shared_quad_state->filter_id,
++    quad->shared_quad_state->bounding_box, gfx::RectF(quad->rect), true,
++    quad->ya_tex_coord_rect, params);
 +
    DrawSingleImage(image, quad->ya_tex_coord_rect, rpdq_params, &paint, params);
  }
  
 diff --git a/components/viz/service/display/skia_renderer.h b/components/viz/service/display/skia_renderer.h
-index b94ffe0bae845928db4f3dc05d71fef72e4b3523..7bec2e8c4db20f7e7905acfba2dd273715a31eae 100644
+index b94ffe0bae845928db4f3dc05d71fef72e4b3523..7a6182ccac5d1a2d84bb410390989d2163f72fdb 100644
 --- a/components/viz/service/display/skia_renderer.h
 +++ b/components/viz/service/display/skia_renderer.h
 @@ -362,6 +362,9 @@ class VIZ_SERVICE_EXPORT SkiaRenderer : public DirectRenderer {
    bool UsingSkiaForDelegatedInk() const;
    uint32_t debug_tint_modulate_count_ = 0;
  
-+  void SetAroundFilter(SkPaint& paint, const SkImage* image, int filter_id, gfx::RectF bounding_box, gfx::RectF rect, bool is_yuv);
++  void SetAroundFilter(SkPaint& paint, const SkImage* image, int filter_id, gfx::RectF bounding_box, gfx::RectF rect, bool is_yuv, gfx::RectF clip_bounds, DrawQuadParams* params);
 +  sk_sp<SkRuntimeEffect> around_shader_cache_;
 +
    DISALLOW_COPY_AND_ASSIGN(SkiaRenderer);
@@ -2189,10 +2213,10 @@ index 5267862f11b3de3c234980ae81955c4336e44526..0b6fc3ce97092b0860f1581e0de2376f
    friend class WTF::ThreadSafeRefCounted<WebMediaPlayerMSCompositor,
                                           WebMediaPlayerMSCompositorTraits>;
 diff --git a/third_party/blink/renderer/platform/graphics/video_frame_resource_provider.cc b/third_party/blink/renderer/platform/graphics/video_frame_resource_provider.cc
-index 7fff6982941a10272e671e182d4a3ddbbd1731da..a7b8ed98344a1cf5a441a5fc34e5c047dc9a1759 100644
+index 7fff6982941a10272e671e182d4a3ddbbd1731da..5cec82b31670f45e5c7808ca3861865b2ee5e945 100644
 --- a/third_party/blink/renderer/platform/graphics/video_frame_resource_provider.cc
 +++ b/third_party/blink/renderer/platform/graphics/video_frame_resource_provider.cc
-@@ -119,10 +119,81 @@ void VideoFrameResourceProvider::AppendQuads(
+@@ -119,10 +119,86 @@ void VideoFrameResourceProvider::AppendQuads(
    float draw_opacity = 1.0f;
    int sorting_context_id = 0;
  
@@ -2218,11 +2242,16 @@ index 7fff6982941a10272e671e182d4a3ddbbd1731da..a7b8ed98344a1cf5a441a5fc34e5c047
 +    }
 +
 +    mask_filter_info = gfx::MaskFilterInfo(gfx::RRectF(bounds, bounds.height() / 2));
++  }
 +
-+    // AROUND: Image filters in Skia are scaling up videos as video resolution
-+    // gets smaller, so we're adjusting the texture here so it always remains in
-+    // the bounds of the video element.
-+    transform.Scale(quad_rect.width() / visible_rect.width(), quad_rect.height() / visible_rect.height());
++  // AROUND: Image filters in Skia are scaling up videos as video resolution
++  // gets smaller, so we're adjusting the texture here so it always remains in
++  // the bounds of the video element.
++  if (media_transform.circle_crop || filter_id > 0 || !bounding_box.IsEmpty()) {
++    gfx::RectF visible_rect(frame->visible_rect());
++    transform.Scale(
++      quad_rect.width() / visible_rect.width(),
++      quad_rect.height() / visible_rect.height());
 +    transform.Translate(-visible_rect.x(), -visible_rect.y());
 +  }
 +
