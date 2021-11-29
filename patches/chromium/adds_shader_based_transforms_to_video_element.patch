@@ -1101,7 +1101,7 @@ index f64ae80494614b0dc8b2ff7ccb8d32730b6e689b..a7ec1d92a26f1e4a44e1bfe6aa339c54
    int resource_multiplier_location_ = -1;
    int resource_offset_location_ = -1;
 diff --git a/components/viz/service/display/skia_renderer.cc b/components/viz/service/display/skia_renderer.cc
-index 67d8f6b28a4edee1764660ede8eb48581c2b897e..bc6e55e81b10e33c33557da10ae5ace3e07a995e 100644
+index 67d8f6b28a4edee1764660ede8eb48581c2b897e..b36c01d89583f5aeff5c8efddf24ab1934b4f8d1 100644
 --- a/components/viz/service/display/skia_renderer.cc
 +++ b/components/viz/service/display/skia_renderer.cc
 @@ -84,6 +84,241 @@ namespace viz {
@@ -1346,7 +1346,30 @@ index 67d8f6b28a4edee1764660ede8eb48581c2b897e..bc6e55e81b10e33c33557da10ae5ace3
  // Smallest unit that impacts anti-aliasing output. We use this to determine
  // when an exterior edge (with AA) has been clipped (no AA). The specific value
  // was chosen to match that used by gl_renderer.
-@@ -1952,8 +2187,7 @@ void SkiaRenderer::DrawTextureQuad(const TextureDrawQuad* quad,
+@@ -1064,8 +1299,20 @@ void SkiaRenderer::PrepareCanvas(
+     current_canvas_->clipRect(gfx::RectToSkRect(*scissor_rect));
+   }
+ 
+-  if (rounded_corner_bounds.has_value())
+-    current_canvas_->clipRRect(SkRRect(*rounded_corner_bounds), true /* AA */);
++  if (rounded_corner_bounds.has_value()) {
++    // AROUND: If radius is 0.1, we strip it to 0 so our filters can be applied
++    // correctly even to rectangular videos.
++    if (rounded_corner_bounds->GetSimpleRadius() == 0.1f) {
++      current_canvas_->clipRect(gfx::RectToSkRect(gfx::Rect(
++        static_cast<int>((*rounded_corner_bounds).rect().x()),
++        static_cast<int>((*rounded_corner_bounds).rect().y()),
++        static_cast<int>((*rounded_corner_bounds).rect().width()),
++        static_cast<int>((*rounded_corner_bounds).rect().height())
++      )));
++    } else {
++      current_canvas_->clipRRect(SkRRect(*rounded_corner_bounds), true /* AA */);
++    }
++  }
+ 
+   if (cdt) {
+     SkMatrix m;
+@@ -1952,8 +2199,7 @@ void SkiaRenderer::DrawTextureQuad(const TextureDrawQuad* quad,
                                     DrawQuadParams* params) {
    const gfx::ColorSpace& src_color_space =
        resource_provider()->GetColorSpace(quad->resource_id());
@@ -1356,7 +1379,7 @@ index 67d8f6b28a4edee1764660ede8eb48581c2b897e..bc6e55e81b10e33c33557da10ae5ace3
  
    ScopedSkImageBuilder builder(
        this, quad->resource_id(), /*maybe_concurrent_reads=*/true,
-@@ -2077,7 +2311,13 @@ void SkiaRenderer::DrawTextureQuad(const TextureDrawQuad* quad,
+@@ -2077,7 +2323,13 @@ void SkiaRenderer::DrawTextureQuad(const TextureDrawQuad* quad,
      paint.setColorFilter(std::move(cf));
    }
  
@@ -1371,7 +1394,7 @@ index 67d8f6b28a4edee1764660ede8eb48581c2b897e..bc6e55e81b10e33c33557da10ae5ace3
      // Skia won't perform color conversion.
      const gfx::ColorSpace dst_color_space = CurrentRenderPassColorSpace();
      DCHECK(SkColorSpace::Equals(image->colorSpace(),
-@@ -2096,6 +2336,74 @@ void SkiaRenderer::DrawTextureQuad(const TextureDrawQuad* quad,
+@@ -2096,6 +2348,74 @@ void SkiaRenderer::DrawTextureQuad(const TextureDrawQuad* quad,
    DrawSingleImage(image, valid_texel_bounds, rpdq_params, &paint, params);
  }
  
@@ -1446,7 +1469,7 @@ index 67d8f6b28a4edee1764660ede8eb48581c2b897e..bc6e55e81b10e33c33557da10ae5ace3
  void SkiaRenderer::DrawTileDrawQuad(const TileDrawQuad* quad,
                                      const DrawRPDQParams* rpdq_params,
                                      DrawQuadParams* params) {
-@@ -2201,6 +2509,10 @@ void SkiaRenderer::DrawYUVVideoQuad(const YUVVideoDrawQuad* quad,
+@@ -2201,6 +2521,10 @@ void SkiaRenderer::DrawYUVVideoQuad(const YUVVideoDrawQuad* quad,
    // entire YUV image.
    SkPaint paint = params->paint(color_filter);
  
@@ -2213,10 +2236,10 @@ index 5267862f11b3de3c234980ae81955c4336e44526..0b6fc3ce97092b0860f1581e0de2376f
    friend class WTF::ThreadSafeRefCounted<WebMediaPlayerMSCompositor,
                                           WebMediaPlayerMSCompositorTraits>;
 diff --git a/third_party/blink/renderer/platform/graphics/video_frame_resource_provider.cc b/third_party/blink/renderer/platform/graphics/video_frame_resource_provider.cc
-index 7fff6982941a10272e671e182d4a3ddbbd1731da..5cec82b31670f45e5c7808ca3861865b2ee5e945 100644
+index 7fff6982941a10272e671e182d4a3ddbbd1731da..5de3fc10dbcf44cbd6dc10aeff4f630858677f31 100644
 --- a/third_party/blink/renderer/platform/graphics/video_frame_resource_provider.cc
 +++ b/third_party/blink/renderer/platform/graphics/video_frame_resource_provider.cc
-@@ -119,10 +119,86 @@ void VideoFrameResourceProvider::AppendQuads(
+@@ -119,10 +119,89 @@ void VideoFrameResourceProvider::AppendQuads(
    float draw_opacity = 1.0f;
    int sorting_context_id = 0;
  
@@ -2234,14 +2257,17 @@ index 7fff6982941a10272e671e182d4a3ddbbd1731da..5cec82b31670f45e5c7808ca3861865b
 +    }
 +
 +    if (bounds.width() > bounds.height()) {
-+      bounds.set_x((bounds.width() - bounds.height()) / 2);
++      bounds.set_x((bounds.width() - bounds.height()) / 2.0f);
 +      bounds.set_width(bounds.height());
 +    } else {
-+      bounds.set_y((bounds.height() - bounds.width()) / 2);
++      bounds.set_y((bounds.height() - bounds.width()) / 2.0f);
 +      bounds.set_height(bounds.width());
 +    }
 +
-+    mask_filter_info = gfx::MaskFilterInfo(gfx::RRectF(bounds, bounds.height() / 2));
++    mask_filter_info = gfx::MaskFilterInfo(gfx::RRectF(bounds, bounds.height() / 2.0f));
++  } else if (filter_id > 0 || !bounding_box.IsEmpty()) {
++    gfx::RectF bounds = gfx::RectF(quad_rect);
++    mask_filter_info = gfx::MaskFilterInfo(gfx::RRectF(bounds, 0.1f));
 +  }
 +
 +  // AROUND: Image filters in Skia are scaling up videos as video resolution
