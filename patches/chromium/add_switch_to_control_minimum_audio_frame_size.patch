@@ -6,22 +6,22 @@ Subject: add switch to control minimum audio frame size
 This patch adds a switch to control minimum audio frame size.
 
 diff --git a/content/browser/renderer_host/render_process_host_impl.cc b/content/browser/renderer_host/render_process_host_impl.cc
-index b3862140ace94186e6a34db749b02c22acc96cb0..b42fe6397921ec694216776b7c05a188f16d075b 100644
+index d244ec871c7c86e7da19b5c2892dd42980fb97a3..7caa95301c5e7325b53085029e7c8e2b581acbe3 100644
 --- a/content/browser/renderer_host/render_process_host_impl.cc
 +++ b/content/browser/renderer_host/render_process_host_impl.cc
-@@ -3406,6 +3406,7 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
+@@ -3424,6 +3424,7 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
      switches::kAllowLoopbackInPeerConnection,
      switches::kAndroidFontsPath,
      switches::kAudioBufferSize,
 +    switches::kAudioLatencyFactor,
      switches::kAutoplayPolicy,
      switches::kMojoCoreLibraryPath,
-     switches::kDisable2dCanvasImageChromium,
+     switches::kCrossOriginWebAssemblyModuleSharingAllowed,
 diff --git a/content/browser/utility_process_host.cc b/content/browser/utility_process_host.cc
-index a2526f669b892079ef1634a6c886d627e3d76682..df018de76a44847d85358628c021117a1f16f1b6 100644
+index 9230b5c64934d736f2fc01828560e0af027887fc..a295f3745dd107e4eb46fc0a58845c4aedbacb52 100644
 --- a/content/browser/utility_process_host.cc
 +++ b/content/browser/utility_process_host.cc
-@@ -272,6 +272,7 @@ bool UtilityProcessHost::StartProcess() {
+@@ -268,6 +268,7 @@ bool UtilityProcessHost::StartProcess() {
        switches::kEnableExperimentalWebPlatformFeatures,
        // These flags are used by the audio service:
        switches::kAudioBufferSize,
@@ -30,10 +30,10 @@ index a2526f669b892079ef1634a6c886d627e3d76682..df018de76a44847d85358628c021117a
        switches::kDisableAudioOutput,
        switches::kFailAudioStreamCreation,
 diff --git a/media/audio/mac/audio_manager_mac.cc b/media/audio/mac/audio_manager_mac.cc
-index f58ac1d55acac1895391579275a12b0f9802491d..9228c6ef6d7e05ac67bd3f9e97725ecaf9bae411 100644
+index d6e08b56420077bbdddd81c12a535fea62197aca..ca2f002c36d9d336af828a104ebd623845a5c6d9 100644
 --- a/media/audio/mac/audio_manager_mac.cc
 +++ b/media/audio/mac/audio_manager_mac.cc
-@@ -19,6 +19,7 @@
+@@ -20,6 +20,7 @@
  #include "base/memory/free_deleter.h"
  #include "base/power_monitor/power_monitor.h"
  #include "base/power_monitor/power_observer.h"
@@ -41,7 +41,7 @@ index f58ac1d55acac1895391579275a12b0f9802491d..9228c6ef6d7e05ac67bd3f9e97725eca
  #include "base/strings/sys_string_conversions.h"
  #include "base/threading/thread_checker.h"
  #include "media/audio/audio_device_description.h"
-@@ -1036,6 +1037,17 @@ bool AudioManagerMac::MaybeChangeBufferSize(AudioDeviceID device_id,
+@@ -1040,6 +1041,17 @@ bool AudioManagerMac::MaybeChangeBufferSize(AudioDeviceID device_id,
    }
    DVLOG(1) << "valid IO buffer size range: [" << minimum << ", " << maximum
             << "]";
@@ -60,7 +60,7 @@ index f58ac1d55acac1895391579275a12b0f9802491d..9228c6ef6d7e05ac67bd3f9e97725eca
    if (buffer_size < minimum)
      buffer_size = minimum;
 diff --git a/media/base/media_switches.cc b/media/base/media_switches.cc
-index 9b32170f896084ba22aa5901a961581a5bacb239..93ed2d58f274ea9ed88ae591743e7d8b440e7eba 100644
+index 5f43904c668ffed2c6471b1da41d4c53033551c7..271481a22b14f814666957dcd68857856cba3634 100644
 --- a/media/base/media_switches.cc
 +++ b/media/base/media_switches.cc
 @@ -19,6 +19,10 @@
@@ -75,7 +75,7 @@ index 9b32170f896084ba22aa5901a961581a5bacb239..93ed2d58f274ea9ed88ae591743e7d8b
  const char kAudioBufferSize[] = "audio-buffer-size";
  
 diff --git a/media/base/media_switches.h b/media/base/media_switches.h
-index 4e79508bc27767e7ddf61929ead29a4baa85f3c8..38ebd21fd27d7bc9d330c31aca66822f20cb4fe4 100644
+index e09620e46251d1fa1121064caf5d34c67dadd5ee..056cd95a6e7a8365fad52ce8a1869927e6f4f028 100644
 --- a/media/base/media_switches.h
 +++ b/media/base/media_switches.h
 @@ -22,6 +22,8 @@ class CommandLine;

@@ -10,10 +10,10 @@ Enabled access to native audio APIs in renderer process.
 Removed encryption of device ids and verification of device ids. This was needed mainly to simplify handling of native device ids. Alternative would have been to write HMAC to device id conversion, which needs to know salt and URL being used, which looked messy enough to try to avoid doing that.
 
 diff --git a/content/browser/renderer_host/media/media_stream_manager.cc b/content/browser/renderer_host/media/media_stream_manager.cc
-index 0c018c0e390932035c56b1f6166642148b55fa9c..7b95e9ed1009f1ec12bc0d166107559cc32b3352 100644
+index 4680642f572b4e41b3737c34625c74d53a7cc75f..a3b1796f000ff3fd1434c61ec46e6bffdd5e0457 100644
 --- a/content/browser/renderer_host/media/media_stream_manager.cc
 +++ b/content/browser/renderer_host/media/media_stream_manager.cc
-@@ -2569,6 +2569,9 @@ std::string MediaStreamManager::GetHMACForMediaDeviceID(
+@@ -2617,6 +2617,9 @@ std::string MediaStreamManager::GetHMACForMediaDeviceID(
  #if !defined(OS_CHROMEOS)
    DCHECK(!raw_unique_id.empty());
  #endif
@@ -24,10 +24,10 @@ index 0c018c0e390932035c56b1f6166642148b55fa9c..7b95e9ed1009f1ec12bc0d166107559c
        raw_unique_id == media::AudioDeviceDescription::kCommunicationsDeviceId) {
      return raw_unique_id;
 diff --git a/content/browser/renderer_host/render_process_host_impl.cc b/content/browser/renderer_host/render_process_host_impl.cc
-index 441febf2cc00648ca8242129a750a26e83010799..01f8aa255053c3e9476d0c6b6e85a5e7cf35f3a4 100644
+index 11cf460679570a971a63c50b6711e1f58fd10485..266c2eb22eec5a9f0fdf5fb2ca1b29e1b47482d7 100644
 --- a/content/browser/renderer_host/render_process_host_impl.cc
 +++ b/content/browser/renderer_host/render_process_host_impl.cc
-@@ -3407,6 +3407,7 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
+@@ -3425,6 +3425,7 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
      switches::kAndroidFontsPath,
      switches::kAudioBufferSize,
      switches::kAudioLatencyFactor,
@@ -36,10 +36,10 @@ index 441febf2cc00648ca8242129a750a26e83010799..01f8aa255053c3e9476d0c6b6e85a5e7
      switches::kOpusComplexity,
      switches::kDisableEncoderQueue,
 diff --git a/content/browser/utility_process_host.cc b/content/browser/utility_process_host.cc
-index 05d8c8509bc9064c60bcd58146ddf56fc472bec5..c2c8008e17461a2700759e9638e687a189bd5196 100644
+index 009e7bdb99444708780a55676fc3d1aa2677f5bc..f4328c33d07a046007a174449624389964759517 100644
 --- a/content/browser/utility_process_host.cc
 +++ b/content/browser/utility_process_host.cc
-@@ -273,6 +273,7 @@ bool UtilityProcessHost::StartProcess() {
+@@ -269,6 +269,7 @@ bool UtilityProcessHost::StartProcess() {
        // These flags are used by the audio service:
        switches::kAudioBufferSize,
        switches::kAudioLatencyFactor,
@@ -76,7 +76,7 @@ index 0cc1de482243e8d0c8c0e4a90865bf7d746c8297..59fc1da322d8f3d68e89897a93187608
    if (media::AudioDeviceDescription::IsDefaultDevice(device_id) ||
        device_id == media::AudioDeviceDescription::kCommunicationsDeviceId)
 diff --git a/media/audio/audio_input_device.cc b/media/audio/audio_input_device.cc
-index 803c1430101a56205a362a99586605033381c181..5188f7ddceb3d4e405554ac7bb91b99c9f40f01c 100644
+index 8b238c3413df667ba19139506d935cafca5b0441..887da67bb013b1f77a38fed07cc78412930c4323 100644
 --- a/media/audio/audio_input_device.cc
 +++ b/media/audio/audio_input_device.cc
 @@ -10,6 +10,7 @@
@@ -98,8 +98,8 @@ index 803c1430101a56205a362a99586605033381c181..5188f7ddceb3d4e405554ac7bb91b99c
  
  namespace media {
  
-@@ -98,18 +101,62 @@ class AudioInputDevice::AudioThreadCallback
-   DISALLOW_COPY_AND_ASSIGN(AudioThreadCallback);
+@@ -100,18 +103,62 @@ class AudioInputDevice::AudioThreadCallback
+   base::RepeatingClosure got_data_callback_;
  };
  
 +class AudioInputDevice::AudioCallback
@@ -163,7 +163,7 @@ index 803c1430101a56205a362a99586605033381c181..5188f7ddceb3d4e405554ac7bb91b99c
    // The correctness of the code depends on the relative values assigned in the
    // State enum.
    static_assert(IPC_CLOSED < IDLE, "invalid enum value assignment 0");
-@@ -136,8 +183,32 @@ void AudioInputDevice::Start() {
+@@ -138,8 +185,32 @@ void AudioInputDevice::Start() {
      return;
  
    state_ = CREATING_STREAM;
@@ -198,7 +198,7 @@ index 803c1430101a56205a362a99586605033381c181..5188f7ddceb3d4e405554ac7bb91b99c
  }
  
  void AudioInputDevice::Stop() {
-@@ -158,7 +229,15 @@ void AudioInputDevice::Stop() {
+@@ -160,7 +231,15 @@ void AudioInputDevice::Stop() {
  
    // Close the stream, if we haven't already.
    if (state_ >= CREATING_STREAM) {
@@ -215,7 +215,7 @@ index 803c1430101a56205a362a99586605033381c181..5188f7ddceb3d4e405554ac7bb91b99c
      state_ = IDLE;
      agc_is_enabled_ = false;
    }
-@@ -184,8 +263,13 @@ void AudioInputDevice::SetVolume(double volume) {
+@@ -186,8 +265,13 @@ void AudioInputDevice::SetVolume(double volume) {
      return;
    }
  
@@ -231,7 +231,7 @@ index 803c1430101a56205a362a99586605033381c181..5188f7ddceb3d4e405554ac7bb91b99c
  }
  
  void AudioInputDevice::SetAutomaticGainControl(bool enabled) {
-@@ -210,8 +294,13 @@ void AudioInputDevice::SetOutputDeviceForAec(
+@@ -212,8 +296,13 @@ void AudioInputDevice::SetOutputDeviceForAec(
                 "output_device_id", output_device_id);
  
    output_device_id_for_aec_ = output_device_id;
@@ -247,7 +247,7 @@ index 803c1430101a56205a362a99586605033381c181..5188f7ddceb3d4e405554ac7bb91b99c
  }
  
  void AudioInputDevice::OnStreamCreated(
-@@ -343,6 +432,7 @@ void AudioInputDevice::OnIPCClosed() {
+@@ -345,6 +434,7 @@ void AudioInputDevice::OnIPCClosed() {
  }
  
  AudioInputDevice::~AudioInputDevice() {
@@ -305,7 +305,7 @@ index ab9d0991cf63a5356842095de23c4e4b653a87af..5abf71d4b89b1bbeb38209e824080952
  };
  
 diff --git a/media/audio/audio_manager.cc b/media/audio/audio_manager.cc
-index f04c67116c0d4812a41355f2bb212949f94bd00d..1c72649d4c772d3ff36b15d77ae11b682a908eb7 100644
+index 0c33df6aaaf343733dfd7d067967d46d8f1eed8b..b856bd0091bb87e5573a2363c4c4592ca7698731 100644
 --- a/media/audio/audio_manager.cc
 +++ b/media/audio/audio_manager.cc
 @@ -18,7 +18,9 @@
@@ -327,7 +327,7 @@ index f04c67116c0d4812a41355f2bb212949f94bd00d..1c72649d4c772d3ff36b15d77ae11b68
  
  // Helper class for managing global AudioManager data.
  class AudioManagerHelper {
-@@ -83,6 +87,7 @@ AudioManager::AudioManager(std::unique_ptr<AudioThread> audio_thread)
+@@ -85,6 +89,7 @@ AudioManager::AudioManager(std::unique_ptr<AudioThread> audio_thread)
      : audio_thread_(std::move(audio_thread)) {
    DCHECK(audio_thread_);
  
@@ -335,7 +335,7 @@ index f04c67116c0d4812a41355f2bb212949f94bd00d..1c72649d4c772d3ff36b15d77ae11b68
    if (g_last_created) {
      // We create multiple instances of AudioManager only when testing.
      // We should not encounter this case in production.
-@@ -97,6 +102,7 @@ AudioManager::~AudioManager() {
+@@ -99,6 +104,7 @@ AudioManager::~AudioManager() {
    DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
    DCHECK(shutdown_);
  
@@ -343,7 +343,7 @@ index f04c67116c0d4812a41355f2bb212949f94bd00d..1c72649d4c772d3ff36b15d77ae11b68
    if (g_last_created == this) {
      g_last_created = nullptr;
    } else {
-@@ -125,6 +131,34 @@ std::unique_ptr<AudioManager> AudioManager::CreateForTesting(
+@@ -127,6 +133,34 @@ std::unique_ptr<AudioManager> AudioManager::CreateForTesting(
    return Create(std::move(audio_thread), GetHelper()->fake_log_factory());
  }
  
@@ -379,10 +379,10 @@ index f04c67116c0d4812a41355f2bb212949f94bd00d..1c72649d4c772d3ff36b15d77ae11b68
  void AudioManager::SetGlobalAppName(const std::string& app_name) {
    GetHelper()->set_app_name(app_name);
 diff --git a/media/audio/audio_manager.h b/media/audio/audio_manager.h
-index 508775f23f9cfeed9a5ec70d220f7eda9821631d..46ea1a0334f0c285fa7dd0f8d90eb884f92bf0ac 100644
+index bb2fc8b3822e3076c2d1c0bfeff011ade338bc89..fcc341adc6d0f0e18eade473068f6d62924f1e05 100644
 --- a/media/audio/audio_manager.h
 +++ b/media/audio/audio_manager.h
-@@ -60,6 +60,10 @@ class MEDIA_EXPORT AudioManager {
+@@ -63,6 +63,10 @@ class MEDIA_EXPORT AudioManager {
    static std::unique_ptr<AudioManager> CreateForTesting(
        std::unique_ptr<AudioThread> audio_thread);
  
@@ -680,10 +680,10 @@ index efd2da31abd0f7fae8b2aedfa323868e9b5e5bf3..ae07e0175895bce4243da69c0012726b
  };
  
 diff --git a/media/audio/mac/audio_manager_mac.cc b/media/audio/mac/audio_manager_mac.cc
-index 9228c6ef6d7e05ac67bd3f9e97725ecaf9bae411..e18fee569e4eecdf138fb24071ffa01de4910fac 100644
+index ca2f002c36d9d336af828a104ebd623845a5c6d9..262a2f4bcab7078f553bad0d007a68b02d2d6d67 100644
 --- a/media/audio/mac/audio_manager_mac.cc
 +++ b/media/audio/mac/audio_manager_mac.cc
-@@ -514,11 +514,15 @@ AudioManagerMac::AudioManagerMac(std::unique_ptr<AudioThread> audio_thread,
+@@ -516,11 +516,15 @@ AudioManagerMac::AudioManagerMac(std::unique_ptr<AudioThread> audio_thread,
        weak_ptr_factory_(this) {
    SetMaxOutputStreamsAllowed(kMaxOutputStreams);
  
@@ -705,7 +705,7 @@ index 9228c6ef6d7e05ac67bd3f9e97725ecaf9bae411..e18fee569e4eecdf138fb24071ffa01d
  
  AudioManagerMac::~AudioManagerMac() = default;
 diff --git a/media/base/media_switches.cc b/media/base/media_switches.cc
-index f9ed300ca34f0e41b3b63add3191ce3be05eea38..ffef7a295a1bcc7ac6dd22711d644c388ef7d031 100644
+index d3905726d4411018984ad688a82910b5916290c8..6ed908e171ef23c1256e0a422192ee32d9fd6f33 100644
 --- a/media/base/media_switches.cc
 +++ b/media/base/media_switches.cc
 @@ -23,6 +23,9 @@ namespace switches {
@@ -719,7 +719,7 @@ index f9ed300ca34f0e41b3b63add3191ce3be05eea38..ffef7a295a1bcc7ac6dd22711d644c38
  const char kDisableAroundAudioProcessing[] = "disable-around-audio-processing";
  
 diff --git a/media/base/media_switches.h b/media/base/media_switches.h
-index ddf82f52d50f8a46dac818a7d636b3a88cdbd27d..336b85bf3fbff1c6e950e42debe1524055007c00 100644
+index 2d005552ea971fb9b42b23a3841823d7491ed268..17fb1c14aaf1ec31a9a0046ee350a9a125130ce2 100644
 --- a/media/base/media_switches.h
 +++ b/media/base/media_switches.h
 @@ -23,6 +23,7 @@ class CommandLine;
@@ -731,7 +731,7 @@ index ddf82f52d50f8a46dac818a7d636b3a88cdbd27d..336b85bf3fbff1c6e950e42debe15240
  MEDIA_EXPORT extern const char kOpusComplexity[];
  MEDIA_EXPORT extern const char kDisableEncoderQueue[];
 diff --git a/sandbox/policy/mac/sandbox_mac.mm b/sandbox/policy/mac/sandbox_mac.mm
-index c6605154cbb0220556cba6bdf4159e123cb9b429..fd6d7bcb527057f69ff6f3f7acb05e2290413437 100644
+index b6a8353056c35d2c16c00cfb1716bca6d02e1b47..e792fa0dedb7c53ace7c21fd46fab4215a1f4ab1 100644
 --- a/sandbox/policy/mac/sandbox_mac.mm
 +++ b/sandbox/policy/mac/sandbox_mac.mm
 @@ -12,6 +12,7 @@
@@ -742,7 +742,7 @@ index c6605154cbb0220556cba6bdf4159e123cb9b429..fd6d7bcb527057f69ff6f3f7acb05e22
  #include "sandbox/policy/mac/audio.sb.h"
  #include "sandbox/policy/mac/cdm.sb.h"
  #include "sandbox/policy/mac/common.sb.h"
-@@ -84,6 +85,9 @@
+@@ -86,6 +87,9 @@
        break;
      case SandboxType::kRenderer:
        profile += kSeatbeltPolicyString_renderer;
@@ -751,7 +751,7 @@ index c6605154cbb0220556cba6bdf4159e123cb9b429..fd6d7bcb527057f69ff6f3f7acb05e22
 +      }
        break;
      case SandboxType::kNoSandbox:
-     case SandboxType::kVideoCapture:
+       CHECK(false);
 diff --git a/services/audio/public/cpp/device_factory.cc b/services/audio/public/cpp/device_factory.cc
 index 00c2638af3435197bc10b0fb63e27f68c93f0275..084b7dd6446780501ebeab528ad93e3be9be38f6 100644
 --- a/services/audio/public/cpp/device_factory.cc
@@ -767,10 +767,10 @@ index 00c2638af3435197bc10b0fb63e27f68c93f0275..084b7dd6446780501ebeab528ad93e3b
  
  scoped_refptr<media::AudioCapturerSource> CreateInputDevice(
 diff --git a/third_party/blink/renderer/modules/media/audio/web_audio_device_factory.cc b/third_party/blink/renderer/modules/media/audio/web_audio_device_factory.cc
-index a6b703662baafb1d76b6f32100807e1ad4d06403..fc6cd98c21219feae217db78e77f8f42564e769c 100644
+index e0c0542667255cef62d8433ca046ade27a75da71..2ef13d89e42968c3d26a6f239fb81531f6294509 100644
 --- a/third_party/blink/renderer/modules/media/audio/web_audio_device_factory.cc
 +++ b/third_party/blink/renderer/modules/media/audio/web_audio_device_factory.cc
-@@ -182,7 +182,8 @@ WebAudioDeviceFactory::NewAudioCapturerSource(
+@@ -181,7 +181,8 @@ WebAudioDeviceFactory::NewAudioCapturerSource(
        blink::WebAudioInputIPCFactory::GetInstance().CreateAudioInputIPC(
            frame_token, params),
        media::AudioInputDevice::Purpose::kUserInput,
@@ -797,7 +797,7 @@ index d284b26908e2095df0cef8f8852d24068ba8aa36..699456bcbd3e22084369dcf228dea72a
    source_->Start();
    return true;
 diff --git a/third_party/blink/renderer/modules/mediastream/processed_local_audio_source.cc b/third_party/blink/renderer/modules/mediastream/processed_local_audio_source.cc
-index b0b277e9813d52e5b32cf9904dc53487008af3b7..6c7f43a9e6414f53c3f007fb61af007fa44460c3 100644
+index 815ea74249ffcd19cb94521e4fdd924e0fc505d9..b818efac3604dc728da5528ef53b00c4961e9e2a 100644
 --- a/third_party/blink/renderer/modules/mediastream/processed_local_audio_source.cc
 +++ b/third_party/blink/renderer/modules/mediastream/processed_local_audio_source.cc
 @@ -393,6 +393,7 @@ bool ProcessedLocalAudioSource::EnsureSourceIsStarted() {

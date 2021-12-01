@@ -8,23 +8,23 @@ This patch adds onbufferdrained and onbufferrestored events to the fifo neteq im
 Signed-off-by: gellert <gellert.hegyi@around.co>
 
 diff --git a/third_party/blink/public/mojom/web_feature/web_feature.mojom b/third_party/blink/public/mojom/web_feature/web_feature.mojom
-index 9bf11d973b7869a5c6f67ee432c9df7df5d593bc..e7bafee7b81d2d56d005939ea3bff4f610e6951b 100644
+index e847b8c27ec4a4c3aced5c2fb4295cc2eaef8390..1f153871234e001888d67cb1225393d6b226c95d 100644
 --- a/third_party/blink/public/mojom/web_feature/web_feature.mojom
 +++ b/third_party/blink/public/mojom/web_feature/web_feature.mojom
-@@ -3287,6 +3287,8 @@ enum WebFeature {
-   kCanvasRenderingContext2DContextRestoredEvent = 3975,
-   kReadOrWriteWebDatabaseThirdPartyContext = 3985,
-   kMediaStreamConstraintsAroundAudioProcessing = 3976,
-+  kV8RTCRtpReceiver_BufferDrained_Method = 3977,
-+  kV8RTCRtpReceiver_BufferRestored_Method = 3978,
+@@ -3371,6 +3371,8 @@ enum WebFeature {
+ 
+   // @Around features
+   kMediaStreamConstraintsAroundAudioProcessing = 4500,
++  kV8RTCRtpReceiver_BufferDrained_Method = 4501,
++  kV8RTCRtpReceiver_BufferRestored_Method = 4502,
  
    // Add new features immediately above this line. Don't change assigned
    // numbers of any item, and don't reuse removed slots.
 diff --git a/third_party/blink/renderer/core/events/event_type_names.json5 b/third_party/blink/renderer/core/events/event_type_names.json5
-index fcb366c160ed427c478512d27707453d81b56f23..d00aa999b8e70a7654b00380ad18249db04f6c9e 100644
+index d1ed1f93f733e7e16e75440890c19d716be5b441..c209574e38bb06ac1efec6edb8a11358ba7daae1 100644
 --- a/third_party/blink/renderer/core/events/event_type_names.json5
 +++ b/third_party/blink/renderer/core/events/event_type_names.json5
-@@ -60,6 +60,8 @@
+@@ -59,6 +59,8 @@
      "blur",
      "boundary",
      "bufferedamountlow",
@@ -34,10 +34,10 @@ index fcb366c160ed427c478512d27707453d81b56f23..d00aa999b8e70a7654b00380ad18249d
      "cancel",
      "canmakepayment",
 diff --git a/third_party/blink/renderer/modules/peerconnection/rtc_peer_connection.cc b/third_party/blink/renderer/modules/peerconnection/rtc_peer_connection.cc
-index 73f8554e487a23ea86f4cf643b756d5e9773036b..2e5bd763bbc97268790eb78766e8231b9af10b03 100644
+index c4ea6eec6698f736b1ac0bb3c883c2182b5246cb..2fe8511b65bbb8b0a321238bed5e030dae645d60 100644
 --- a/third_party/blink/renderer/modules/peerconnection/rtc_peer_connection.cc
 +++ b/third_party/blink/renderer/modules/peerconnection/rtc_peer_connection.cc
-@@ -3442,6 +3442,16 @@ void RTCPeerConnection::ClosePeerConnection() {
+@@ -3446,6 +3446,16 @@ void RTCPeerConnection::ClosePeerConnection() {
    CloseInternal();
  }
  
@@ -55,10 +55,10 @@ index 73f8554e487a23ea86f4cf643b756d5e9773036b..2e5bd763bbc97268790eb78766e8231b
    return event_target_names::kRTCPeerConnection;
  }
 diff --git a/third_party/blink/renderer/modules/peerconnection/rtc_peer_connection.h b/third_party/blink/renderer/modules/peerconnection/rtc_peer_connection.h
-index 0d077326d5edafc42ec7fba9a93b94636b31cd83..67a9f9bcc38618bf82f36c818dcc2cf06eed2064 100644
+index dc517b903508ef6625b2a13bf313118834bdfbc9..0bbcc6cb62474fcacbf020e306003cffb7a6ae12 100644
 --- a/third_party/blink/renderer/modules/peerconnection/rtc_peer_connection.h
 +++ b/third_party/blink/renderer/modules/peerconnection/rtc_peer_connection.h
-@@ -313,6 +313,9 @@ class MODULES_EXPORT RTCPeerConnection final
+@@ -314,6 +314,9 @@ class MODULES_EXPORT RTCPeerConnection final
    DEFINE_ATTRIBUTE_EVENT_LISTENER(datachannel, kDatachannel)
    DEFINE_ATTRIBUTE_EVENT_LISTENER(icecandidateerror, kIcecandidateerror)
  
@@ -68,7 +68,7 @@ index 0d077326d5edafc42ec7fba9a93b94636b31cd83..67a9f9bcc38618bf82f36c818dcc2cf0
    // Utility to note result of CreateOffer / CreateAnswer
    void NoteSdpCreated(const RTCSessionDescription&);
    // Utility to report SDP usage of setLocalDescription / setRemoteDescription.
-@@ -364,6 +367,9 @@ class MODULES_EXPORT RTCPeerConnection final
+@@ -365,6 +368,9 @@ class MODULES_EXPORT RTCPeerConnection final
    void UnregisterPeerConnectionHandler() override;
    void ClosePeerConnection() override;
  
@@ -145,10 +145,10 @@ index f99d8e726f4df652ee0d1326d6f8aa5ad48abd25..a04cef659d59fa9b2be9f48872848c65
      const webrtc::SessionDescriptionInterface* sdesc) {
    DCHECK(sdesc);
 diff --git a/third_party/blink/renderer/modules/peerconnection/rtc_peer_connection_handler.h b/third_party/blink/renderer/modules/peerconnection/rtc_peer_connection_handler.h
-index 0279dff58449cffaeef0d611d8786692e60148e9..49f00781b7413ad4d118bf7129dc0cd66ac82156 100644
+index 5760b240b004713320bd7ae129ad81f81598a5e5..fdbec8766a661c5721a9ba2feeb22989f608aed7 100644
 --- a/third_party/blink/renderer/modules/peerconnection/rtc_peer_connection_handler.h
 +++ b/third_party/blink/renderer/modules/peerconnection/rtc_peer_connection_handler.h
-@@ -287,6 +287,9 @@ class MODULES_EXPORT RTCPeerConnectionHandler {
+@@ -291,6 +291,9 @@ class MODULES_EXPORT RTCPeerConnectionHandler {
      return force_encoded_video_insertable_streams_;
    }
  

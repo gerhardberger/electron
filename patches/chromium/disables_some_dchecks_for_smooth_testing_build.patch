@@ -8,7 +8,7 @@ This patch disables some dchecks that could fail for Around during runtime, but 
 Signed-off-by: gellert <gellert.hegyi@around.co>
 
 diff --git a/base/observer_list.h b/base/observer_list.h
-index a62fa36b73c477dbd8b5ac9d062673a2a37f30a5..685e8c14d65987d781eec771ec8ab9426fc57e80 100644
+index 0c8a2a007bce51e8358c5f63e22b655d0529428a..1473540302792b50d7b142607647a20d16058ebd 100644
 --- a/base/observer_list.h
 +++ b/base/observer_list.h
 @@ -269,7 +269,7 @@ class ObserverList {
@@ -21,10 +21,10 @@ index a62fa36b73c477dbd8b5ac9d062673a2a37f30a5..685e8c14d65987d781eec771ec8ab942
      }
      observers_count_++;
 diff --git a/content/renderer/media/renderer_webaudiodevice_impl.cc b/content/renderer/media/renderer_webaudiodevice_impl.cc
-index 637d248a1b0093e96c323a8991e141b6ed976ab4..04fe5baa8be42d388c35b85a63e2ed3f86630379 100644
+index 1b1e5276aa525e2227abe03d55e926f61706cc83..caf18bf249d0f81cf075df3bc3115a354d0d843f 100644
 --- a/content/renderer/media/renderer_webaudiodevice_impl.cc
 +++ b/content/renderer/media/renderer_webaudiodevice_impl.cc
-@@ -264,7 +264,7 @@ int RendererWebAudioDeviceImpl::Render(base::TimeDelta delay,
+@@ -263,7 +263,7 @@ int RendererWebAudioDeviceImpl::Render(base::TimeDelta delay,
      delay -=
          media::AudioTimestampHelper::FramesToTime(dest->frames(), SampleRate());
    }
@@ -51,7 +51,7 @@ index bd35955cb3716e425c2cbdb713e78ca7f2388407..864c570925475774064db8ed97e38ee7
  #endif
  
 diff --git a/third_party/blink/renderer/modules/webgl/webgl2_rendering_context_base.cc b/third_party/blink/renderer/modules/webgl/webgl2_rendering_context_base.cc
-index 2f3348e5bd8c089de9e0ffeb0e603da2ef8ec578..43a081281aa1da54c13dcb8bc56a848f82fc016e 100644
+index fad756bbbfba6c1d688094429ea64632a9b7f4d7..9711c7ec9527bdcc58daa7931b66d663ce13105a 100644
 --- a/third_party/blink/renderer/modules/webgl/webgl2_rendering_context_base.cc
 +++ b/third_party/blink/renderer/modules/webgl/webgl2_rendering_context_base.cc
 @@ -838,7 +838,7 @@ void WebGL2RenderingContextBase::readPixels(GLint x,
@@ -64,10 +64,10 @@ index 2f3348e5bd8c089de9e0ffeb0e603da2ef8ec578..43a081281aa1da54c13dcb8bc56a848f
    if (!ValidateValueFitNonNegInt32("readPixels", "offset", offset))
      return;
 diff --git a/third_party/blink/renderer/platform/mediastream/media_stream_audio_processor_options.cc b/third_party/blink/renderer/platform/mediastream/media_stream_audio_processor_options.cc
-index e6a937299187b4875d8792f1a03d198df21e30e7..46902069ce04dd42b28e259d75282de9c4ed23be 100644
+index f3c175c04a88ca72db4a71b07c7602e74e7d5abc..2fe1825064e279b3e8da2da9534f548010656448 100644
 --- a/third_party/blink/renderer/platform/mediastream/media_stream_audio_processor_options.cc
 +++ b/third_party/blink/renderer/platform/mediastream/media_stream_audio_processor_options.cc
-@@ -191,8 +191,7 @@ bool AudioProcessingProperties::HasSameReconfigurableSettings(
+@@ -34,8 +34,7 @@ bool AudioProcessingProperties::HasSameReconfigurableSettings(
  
  bool AudioProcessingProperties::HasSameNonReconfigurableSettings(
      const AudioProcessingProperties& other) const {
@@ -78,7 +78,7 @@ index e6a937299187b4875d8792f1a03d198df21e30e7..46902069ce04dd42b28e259d75282de9
           goog_experimental_echo_cancellation ==
               other.goog_experimental_echo_cancellation &&
 diff --git a/third_party/blink/renderer/platform/mediastream/webaudio_media_stream_source.cc b/third_party/blink/renderer/platform/mediastream/webaudio_media_stream_source.cc
-index 61a966d15a0e6de00f6465d1ec4ac722128f3bc2..18a7b274a6eaa99fee421f93ebe9af6e8cb1f9d3 100644
+index 4f3001d5d411af46d8ef52d2299fd38774f6aa8c..4e591c5858be34282fa4de7b1492e3fd6bc2c208 100644
 --- a/third_party/blink/renderer/platform/mediastream/webaudio_media_stream_source.cc
 +++ b/third_party/blink/renderer/platform/mediastream/webaudio_media_stream_source.cc
 @@ -31,7 +31,7 @@ WebAudioMediaStreamSource::~WebAudioMediaStreamSource() {

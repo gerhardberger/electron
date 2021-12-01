@@ -7,10 +7,10 @@ Subject: Add switches to disable Around audio processing, set opus complexity
 Add switches to disable Around audio processing, set opus complexity and disable audio encoder queue.
 
 diff --git a/content/browser/renderer_host/render_process_host_impl.cc b/content/browser/renderer_host/render_process_host_impl.cc
-index b42fe6397921ec694216776b7c05a188f16d075b..441febf2cc00648ca8242129a750a26e83010799 100644
+index 7caa95301c5e7325b53085029e7c8e2b581acbe3..11cf460679570a971a63c50b6711e1f58fd10485 100644
 --- a/content/browser/renderer_host/render_process_host_impl.cc
 +++ b/content/browser/renderer_host/render_process_host_impl.cc
-@@ -3407,6 +3407,9 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
+@@ -3425,6 +3425,9 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
      switches::kAndroidFontsPath,
      switches::kAudioBufferSize,
      switches::kAudioLatencyFactor,
@@ -19,12 +19,12 @@ index b42fe6397921ec694216776b7c05a188f16d075b..441febf2cc00648ca8242129a750a26e
 +    switches::kDisableEncoderQueue,
      switches::kAutoplayPolicy,
      switches::kMojoCoreLibraryPath,
-     switches::kDisable2dCanvasImageChromium,
+     switches::kCrossOriginWebAssemblyModuleSharingAllowed,
 diff --git a/content/browser/utility_process_host.cc b/content/browser/utility_process_host.cc
-index df018de76a44847d85358628c021117a1f16f1b6..05d8c8509bc9064c60bcd58146ddf56fc472bec5 100644
+index a295f3745dd107e4eb46fc0a58845c4aedbacb52..009e7bdb99444708780a55676fc3d1aa2677f5bc 100644
 --- a/content/browser/utility_process_host.cc
 +++ b/content/browser/utility_process_host.cc
-@@ -273,6 +273,9 @@ bool UtilityProcessHost::StartProcess() {
+@@ -269,6 +269,9 @@ bool UtilityProcessHost::StartProcess() {
        // These flags are used by the audio service:
        switches::kAudioBufferSize,
        switches::kAudioLatencyFactor,
@@ -35,7 +35,7 @@ index df018de76a44847d85358628c021117a1f16f1b6..05d8c8509bc9064c60bcd58146ddf56f
        switches::kDisableAudioOutput,
        switches::kFailAudioStreamCreation,
 diff --git a/media/base/media_switches.cc b/media/base/media_switches.cc
-index 93ed2d58f274ea9ed88ae591743e7d8b440e7eba..f9ed300ca34f0e41b3b63add3191ce3be05eea38 100644
+index 271481a22b14f814666957dcd68857856cba3634..d3905726d4411018984ad688a82910b5916290c8 100644
 --- a/media/base/media_switches.cc
 +++ b/media/base/media_switches.cc
 @@ -23,6 +23,15 @@ namespace switches {
@@ -55,7 +55,7 @@ index 93ed2d58f274ea9ed88ae591743e7d8b440e7eba..f9ed300ca34f0e41b3b63add3191ce3b
  const char kAudioBufferSize[] = "audio-buffer-size";
  
 diff --git a/media/base/media_switches.h b/media/base/media_switches.h
-index 38ebd21fd27d7bc9d330c31aca66822f20cb4fe4..ddf82f52d50f8a46dac818a7d636b3a88cdbd27d 100644
+index 056cd95a6e7a8365fad52ce8a1869927e6f4f028..2d005552ea971fb9b42b23a3841823d7491ed268 100644
 --- a/media/base/media_switches.h
 +++ b/media/base/media_switches.h
 @@ -23,6 +23,9 @@ class CommandLine;
@@ -69,10 +69,10 @@ index 38ebd21fd27d7bc9d330c31aca66822f20cb4fe4..ddf82f52d50f8a46dac818a7d636b3a8
  MEDIA_EXPORT extern const char kAudioBufferSize[];
  
 diff --git a/third_party/blink/renderer/modules/mediastream/media_stream_audio_processor.cc b/third_party/blink/renderer/modules/mediastream/media_stream_audio_processor.cc
-index e4e7d7e38ffb6699cef682437358a41aff99d638..46c1a5e1bb693728dfcd4ccc2e4918fa52deb0aa 100644
+index 3b310149b6351190bdfebfefb1de5826bef2491f..db8acd3ba86a8bcf87212d86302ae563e0895cf0 100644
 --- a/third_party/blink/renderer/modules/mediastream/media_stream_audio_processor.cc
 +++ b/third_party/blink/renderer/modules/mediastream/media_stream_audio_processor.cc
-@@ -27,6 +27,7 @@
+@@ -26,6 +26,7 @@
  #include "media/base/audio_parameters.h"
  #include "media/base/channel_layout.h"
  #include "media/base/limits.h"
@@ -80,7 +80,7 @@ index e4e7d7e38ffb6699cef682437358a41aff99d638..46c1a5e1bb693728dfcd4ccc2e4918fa
  #include "media/webrtc/helpers.h"
  #include "third_party/abseil-cpp/absl/types/optional.h"
  #include "third_party/blink/public/common/features.h"
-@@ -577,6 +578,12 @@ void MediaStreamAudioProcessor::InitializeCaptureFifo(
+@@ -570,6 +571,12 @@ void MediaStreamAudioProcessor::InitializeCaptureFifo(
    // The output channels from the fifo is normally the same as input.
    int fifo_output_channels = input_format.channels();
  

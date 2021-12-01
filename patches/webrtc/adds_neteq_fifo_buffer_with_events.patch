@@ -67,10 +67,10 @@ index dbfa0718e48d8c419b26f83e4379f2db082e2ff8..39d013cd7ae8a83022b9999669e5362c
  
  }  // namespace webrtc
 diff --git a/api/peer_connection_interface.h b/api/peer_connection_interface.h
-index a3c420f80b45d50738b5087ebaf284d3fe32c612..752f418177982aacf74e68c79480edcec088c2a6 100644
+index b1700ce818f534e74a029f8fc92f4c9d911da83d..7544baaacfa039466efd5016ae2fda5b55798e5f 100644
 --- a/api/peer_connection_interface.h
 +++ b/api/peer_connection_interface.h
-@@ -1322,6 +1322,9 @@ class PeerConnectionObserver {
+@@ -1334,6 +1334,9 @@ class PeerConnectionObserver {
    // The heuristics for defining what constitutes "interesting" are
    // implementation-defined.
    virtual void OnInterestingUsage(int usage_pattern) {}
@@ -106,10 +106,10 @@ index bc9839f479d7c844462f9aa993eeede0e838a557..b64e1bee7d4f43aab45fd97d6d7d356b
    const absl::optional<int64_t>& local_capture_clock_offset() const {
      return local_capture_clock_offset_;
 diff --git a/audio/audio_receive_stream.h b/audio/audio_receive_stream.h
-index 61ebc2719f589200de43213527a437c70b8b12db..fdd1e3b36816783b8facc644b829abf967cb1218 100644
+index 444ec4586e5470ce50e24607361dd0c3a7682e05..36aef986b714ed755d716b4649ae4056910269e9 100644
 --- a/audio/audio_receive_stream.h
 +++ b/audio/audio_receive_stream.h
-@@ -140,6 +140,10 @@ class AudioReceiveStream final : public webrtc::AudioReceiveStream,
+@@ -141,6 +141,10 @@ class AudioReceiveStream final : public webrtc::AudioReceiveStream,
    // TODO(tommi): Remove this method.
    void ReconfigureForTesting(const webrtc::AudioReceiveStream::Config& config);
  
@@ -121,7 +121,7 @@ index 61ebc2719f589200de43213527a437c70b8b12db..fdd1e3b36816783b8facc644b829abf9
    AudioState* audio_state() const;
  
 diff --git a/audio/audio_send_stream.cc b/audio/audio_send_stream.cc
-index 455bb84e04ef5c0ea0779f885fe48ed76502e817..a3b6a4f23675a4587137bcfab3f6c31115ca26c1 100644
+index 0d2a03d27bf8022eb072e52863bf399f9288cdbb..bea36c5a5ae0ebff9e49ec248ff1005534d00ab3 100644
 --- a/audio/audio_send_stream.cc
 +++ b/audio/audio_send_stream.cc
 @@ -835,7 +835,7 @@ void AudioSendStream::ConfigureBitrateObserver() {
@@ -134,7 +134,7 @@ index 455bb84e04ef5c0ea0779f885fe48ed76502e817..a3b6a4f23675a4587137bcfab3f6c311
    DataRate priority_bitrate = allocation_settings_.priority_bitrate;
    if (send_side_bwe_with_overhead_) {
 diff --git a/audio/channel_receive.cc b/audio/channel_receive.cc
-index b741a8c1cadc66298eda0bd5652a85ce5556e4b9..de9f29eaf05d5d79218dfcb3b3765170c62f5d46 100644
+index 9c6f672c3f6fa8e0da9905c7858bce823a907612..e97fb37e2522a635fc71ec43c8d58abdf70c952b 100644
 --- a/audio/channel_receive.cc
 +++ b/audio/channel_receive.cc
 @@ -27,7 +27,6 @@
@@ -145,7 +145,7 @@ index b741a8c1cadc66298eda0bd5652a85ce5556e4b9..de9f29eaf05d5d79218dfcb3b3765170
  #include "modules/audio_coding/audio_network_adaptor/include/audio_network_adaptor_config.h"
  #include "modules/audio_device/include/audio_device.h"
  #include "modules/pacing/packet_router.h"
-@@ -187,6 +186,10 @@ class ChannelReceive : public ChannelReceiveInterface,
+@@ -189,6 +188,10 @@ class ChannelReceive : public ChannelReceiveInterface,
        uint32_t ssrc,
        const RtcpPacketTypeCounter& packet_counter) override;
  
@@ -157,7 +157,7 @@ index b741a8c1cadc66298eda0bd5652a85ce5556e4b9..de9f29eaf05d5d79218dfcb3b3765170
    void ReceivePacket(const uint8_t* packet,
                       size_t packet_length,
 diff --git a/audio/channel_receive.h b/audio/channel_receive.h
-index deec49feaffbb33c4361418215598e43620443ec..e2895a015d7840adb3064540389f1efa4b0c0ef3 100644
+index d811e87719778571ca65cb04e6736598e15ec8b4..8df0001db293bf97e6c9548283151152b64397bb 100644
 --- a/audio/channel_receive.h
 +++ b/audio/channel_receive.h
 @@ -27,6 +27,7 @@
@@ -168,7 +168,7 @@ index deec49feaffbb33c4361418215598e43620443ec..e2895a015d7840adb3064540389f1efa
  #include "modules/audio_coding/include/audio_coding_module_typedefs.h"
  #include "modules/rtp_rtcp/source/source_tracker.h"
  #include "system_wrappers/include/clock.h"
-@@ -165,6 +166,10 @@ class ChannelReceiveInterface : public RtpPacketSinkInterface {
+@@ -169,6 +170,10 @@ class ChannelReceiveInterface : public RtpPacketSinkInterface {
  
    virtual void OnLocalSsrcChange(uint32_t local_ssrc) = 0;
    virtual uint32_t GetLocalSsrc() const = 0;
@@ -193,10 +193,10 @@ index 6f47127f309b27389511bda82ed6c448096b6c3e..f1f2245374d5b887bef017f62ddd75e7
  
  class VideoEngineInterface : public RtpHeaderExtensionQueryInterface {
 diff --git a/media/engine/webrtc_voice_engine.cc b/media/engine/webrtc_voice_engine.cc
-index dbe895968d79e590b6cc00813e0d2744981920bb..10861091bc676ffbc59c27e7de3fe0779ddc6b84 100644
+index 18a67457bde24449df9f368b87b00df2bf485ef7..49996e2be9dead345eb29133465b4541b48b9783 100644
 --- a/media/engine/webrtc_voice_engine.cc
 +++ b/media/engine/webrtc_voice_engine.cc
-@@ -664,7 +664,8 @@ WebRtcVoiceEngine::GetRtpHeaderExtensions() const {
+@@ -670,7 +670,8 @@ WebRtcVoiceEngine::GetRtpHeaderExtensions() const {
          webrtc::RtpExtension::kAbsSendTimeUri,
          webrtc::RtpExtension::kTransportSequenceNumberUri,
          webrtc::RtpExtension::kMidUri, webrtc::RtpExtension::kRidUri,
@@ -206,19 +206,20 @@ index dbe895968d79e590b6cc00813e0d2744981920bb..10861091bc676ffbc59c27e7de3fe077
      result.emplace_back(uri, id++, webrtc::RtpTransceiverDirection::kSendRecv);
    }
    return result;
-@@ -1960,7 +1961,9 @@ bool WebRtcVoiceMediaChannel::AddRecvStream(const StreamParams& sp) {
+@@ -2014,7 +2015,10 @@ bool WebRtcVoiceMediaChannel::AddRecvStream(const StreamParams& sp) {
        ssrc, receiver_reports_ssrc_, recv_transport_cc_enabled_,
-       recv_nack_enabled_, sp.stream_ids(), recv_rtp_extensions_, this,
-       engine()->decoder_factory_, decoder_map_, codec_pair_id_,
--      engine()->audio_jitter_buffer_max_packets_,
-+      options_.audio_jitter_buffer_max_packets ?
-+        options_.audio_jitter_buffer_max_packets.value() :
-+        engine()->audio_jitter_buffer_max_packets_,
+       recv_nack_enabled_, enable_non_sender_rtt_, sp.stream_ids(),
+       recv_rtp_extensions_, this, engine()->decoder_factory_, decoder_map_,
+-      codec_pair_id_, engine()->audio_jitter_buffer_max_packets_,
++      codec_pair_id_,
++      options_.audio_jitter_buffer_max_packets
++          ? options_.audio_jitter_buffer_max_packets.value()
++          : engine()->audio_jitter_buffer_max_packets_,
        engine()->audio_jitter_buffer_fast_accelerate_,
        engine()->audio_jitter_buffer_min_delay_ms_,
        engine()->audio_jitter_buffer_enable_rtx_handling_,
 diff --git a/media/engine/webrtc_voice_engine.h b/media/engine/webrtc_voice_engine.h
-index 147688b0e0da9107231cdbe608e6746a8d95f674..534c911c259e248cfa7d8f66f5023921134e504e 100644
+index a8eb61d3189c3965db68930d1aa20bc8afe7fa80..62318da4784866e8aaf2cd219f7b09e9af02d927 100644
 --- a/media/engine/webrtc_voice_engine.h
 +++ b/media/engine/webrtc_voice_engine.h
 @@ -87,6 +87,10 @@ class WebRtcVoiceEngine final : public VoiceEngineInterface {
@@ -233,7 +234,7 @@ index 147688b0e0da9107231cdbe608e6746a8d95f674..534c911c259e248cfa7d8f66f5023921
    // Every option that is "set" will be applied. Every option not "set" will be
    // ignored. This allows us to selectively turn on and off different options
 diff --git a/modules/audio_coding/BUILD.gn b/modules/audio_coding/BUILD.gn
-index 79148063b9b5443ed1cd38ec1fcc040bcab43eaa..3ca2e9915389bed7669b6335b6b63cff43244899 100644
+index e67a05ddae44b6d8e781dd87ac654fb8a7ec2d88..e76f73b012d3ee7c373fbe66574a98949756d833 100644
 --- a/modules/audio_coding/BUILD.gn
 +++ b/modules/audio_coding/BUILD.gn
 @@ -958,6 +958,8 @@ rtc_library("neteq") {
@@ -1685,7 +1686,7 @@ index f66202efee649eab26599b4de6193b9ceae1791c..31684b0b1325db8b8069f51ceed353e8
    AudioMixerImpl(std::unique_ptr<OutputRateCalculator> output_rate_calculator,
                   bool use_limiter,
 diff --git a/pc/sdp_offer_answer.cc b/pc/sdp_offer_answer.cc
-index 82f13ee95737a667ef9585c1be5c749bb49368bf..13cdd25d795698b7455153c1f0835f4f665542b7 100644
+index b40370acc065b52fc4f4dffc616aaf05373229a5..462bbed0084b518b21abef5f6b878820b3fc3f33 100644
 --- a/pc/sdp_offer_answer.cc
 +++ b/pc/sdp_offer_answer.cc
 @@ -28,6 +28,7 @@
@@ -1696,7 +1697,7 @@ index 82f13ee95737a667ef9585c1be5c749bb49368bf..13cdd25d795698b7455153c1f0835f4f
  #include "media/base/codec.h"
  #include "media/base/media_engine.h"
  #include "media/base/rid_description.h"
-@@ -1875,6 +1876,23 @@ RTCError SdpOfferAnswerHandler::ApplyRemoteDescription(
+@@ -1872,6 +1873,23 @@ RTCError SdpOfferAnswerHandler::ApplyRemoteDescription(
      local_ice_credentials_to_replace_->ClearIceCredentials();
    }
  

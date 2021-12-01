@@ -6,10 +6,10 @@ Subject: removes special case handling for airpods name
 This patch removes the special case handling for all AirPods' names.
 
 diff --git a/third_party/blink/renderer/modules/mediastream/media_devices.cc b/third_party/blink/renderer/modules/mediastream/media_devices.cc
-index 4b4377251af7c09aaa836a2ee9dc991cea386bb3..22069b56b8e41045ca8199346c801eb547aa89e8 100644
+index 532005696db25402114cea5c3d5b361b57889309..04da50b3c71ee623cc18360d93a80add0776353c 100644
 --- a/third_party/blink/renderer/modules/mediastream/media_devices.cc
 +++ b/third_party/blink/renderer/modules/mediastream/media_devices.cc
-@@ -463,9 +463,12 @@ void MediaDevices::DevicesEnumerated(
+@@ -530,9 +530,12 @@ void MediaDevices::DevicesEnumerated(
            static_cast<mojom::blink::MediaDeviceType>(i);
        WebMediaDeviceInfo device_info = enumeration[i][j];
        String device_label = String::FromUTF8(device_info.label);

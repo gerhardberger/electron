@@ -56,7 +56,7 @@ index 8d320bd56f5a8b652c07f4ca43902c9f9573faa3..5b1fec3f5f569137335c228d7c23f883
                                    /*session_id=*/base::UnguessableToken(),
                                    String(device_id),
 diff --git a/third_party/blink/renderer/modules/peerconnection/peer_connection_dependency_factory.cc b/third_party/blink/renderer/modules/peerconnection/peer_connection_dependency_factory.cc
-index b0405d0bcbd376374a98f76c8e85a8c35edaf994..07a203371d7211c22495bbb165c2e1b65cc656a7 100644
+index 0c114736cf0d1c251984dbbdcffd1c182f2fbb36..542e6547d7ad4df3b8a7f396c50b600ebbc9cca2 100644
 --- a/third_party/blink/renderer/modules/peerconnection/peer_connection_dependency_factory.cc
 +++ b/third_party/blink/renderer/modules/peerconnection/peer_connection_dependency_factory.cc
 @@ -64,6 +64,8 @@
@@ -68,7 +68,7 @@ index b0405d0bcbd376374a98f76c8e85a8c35edaf994..07a203371d7211c22495bbb165c2e1b6
  #include "third_party/webrtc/modules/video_coding/codecs/h264/include/h264.h"
  #include "third_party/webrtc/rtc_base/openssl_stream_adapter.h"
  #include "third_party/webrtc/rtc_base/ref_counted_object.h"
-@@ -406,6 +408,7 @@ void PeerConnectionDependencyFactory::CreatePeerConnectionFactory() {
+@@ -400,6 +402,7 @@ void PeerConnectionDependencyFactory::CreatePeerConnectionFactory() {
  #endif  // BUILDFLAG(RTC_USE_H264) && BUILDFLAG(ENABLE_FFMPEG_VIDEO_DECODERS)
  
    EnsureWebRtcAudioDeviceImpl();
@@ -76,7 +76,7 @@ index b0405d0bcbd376374a98f76c8e85a8c35edaf994..07a203371d7211c22495bbb165c2e1b6
  
    // Init SSL, which will be needed by PeerConnection.
    if (!rtc::InitializeSSL()) {
-@@ -553,6 +556,7 @@ void PeerConnectionDependencyFactory::InitializeSignalingThread(
+@@ -547,6 +550,7 @@ void PeerConnectionDependencyFactory::InitializeSignalingThread(
    media_deps.adm = audio_device_.get();
    media_deps.audio_encoder_factory = blink::CreateWebrtcAudioEncoderFactory();
    media_deps.audio_decoder_factory = blink::CreateWebrtcAudioDecoderFactory();
@@ -84,7 +84,7 @@ index b0405d0bcbd376374a98f76c8e85a8c35edaf994..07a203371d7211c22495bbb165c2e1b6
    media_deps.video_encoder_factory = std::move(webrtc_encoder_factory);
    media_deps.video_decoder_factory = std::move(webrtc_decoder_factory);
    // Audio Processing Module (APM) instances are owned and handled by the Blink
-@@ -754,6 +758,12 @@ PeerConnectionDependencyFactory::GetWebRtcAudioDevice() {
+@@ -748,6 +752,12 @@ PeerConnectionDependencyFactory::GetWebRtcAudioDevice() {
    return audio_device_.get();
  }
  
@@ -97,7 +97,7 @@ index b0405d0bcbd376374a98f76c8e85a8c35edaf994..07a203371d7211c22495bbb165c2e1b6
  void PeerConnectionDependencyFactory::CreateIpcNetworkManagerOnNetworkThread(
      base::WaitableEvent* event,
      std::unique_ptr<MdnsResponderAdapter> mdns_responder) {
-@@ -834,6 +844,14 @@ void PeerConnectionDependencyFactory::EnsureWebRtcAudioDeviceImpl() {
+@@ -828,6 +838,14 @@ void PeerConnectionDependencyFactory::EnsureWebRtcAudioDeviceImpl() {
    audio_device_ = new rtc::RefCountedObject<blink::WebRtcAudioDeviceImpl>();
  }
  
@@ -113,7 +113,7 @@ index b0405d0bcbd376374a98f76c8e85a8c35edaf994..07a203371d7211c22495bbb165c2e1b6
  PeerConnectionDependencyFactory::GetSenderCapabilities(const String& kind) {
    if (kind == "audio") {
 diff --git a/third_party/blink/renderer/modules/peerconnection/peer_connection_dependency_factory.h b/third_party/blink/renderer/modules/peerconnection/peer_connection_dependency_factory.h
-index 08fbc7f0e91351351df293e1610663ffd53e39df..7e9e9680f91f777c0a3e837450d969a6d7aa5457 100644
+index 8fe12e747a498c9ac733e75c174b89d1976e6aed..d984c15e7ac97a4793c3da721e6fa464d84e065c 100644
 --- a/third_party/blink/renderer/modules/peerconnection/peer_connection_dependency_factory.h
 +++ b/third_party/blink/renderer/modules/peerconnection/peer_connection_dependency_factory.h
 @@ -41,6 +41,10 @@ namespace gfx {
@@ -127,7 +127,7 @@ index 08fbc7f0e91351351df293e1610663ffd53e39df..7e9e9680f91f777c0a3e837450d969a6
  namespace blink {
  
  class IpcNetworkManager;
-@@ -122,6 +126,7 @@ class MODULES_EXPORT PeerConnectionDependencyFactory
+@@ -128,6 +132,7 @@ class MODULES_EXPORT PeerConnectionDependencyFactory
        const String& kind);
  
    blink::WebRtcAudioDeviceImpl* GetWebRtcAudioDevice();
@@ -135,7 +135,7 @@ index 08fbc7f0e91351351df293e1610663ffd53e39df..7e9e9680f91f777c0a3e837450d969a6
  
    void EnsureInitialized();
  
-@@ -146,6 +151,7 @@ class MODULES_EXPORT PeerConnectionDependencyFactory
+@@ -152,6 +157,7 @@ class MODULES_EXPORT PeerConnectionDependencyFactory
  
    // Helper method to create a WebRtcAudioDeviceImpl.
    void EnsureWebRtcAudioDeviceImpl();
@@ -143,7 +143,7 @@ index 08fbc7f0e91351351df293e1610663ffd53e39df..7e9e9680f91f777c0a3e837450d969a6
  
   private:
    // ExecutionContextLifecycleObserver:
-@@ -185,6 +191,7 @@ class MODULES_EXPORT PeerConnectionDependencyFactory
+@@ -191,6 +197,7 @@ class MODULES_EXPORT PeerConnectionDependencyFactory
    Member<P2PSocketDispatcher> p2p_socket_dispatcher_;
  
    scoped_refptr<blink::WebRtcAudioDeviceImpl> audio_device_;

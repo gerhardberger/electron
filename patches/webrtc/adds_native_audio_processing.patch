@@ -8,10 +8,10 @@ This patch adds custom denoising for around using a custom rnnoise model with su
 Signed-off-by: gellert <gellert.hegyi@around.co>
 
 diff --git a/media/engine/webrtc_voice_engine.cc b/media/engine/webrtc_voice_engine.cc
-index cbc6abf5063a027c532339fd3955c4676eeff13f..dbe895968d79e590b6cc00813e0d2744981920bb 100644
+index 448ad3522a0d5562dfcd47b3d4db37bf50a708ae..18a67457bde24449df9f368b87b00df2bf485ef7 100644
 --- a/media/engine/webrtc_voice_engine.cc
 +++ b/media/engine/webrtc_voice_engine.cc
-@@ -630,8 +630,7 @@ bool WebRtcVoiceEngine::ApplyOptions(const AudioOptions& options_in) {
+@@ -636,8 +636,7 @@ bool WebRtcVoiceEngine::ApplyOptions(const AudioOptions& options_in) {
    if (options.noise_suppression) {
      const bool enabled = *options.noise_suppression;
      apm_config.noise_suppression.enabled = enabled;
@@ -22,10 +22,10 @@ index cbc6abf5063a027c532339fd3955c4676eeff13f..dbe895968d79e590b6cc00813e0d2744
    }
  
 diff --git a/modules/audio_processing/BUILD.gn b/modules/audio_processing/BUILD.gn
-index 506c8212fd78b62439e36816b282373d0d005a20..1e53b66a8e2068cbf1b64dbe1bbbe1164545a4c9 100644
+index d6ed3e251ba9bb546109a16a9a18cb8fe90e8b99..803411934979300f0c1dbad59130aadf542793e1 100644
 --- a/modules/audio_processing/BUILD.gn
 +++ b/modules/audio_processing/BUILD.gn
-@@ -48,6 +48,7 @@ rtc_library("api") {
+@@ -38,6 +38,7 @@ rtc_library("api") {
      "../../rtc_base/system:file_wrapper",
      "../../rtc_base/system:rtc_export",
      "agc:gain_control_interface",
@@ -33,7 +33,7 @@ index 506c8212fd78b62439e36816b282373d0d005a20..1e53b66a8e2068cbf1b64dbe1bbbe116
    ]
    absl_deps = [ "//third_party/abseil-cpp/absl/types:optional" ]
  }
-@@ -200,6 +201,9 @@ rtc_library("audio_processing") {
+@@ -189,6 +190,9 @@ rtc_library("audio_processing") {
      "ns",
      "transient:transient_suppressor_api",
      "vad",
@@ -44,7 +44,7 @@ index 506c8212fd78b62439e36816b282373d0d005a20..1e53b66a8e2068cbf1b64dbe1bbbe116
    absl_deps = [ "//third_party/abseil-cpp/absl/types:optional" ]
  
 diff --git a/modules/audio_processing/aec3/echo_canceller3.cc b/modules/audio_processing/aec3/echo_canceller3.cc
-index 181b649f6d0679404be9d53da982581e47854b54..fdff6a75e2be59fa56fe2341dcd7f296555725a3 100644
+index dfa932f49ce08ce2974dc5531470ce266ffe59a5..57e3f54206567480fa40a43ab3c242a118bcd9cb 100644
 --- a/modules/audio_processing/aec3/echo_canceller3.cc
 +++ b/modules/audio_processing/aec3/echo_canceller3.cc
 @@ -85,7 +85,7 @@ void FillSubFrameView(
@@ -56,7 +56,7 @@ index 181b649f6d0679404be9d53da982581e47854b54..fdff6a75e2be59fa56fe2341dcd7f296
    for (size_t band = 0; band < sub_frame_view->size(); ++band) {
      for (size_t channel = 0; channel < (*sub_frame_view)[0].size(); ++channel) {
        (*sub_frame_view)[band][channel] = rtc::ArrayView<float>(
-@@ -642,7 +642,7 @@ EchoCanceller3::RenderWriter::~RenderWriter() = default;
+@@ -643,7 +643,7 @@ EchoCanceller3::RenderWriter::~RenderWriter() = default;
  void EchoCanceller3::RenderWriter::Insert(const AudioBuffer& input) {
    RTC_DCHECK_EQ(AudioBuffer::kSplitBandSize, input.num_frames_per_band());
    RTC_DCHECK_EQ(num_bands_, input.num_bands());
@@ -65,7 +65,7 @@ index 181b649f6d0679404be9d53da982581e47854b54..fdff6a75e2be59fa56fe2341dcd7f296
  
    // TODO(bugs.webrtc.org/8759) Temporary work-around.
    if (num_bands_ != input.num_bands())
-@@ -756,7 +756,7 @@ EchoCanceller3::~EchoCanceller3() = default;
+@@ -757,7 +757,7 @@ EchoCanceller3::~EchoCanceller3() = default;
  void EchoCanceller3::AnalyzeRender(const AudioBuffer& render) {
    RTC_DCHECK_RUNS_SERIALIZED(&render_race_checker_);
  
@@ -74,7 +74,7 @@ index 181b649f6d0679404be9d53da982581e47854b54..fdff6a75e2be59fa56fe2341dcd7f296
    data_dumper_->DumpRaw("aec3_call_order",
                          static_cast<int>(EchoCanceller3ApiCall::kRender));
  
-@@ -768,7 +768,7 @@ void EchoCanceller3::AnalyzeCapture(const AudioBuffer& capture) {
+@@ -769,7 +769,7 @@ void EchoCanceller3::AnalyzeCapture(const AudioBuffer& capture) {
    data_dumper_->DumpWav("aec3_capture_analyze_input", capture.num_frames(),
                          capture.channels_const()[0], sample_rate_hz_, 1);
    saturated_microphone_signal_ = false;
@@ -83,7 +83,7 @@ index 181b649f6d0679404be9d53da982581e47854b54..fdff6a75e2be59fa56fe2341dcd7f296
      saturated_microphone_signal_ |=
          DetectSaturation(rtc::ArrayView<const float>(
              capture.channels_const()[channel], capture.num_frames()));
-@@ -789,7 +789,7 @@ void EchoCanceller3::ProcessCapture(AudioBuffer* capture,
+@@ -790,7 +790,7 @@ void EchoCanceller3::ProcessCapture(AudioBuffer* capture,
    RTC_DCHECK(capture);
    RTC_DCHECK_EQ(num_bands_, capture->num_bands());
    RTC_DCHECK_EQ(AudioBuffer::kSplitBandSize, capture->num_frames_per_band());
@@ -1049,7 +1049,7 @@ index 0000000000000000000000000000000000000000..8fb7563319fbd6844dad20f411180554
 +
 +#endif
 diff --git a/modules/audio_processing/audio_processing_impl.cc b/modules/audio_processing/audio_processing_impl.cc
-index 7facd25c12aabc988deb83db273c487138965b0d..dc1818c6d0aa410a51764305439242a490b1d4f2 100644
+index d7fbfb6569f67f087bca4660ac3eb807f55338be..e8eb1a01f7085bc9064459e20f0913e70e043784 100644
 --- a/modules/audio_processing/audio_processing_impl.cc
 +++ b/modules/audio_processing/audio_processing_impl.cc
 @@ -39,6 +39,8 @@
@@ -1061,7 +1061,7 @@ index 7facd25c12aabc988deb83db273c487138965b0d..dc1818c6d0aa410a51764305439242a4
  #define RETURN_ON_ERR(expr) \
    do {                      \
      int err = (expr);       \
-@@ -320,7 +322,9 @@ AudioProcessingImpl::AudioProcessingImpl(
+@@ -301,7 +303,9 @@ AudioProcessingImpl::AudioProcessingImpl(
    Initialize();
  }
  
@@ -1072,7 +1072,7 @@ index 7facd25c12aabc988deb83db273c487138965b0d..dc1818c6d0aa410a51764305439242a4
  
  int AudioProcessingImpl::Initialize() {
    // Run in a single-threaded manner during initialization.
-@@ -434,12 +438,36 @@ void AudioProcessingImpl::InitializeLocked() {
+@@ -415,12 +419,36 @@ void AudioProcessingImpl::InitializeLocked() {
    InitializePostProcessor();
    InitializePreProcessor();
    InitializeCaptureLevelsAdjuster();
@@ -1109,7 +1109,7 @@ index 7facd25c12aabc988deb83db273c487138965b0d..dc1818c6d0aa410a51764305439242a4
  int AudioProcessingImpl::InitializeLocked(const ProcessingConfig& config) {
    UpdateActiveSubmoduleStates();
  
-@@ -1211,7 +1239,9 @@ int AudioProcessingImpl::ProcessCaptureStreamLocked() {
+@@ -1194,7 +1222,9 @@ int AudioProcessingImpl::ProcessCaptureStreamLocked() {
      // capture signal saturation.
      // TODO(peah): Look into ensuring that this kind of tampering with the
      // AudioBuffer functionality should not be needed.
@@ -1120,7 +1120,7 @@ index 7facd25c12aabc988deb83db273c487138965b0d..dc1818c6d0aa410a51764305439242a4
    }
  
    if (submodules_.high_pass_filter &&
-@@ -1284,6 +1314,10 @@ int AudioProcessingImpl::ProcessCaptureStreamLocked() {
+@@ -1267,6 +1297,10 @@ int AudioProcessingImpl::ProcessCaptureStreamLocked() {
      }
    }
  
@@ -1131,7 +1131,7 @@ index 7facd25c12aabc988deb83db273c487138965b0d..dc1818c6d0aa410a51764305439242a4
    if (submodules_.gain_control) {
      // TODO(peah): Add reporting from AEC3 whether there is echo.
      RETURN_ON_ERR(submodules_.gain_control->ProcessCaptureAudio(
-@@ -1427,10 +1461,80 @@ int AudioProcessingImpl::ProcessCaptureStreamLocked() {
+@@ -1410,10 +1444,80 @@ int AudioProcessingImpl::ProcessCaptureStreamLocked() {
    }
    capture_.capture_output_used_last_frame = capture_.capture_output_used;
  
@@ -1212,7 +1212,7 @@ index 7facd25c12aabc988deb83db273c487138965b0d..dc1818c6d0aa410a51764305439242a4
  int AudioProcessingImpl::AnalyzeReverseStream(
      const float* const* data,
      const StreamConfig& reverse_config) {
-@@ -2224,4 +2328,36 @@ void AudioProcessingImpl::ApmStatsReporter::UpdateStatistics(
+@@ -2207,4 +2311,36 @@ void AudioProcessingImpl::ApmStatsReporter::UpdateStatistics(
    static_cast<void>(stats_message_passed);
  }
  
@@ -1250,7 +1250,7 @@ index 7facd25c12aabc988deb83db273c487138965b0d..dc1818c6d0aa410a51764305439242a4
 +
  }  // namespace webrtc
 diff --git a/modules/audio_processing/audio_processing_impl.h b/modules/audio_processing/audio_processing_impl.h
-index 27abbd4c20b955d64847e82469276c4e7f6258e6..00983c9346d8b1588c4b635bba85e74ffd8171a5 100644
+index 7c541736589ca997ec4454abf6ebf72273d31548..91434ef3c61e9e5ea363acb4b8a0d7b9cacfdb46 100644
 --- a/modules/audio_processing/audio_processing_impl.h
 +++ b/modules/audio_processing/audio_processing_impl.h
 @@ -22,6 +22,9 @@
@@ -1281,7 +1281,7 @@ index 27abbd4c20b955d64847e82469276c4e7f6258e6..00983c9346d8b1588c4b635bba85e74f
   public:
    // Methods forcing APM to run in a single-threaded manner.
    // Acquires both the render and capture locks.
-@@ -65,6 +70,7 @@ class AudioProcessingImpl : public AudioProcessing {
+@@ -64,6 +69,7 @@ class AudioProcessingImpl : public AudioProcessing {
                        std::unique_ptr<CustomAudioAnalyzer> capture_analyzer);
    ~AudioProcessingImpl() override;
    int Initialize() override;
@@ -1289,7 +1289,7 @@ index 27abbd4c20b955d64847e82469276c4e7f6258e6..00983c9346d8b1588c4b635bba85e74f
    int Initialize(int capture_input_sample_rate_hz,
                   int capture_output_sample_rate_hz,
                   int render_sample_rate_hz,
-@@ -139,6 +145,8 @@ class AudioProcessingImpl : public AudioProcessing {
+@@ -138,6 +144,8 @@ class AudioProcessingImpl : public AudioProcessing {
  
    AudioProcessing::Config GetConfig() const override;
  
@@ -1298,7 +1298,7 @@ index 27abbd4c20b955d64847e82469276c4e7f6258e6..00983c9346d8b1588c4b635bba85e74f
   protected:
    // Overridden in a mock.
    virtual void InitializeLocked()
-@@ -282,6 +290,9 @@ class AudioProcessingImpl : public AudioProcessing {
+@@ -281,6 +289,9 @@ class AudioProcessingImpl : public AudioProcessing {
        RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_capture_);
    void InitializePostProcessor() RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_capture_);
    void InitializeAnalyzer() RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_capture_);
@@ -1308,7 +1308,7 @@ index 27abbd4c20b955d64847e82469276c4e7f6258e6..00983c9346d8b1588c4b635bba85e74f
  
    // Initializations of render-only submodules, requiring the render lock
    // already acquired.
-@@ -405,6 +416,9 @@ class AudioProcessingImpl : public AudioProcessing {
+@@ -404,6 +415,9 @@ class AudioProcessingImpl : public AudioProcessing {
      std::unique_ptr<LevelEstimator> output_level_estimator;
      std::unique_ptr<VoiceDetection> voice_detector;
      std::unique_ptr<CaptureLevelsAdjuster> capture_levels_adjuster;
@@ -1318,7 +1318,7 @@ index 27abbd4c20b955d64847e82469276c4e7f6258e6..00983c9346d8b1588c4b635bba85e74f
    } submodules_;
  
    // State that is written to while holding both the render and capture locks
-@@ -540,6 +554,8 @@ class AudioProcessingImpl : public AudioProcessing {
+@@ -539,6 +553,8 @@ class AudioProcessingImpl : public AudioProcessing {
        agc_render_signal_queue_;
    std::unique_ptr<SwapQueue<std::vector<float>, RenderQueueItemVerifier<float>>>
        red_render_signal_queue_;
@@ -1366,24 +1366,24 @@ index bff7209e96bedfb9b2e735abede7811caea7d0f7..debbd01a8405affad7dca2b5dac9bcea
            audio->split_bands(k)[0], audio->num_frames_per_band());
        filters_[k]->Process(channel_data);
 diff --git a/modules/audio_processing/include/audio_processing.cc b/modules/audio_processing/include/audio_processing.cc
-index 44a90d6e761fd0264fd43b708138528a3391b8e5..cc4d2bd8dce2ef38a4298972aaa0f96f07a08758 100644
+index f57ace7dbfadba938d650483ca33184df764e538..60348288085b9d31ddb1caee7e71296774c56377 100644
 --- a/modules/audio_processing/include/audio_processing.cc
 +++ b/modules/audio_processing/include/audio_processing.cc
-@@ -221,6 +221,9 @@ std::string AudioProcessing::Config::ToString() const {
-       << "}}, residual_echo_detector: { enabled: "
-       << residual_echo_detector.enabled
-       << " }, level_estimation: { enabled: " << level_estimation.enabled
+@@ -212,6 +212,9 @@ std::string AudioProcessing::Config::ToString() const {
+           << "}}, residual_echo_detector: { enabled: "
+           << residual_echo_detector.enabled
+           << " }, level_estimation: { enabled: " << level_estimation.enabled
 +      << " }, around_audio_processing: { enabled: " << around_audio_processing.enabled
 +      << ", noise_suppression_db: " << around_audio_processing.noise_suppression_db
 +      << ", mask_compensation: " << around_audio_processing.mask_compensation
-       << " }}";
+           << " }}";
    return builder.str();
  }
 diff --git a/modules/audio_processing/include/audio_processing.h b/modules/audio_processing/include/audio_processing.h
-index 02a961ad7e72defdafd36a52b138b0e4371e89cc..c588fb1bdd06ba010cc7a2d237c5a580c2c2768c 100644
+index 590540132fb3fd4ed2d17cb3cea36b118742632e..fdcac19c4def40ed86bcf8678d9121ac3228ff55 100644
 --- a/modules/audio_processing/include/audio_processing.h
 +++ b/modules/audio_processing/include/audio_processing.h
-@@ -59,9 +59,9 @@ class CustomProcessing;
+@@ -58,9 +58,9 @@ class CustomProcessing;
  //
  // Must be provided through AudioProcessingBuilder().Create(config).
  #if defined(WEBRTC_CHROMIUM_BUILD)
@@ -1395,7 +1395,7 @@ index 02a961ad7e72defdafd36a52b138b0e4371e89cc..c588fb1bdd06ba010cc7a2d237c5a580
  #endif  // defined(WEBRTC_CHROMIUM_BUILD)
  static constexpr int kClippedLevelMin = 70;
  
-@@ -238,7 +238,7 @@ class RTC_EXPORT AudioProcessing : public rtc::RefCountInterface {
+@@ -208,7 +208,7 @@ class RTC_EXPORT AudioProcessing : public rtc::RefCountInterface {
      } capture_level_adjustment;
  
      struct HighPassFilter {
@@ -1404,7 +1404,7 @@ index 02a961ad7e72defdafd36a52b138b0e4371e89cc..c588fb1bdd06ba010cc7a2d237c5a580
        bool apply_in_full_band = true;
      } high_pass_filter;
  
-@@ -257,6 +257,7 @@ class RTC_EXPORT AudioProcessing : public rtc::RefCountInterface {
+@@ -227,6 +227,7 @@ class RTC_EXPORT AudioProcessing : public rtc::RefCountInterface {
        enum Level { kLow, kModerate, kHigh, kVeryHigh };
        Level level = kModerate;
        bool analyze_linear_aec_output_when_available = false;
@@ -1412,7 +1412,7 @@ index 02a961ad7e72defdafd36a52b138b0e4371e89cc..c588fb1bdd06ba010cc7a2d237c5a580
      } noise_suppression;
  
      // Enables transient suppression.
-@@ -422,7 +423,7 @@ class RTC_EXPORT AudioProcessing : public rtc::RefCountInterface {
+@@ -383,7 +384,7 @@ class RTC_EXPORT AudioProcessing : public rtc::RefCountInterface {
      } gain_controller2;
  
      struct ResidualEchoDetector {
@@ -1421,7 +1421,7 @@ index 02a961ad7e72defdafd36a52b138b0e4371e89cc..c588fb1bdd06ba010cc7a2d237c5a580
      } residual_echo_detector;
  
      // Enables reporting of `output_rms_dbfs` in webrtc::AudioProcessingStats.
-@@ -430,6 +431,13 @@ class RTC_EXPORT AudioProcessing : public rtc::RefCountInterface {
+@@ -391,6 +392,13 @@ class RTC_EXPORT AudioProcessing : public rtc::RefCountInterface {
        bool enabled = false;
      } level_estimation;
  
@@ -1435,7 +1435,7 @@ index 02a961ad7e72defdafd36a52b138b0e4371e89cc..c588fb1bdd06ba010cc7a2d237c5a580
      std::string ToString() const;
    };
  
-@@ -567,6 +575,8 @@ class RTC_EXPORT AudioProcessing : public rtc::RefCountInterface {
+@@ -528,6 +536,8 @@ class RTC_EXPORT AudioProcessing : public rtc::RefCountInterface {
    // TODO(webrtc:5298): Change to return void.
    virtual int Initialize() = 0;
  

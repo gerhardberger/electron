@@ -10,7 +10,7 @@ desktop capture API.
 Signed-off-by: gellert <gellert.hegyi@around.co>
 
 diff --git a/modules/desktop_capture/BUILD.gn b/modules/desktop_capture/BUILD.gn
-index 25b92bed45ec52838394ebf61e25d5aea9cf3340..d2a0a9a71230f81b133f11a36e4146eb558a59f2 100644
+index 787a5c83b05c47b22e0f76652f0e82270a76e724..067287c01e00e91ba0e8b7b0fe264468bba713eb 100644
 --- a/modules/desktop_capture/BUILD.gn
 +++ b/modules/desktop_capture/BUILD.gn
 @@ -480,6 +480,8 @@ rtc_library("desktop_capture_generic") {

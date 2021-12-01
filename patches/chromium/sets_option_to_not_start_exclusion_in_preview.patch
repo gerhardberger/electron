@@ -8,10 +8,10 @@ This patch sets a flag that will prevent window exclusion while in preview when 
 Signed-off-by: gellert <gellert.hegyi@around.co>
 
 diff --git a/content/browser/media/capture/desktop_capture_device.cc b/content/browser/media/capture/desktop_capture_device.cc
-index a81a2d14b782d2ca43a11dd40ff12e1dcd989df4..51dcf88d0925023bd1133a4f88366b7dd073ddc9 100644
+index cdbac5d5e7c9734fa4a18f82e0c37cbc52c813de..48a40231a248327b8adc4a207fbe3f767ba2b6c6 100644
 --- a/content/browser/media/capture/desktop_capture_device.cc
 +++ b/content/browser/media/capture/desktop_capture_device.cc
-@@ -263,6 +263,7 @@ void DesktopCaptureDevice::Core::AllocateAndStart(
+@@ -264,6 +264,7 @@ void DesktopCaptureDevice::Core::AllocateAndStart(
    DCHECK(!wake_lock_);
    RequestWakeLock();
  

@@ -6,7 +6,7 @@ Subject: Add native down mixing support for ET
 Add native down mixing support to WebRTC Audio pipeline for EchoTerminator.
 
 diff --git a/third_party/blink/renderer/modules/mediastream/BUILD.gn b/third_party/blink/renderer/modules/mediastream/BUILD.gn
-index 108eb4cbfe26bb833e78ba32b36eeb985488001d..1f303dd09da91523c320d23140ee3440bf7e613d 100644
+index 8f245e721e846dc2c256329a834f8241e1cbf952..555ac5115fe7c654d180a0319325ccde915bf07a 100644
 --- a/third_party/blink/renderer/modules/mediastream/BUILD.gn
 +++ b/third_party/blink/renderer/modules/mediastream/BUILD.gn
 @@ -10,6 +10,8 @@ blink_modules_sources("mediastream") {
@@ -358,10 +358,10 @@ index 0000000000000000000000000000000000000000..c854808cc2735499e65a1f1c6ca20fac
 +
 +#endif  //THIRD_PARTY_BLINK_RENDERER_MODULES_MEDIASTREAM_AROUND_AUDIO_MIXER_H
 diff --git a/third_party/blink/renderer/modules/mediastream/media_stream.cc b/third_party/blink/renderer/modules/mediastream/media_stream.cc
-index e010f2b3f75a321670510035a09c1f1399cd68f9..4650549d67ea852f4b28a7ceb3f4263cc726d17a 100644
+index d62f75a64811bd8c2e78afbfae1203715aa5620a..5558a078b007fc471368dcf4c96a97d8ddc04aac 100644
 --- a/third_party/blink/renderer/modules/mediastream/media_stream.cc
 +++ b/third_party/blink/renderer/modules/mediastream/media_stream.cc
-@@ -25,17 +25,66 @@
+@@ -25,15 +25,22 @@
  
  #include "third_party/blink/renderer/modules/mediastream/media_stream.h"
  
@@ -370,6 +370,7 @@ index e010f2b3f75a321670510035a09c1f1399cd68f9..4650549d67ea852f4b28a7ceb3f4263c
  #include "third_party/blink/public/platform/task_type.h"
  #include "third_party/blink/renderer/core/execution_context/execution_context.h"
  #include "third_party/blink/renderer/core/frame/deprecation.h"
+ #include "third_party/blink/renderer/modules/mediastream/focusable_media_stream_track.h"
 +#include "third_party/blink/renderer/modules/mediastream/around_audio_mixer.h"
  #include "third_party/blink/renderer/modules/mediastream/media_stream_track_event.h"
 +#include "third_party/blink/renderer/modules/peerconnection/peer_connection_dependency_factory.h"
@@ -383,8 +384,10 @@ index e010f2b3f75a321670510035a09c1f1399cd68f9..4650549d67ea852f4b28a7ceb3f4263c
  
  namespace blink {
  
-+namespace {
-+
+@@ -79,6 +86,44 @@ MediaStreamTrack* MakeMediaStreamTrack(ExecutionContext* context,
+                                                       std::move(callback));
+ }
+ 
 +// @AROUND: added for native ET mixing.
 +const char* kGroupInputLabel = "group_capture";
 +const char* kGroupOutputLabel = "group_playback";
@@ -423,12 +426,10 @@ index e010f2b3f75a321670510035a09c1f1399cd68f9..4650549d67ea852f4b28a7ceb3f4263c
 +  return latency;
 +}
 +
-+}
-+
+ }  // namespace
+ 
  static bool ContainsSource(MediaStreamTrackVector& track_vector,
-                            MediaStreamSource* source) {
-   for (MediaStreamTrack* track : track_vector) {
-@@ -289,6 +338,27 @@ void MediaStream::addTrack(MediaStreamTrack* track,
+@@ -335,6 +380,27 @@ void MediaStream::addTrack(MediaStreamTrack* track,
  
    switch (track->Component()->Source()->GetType()) {
      case MediaStreamSource::kTypeAudio:
@@ -456,7 +457,7 @@ index e010f2b3f75a321670510035a09c1f1399cd68f9..4650549d67ea852f4b28a7ceb3f4263c
        audio_tracks_.push_back(track);
        break;
      case MediaStreamSource::kTypeVideo:
-@@ -320,8 +390,20 @@ void MediaStream::removeTrack(MediaStreamTrack* track,
+@@ -366,8 +432,20 @@ void MediaStream::removeTrack(MediaStreamTrack* track,
    switch (track->Component()->Source()->GetType()) {
      case MediaStreamSource::kTypeAudio:
        pos = audio_tracks_.Find(track);
@@ -478,7 +479,7 @@ index e010f2b3f75a321670510035a09c1f1399cd68f9..4650549d67ea852f4b28a7ceb3f4263c
        break;
      case MediaStreamSource::kTypeVideo:
        pos = video_tracks_.Find(track);
-@@ -356,7 +438,41 @@ MediaStreamTrack* MediaStream::getTrackById(String id) {
+@@ -402,7 +480,41 @@ MediaStreamTrack* MediaStream::getTrackById(String id) {
      if ((*iter)->id() == id)
        return iter->Get();
    }
@@ -522,7 +523,7 @@ index e010f2b3f75a321670510035a09c1f1399cd68f9..4650549d67ea852f4b28a7ceb3f4263c
  }
  
 diff --git a/third_party/blink/renderer/modules/peerconnection/peer_connection_dependency_factory.cc b/third_party/blink/renderer/modules/peerconnection/peer_connection_dependency_factory.cc
-index 07a203371d7211c22495bbb165c2e1b65cc656a7..8c1c256de5df7cb0bb7bf567e22c2cba40636017 100644
+index 542e6547d7ad4df3b8a7f396c50b600ebbc9cca2..acd7f05e493d7e955fc3aa8cf4951def68698ec5 100644
 --- a/third_party/blink/renderer/modules/peerconnection/peer_connection_dependency_factory.cc
 +++ b/third_party/blink/renderer/modules/peerconnection/peer_connection_dependency_factory.cc
 @@ -38,6 +38,7 @@
@@ -533,7 +534,7 @@ index 07a203371d7211c22495bbb165c2e1b65cc656a7..8c1c256de5df7cb0bb7bf567e22c2cba
  #include "third_party/blink/renderer/modules/peerconnection/rtc_error_util.h"
  #include "third_party/blink/renderer/modules/peerconnection/rtc_peer_connection_handler.h"
  #include "third_party/blink/renderer/modules/webrtc/webrtc_audio_device_impl.h"
-@@ -848,8 +849,7 @@ void PeerConnectionDependencyFactory::EnsureWebRtcAudioMixer() {
+@@ -842,8 +843,7 @@ void PeerConnectionDependencyFactory::EnsureWebRtcAudioMixer() {
    DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
    if (audio_mixer_.get())
      return;
@@ -544,7 +545,7 @@ index 07a203371d7211c22495bbb165c2e1b65cc656a7..8c1c256de5df7cb0bb7bf567e22c2cba
  
  std::unique_ptr<webrtc::RtpCapabilities>
 diff --git a/third_party/blink/renderer/modules/webrtc/webrtc_audio_device_impl.cc b/third_party/blink/renderer/modules/webrtc/webrtc_audio_device_impl.cc
-index c78e07ca49b77e3d9305d6de5b8206fa3310c0da..371c3cce90e7f4a042b6fc683e4de28859fde4eb 100644
+index 210ea1f40810444b810f62a69d784fe387488586..e0790edea42e7ca4d9b6775c3fad1d6f86182d25 100644
 --- a/third_party/blink/renderer/modules/webrtc/webrtc_audio_device_impl.cc
 +++ b/third_party/blink/renderer/modules/webrtc/webrtc_audio_device_impl.cc
 @@ -15,6 +15,7 @@
@@ -623,7 +624,7 @@ index c78e07ca49b77e3d9305d6de5b8206fa3310c0da..371c3cce90e7f4a042b6fc683e4de288
  WebRtcAudioDeviceImpl::GetAuthorizedDeviceSessionIdForAudioRenderer() {
    DCHECK_CALLED_ON_VALID_THREAD(main_thread_checker_);
 diff --git a/third_party/blink/renderer/modules/webrtc/webrtc_audio_device_impl.h b/third_party/blink/renderer/modules/webrtc/webrtc_audio_device_impl.h
-index 11090c323056d3ce6d1d7a7dfe6df57123f5d89e..79b3d9641d63e2d7650bef6552c104106ec9e61c 100644
+index 1f19589b10e6e53225f2ca457c09e639022c4f1f..9318186e26e2e45c929fad491789006e72585d89 100644
 --- a/third_party/blink/renderer/modules/webrtc/webrtc_audio_device_impl.h
 +++ b/third_party/blink/renderer/modules/webrtc/webrtc_audio_device_impl.h
 @@ -36,6 +36,7 @@
@@ -634,7 +635,7 @@ index 11090c323056d3ce6d1d7a7dfe6df57123f5d89e..79b3d9641d63e2d7650bef6552c10410
  }
  
  namespace media {
-@@ -140,6 +141,9 @@ class MODULES_EXPORT WebRtcAudioDeviceImpl
+@@ -143,6 +144,9 @@ class MODULES_EXPORT WebRtcAudioDeviceImpl
    void AddPlayoutSink(blink::WebRtcPlayoutDataSource::Sink* sink) override;
    void RemovePlayoutSink(blink::WebRtcPlayoutDataSource::Sink* sink) override;
  
@@ -644,7 +645,7 @@ index 11090c323056d3ce6d1d7a7dfe6df57123f5d89e..79b3d9641d63e2d7650bef6552c10410
   private:
    using CapturerList = std::list<ProcessedLocalAudioSource*>;
    using PlayoutDataSinkList = std::list<blink::WebRtcPlayoutDataSource::Sink*>;
-@@ -169,6 +173,8 @@ class MODULES_EXPORT WebRtcAudioDeviceImpl
+@@ -172,6 +176,8 @@ class MODULES_EXPORT WebRtcAudioDeviceImpl
    // before it goes away.
    PlayoutDataSinkList playout_sinks_ GUARDED_BY(lock_);
  
@@ -653,7 +654,7 @@ index 11090c323056d3ce6d1d7a7dfe6df57123f5d89e..79b3d9641d63e2d7650bef6552c10410
    // Weak reference to the audio callback.
    // The webrtc client defines |audio_transport_callback_| by calling
    // RegisterAudioCallback().
-@@ -188,6 +194,10 @@ class MODULES_EXPORT WebRtcAudioDeviceImpl
+@@ -191,6 +197,10 @@ class MODULES_EXPORT WebRtcAudioDeviceImpl
    // Buffer used for temporary storage during render callback.
    // It is only accessed by the audio render thread.
    Vector<int16_t> render_buffer_;

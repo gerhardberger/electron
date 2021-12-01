@@ -14,10 +14,10 @@ requestAnimationFrame.
 Signed-off-by: gellert <gellert.hegyi@around.co>
 
 diff --git a/components/viz/service/frame_sinks/compositor_frame_sink_support.cc b/components/viz/service/frame_sinks/compositor_frame_sink_support.cc
-index 29482a0fc0976bb19544303b7e03bf44d60f07e9..8cbe71401fa733f0d2eb4f45b22df2689f83f5bc 100644
+index c0106379b63e4116917482fc049d8c94b7409dec..c95cb0b7753c023b741cf1119e92406b6f033c96 100644
 --- a/components/viz/service/frame_sinks/compositor_frame_sink_support.cc
 +++ b/components/viz/service/frame_sinks/compositor_frame_sink_support.cc
-@@ -1079,6 +1079,11 @@ bool CompositorFrameSinkSupport::ShouldSendBeginFrame(
+@@ -1092,6 +1092,11 @@ bool CompositorFrameSinkSupport::ShouldSendBeginFrame(
    // index must be at least as large as our last drawn frame index.
    DCHECK_GE(active_frame_index, last_drawn_frame_index_);
  
@@ -26,10 +26,10 @@ index 29482a0fc0976bb19544303b7e03bf44d60f07e9..8cbe71401fa733f0d2eb4f45b22df268
 +  // frames to not be drawn. We ignore this case to continue receiving updates
 +  // so that requestAnimationFrame will be called without throttling.
 +#if !defined(OS_WIN) && !defined(OS_LINUX)
-   // Throttle clients that have submitted too many undrawn frames.
+   // Throttle clients that have submitted too many undrawn frames, unless the
+   // active frame requests that it doesn't.
    uint64_t num_undrawn_frames = active_frame_index - last_drawn_frame_index_;
-   if (can_throttle_if_unresponsive_or_excessive &&
-@@ -1086,6 +1091,7 @@ bool CompositorFrameSinkSupport::ShouldSendBeginFrame(
+@@ -1101,6 +1106,7 @@ bool CompositorFrameSinkSupport::ShouldSendBeginFrame(
      RecordShouldSendBeginFrame("ThrottleUndrawnFrames");
      return false;
    }

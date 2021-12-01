@@ -6,7 +6,7 @@ Subject: adds support for around screen capturer
 This patch adds support for a new screen capturer implementation that is based on CGWindowListCreateImageFromArray to capture the display every frame, thus providing perfect exclusion of around windows.
 
 diff --git a/content/browser/media/capture/desktop_capture_device.cc b/content/browser/media/capture/desktop_capture_device.cc
-index 6776c5908c061b41f54c90796747e490580f73f5..ba9717811a611d44980d4a677f81df11535b1a2a 100644
+index 2cc644352b2f64a4553f58a1f26a46087f466789..a0eedca44b04be1355dde20a0863192b09f6f0ef 100644
 --- a/content/browser/media/capture/desktop_capture_device.cc
 +++ b/content/browser/media/capture/desktop_capture_device.cc
 @@ -526,7 +526,7 @@ base::TimeTicks DesktopCaptureDevice::Core::NowTicks() const {
@@ -27,9 +27,9 @@ index 6776c5908c061b41f54c90796747e490580f73f5..ba9717811a611d44980d4a677f81df11
          IncrementDesktopCaptureCounter(SCREEN_CAPTURER_CREATED);
          IncrementDesktopCaptureCounter(
              source.audio_share ? SCREEN_CAPTURER_CREATED_WITH_AUDIO
-@@ -579,7 +579,7 @@ std::unique_ptr<media::VideoCaptureDevice> DesktopCaptureDevice::Create(
+@@ -578,7 +578,7 @@ std::unique_ptr<media::VideoCaptureDevice> DesktopCaptureDevice::Create(
+ #endif
        if (window_capturer && window_capturer->SelectSource(source.id)) {
-         window_capturer->FocusOnSelectedSource();
          capturer = std::make_unique<webrtc::DesktopAndCursorComposer>(
 -            std::move(window_capturer), options);
 +            std::move(window_capturer), options, false);
@@ -37,7 +37,7 @@ index 6776c5908c061b41f54c90796747e490580f73f5..ba9717811a611d44980d4a677f81df11
        }
        break;
 diff --git a/content/browser/media/capture/desktop_capture_device.h b/content/browser/media/capture/desktop_capture_device.h
-index 4519ecbf34fa04b186599ce7ded8c881aa264c67..32409d57ebc26ffed16aed527ea25655e6b5afb5 100644
+index c4084d565cd35753bd24caa6a9cf4a26dffd4bf1..478e54d8dbffbda9d9ff3f17c192c734a8aa1c5c 100644
 --- a/content/browser/media/capture/desktop_capture_device.h
 +++ b/content/browser/media/capture/desktop_capture_device.h
 @@ -39,7 +39,7 @@ class CONTENT_EXPORT DesktopCaptureDevice : public media::VideoCaptureDevice {
@@ -47,8 +47,8 @@ index 4519ecbf34fa04b186599ce7ded8c881aa264c67..32409d57ebc26ffed16aed527ea25655
 -      const DesktopMediaID& source);
 +      const DesktopMediaID& source, bool using_around_capturer);
  
-   ~DesktopCaptureDevice() override;
- 
+   DesktopCaptureDevice(const DesktopCaptureDevice&) = delete;
+   DesktopCaptureDevice& operator=(const DesktopCaptureDevice&) = delete;
 diff --git a/content/browser/renderer_host/media/in_process_video_capture_device_launcher.cc b/content/browser/renderer_host/media/in_process_video_capture_device_launcher.cc
 index 38c1ab8a812da61e4dab724205403f580736ea46..937bd32beec2b9739f8eb2e53deb6e592e79b9fa 100644
 --- a/content/browser/renderer_host/media/in_process_video_capture_device_launcher.cc
@@ -142,19 +142,19 @@ index 1c84e97c7334a069be248f20b6d055a059bc7cd8..92d0c6a3de55d207c906ae2e303016ad
  
  }  // namespace media
 diff --git a/third_party/blink/public/mojom/web_feature/web_feature.mojom b/third_party/blink/public/mojom/web_feature/web_feature.mojom
-index e7bafee7b81d2d56d005939ea3bff4f610e6951b..ac6cb47a8dd1e9350e91103c7035326d40e72eb5 100644
+index 1f153871234e001888d67cb1225393d6b226c95d..579a89b40998767931303014e31de555c15c6d20 100644
 --- a/third_party/blink/public/mojom/web_feature/web_feature.mojom
 +++ b/third_party/blink/public/mojom/web_feature/web_feature.mojom
-@@ -3289,6 +3289,7 @@ enum WebFeature {
-   kMediaStreamConstraintsAroundAudioProcessing = 3976,
-   kV8RTCRtpReceiver_BufferDrained_Method = 3977,
-   kV8RTCRtpReceiver_BufferRestored_Method = 3978,
-+  kMediaStreamConstraintsUsingAroundCapturer = 3979,
+@@ -3373,6 +3373,7 @@ enum WebFeature {
+   kMediaStreamConstraintsAroundAudioProcessing = 4500,
+   kV8RTCRtpReceiver_BufferDrained_Method = 4501,
+   kV8RTCRtpReceiver_BufferRestored_Method = 4502,
++  kMediaStreamConstraintsUsingAroundCapturer = 4503,
  
    // Add new features immediately above this line. Don't change assigned
    // numbers of any item, and don't reuse removed slots.
 diff --git a/third_party/blink/renderer/modules/mediastream/media_constraints_impl.cc b/third_party/blink/renderer/modules/mediastream/media_constraints_impl.cc
-index 8ff67efc220de1844ecc6eee46c4e02f161b201f..c5698adff4f385b7dcb04c402721371717181be9 100644
+index a747ec5446beb8585eca33488942887e0cb846ee..6022609cc1f201cae228dcb8f901b8d02506cf82 100644
 --- a/third_party/blink/renderer/modules/mediastream/media_constraints_impl.cc
 +++ b/third_party/blink/renderer/modules/mediastream/media_constraints_impl.cc
 @@ -142,6 +142,7 @@ const char kCpuOveruseEncodeUsage[] = "googCpuOveruseEncodeUsage";
@@ -174,7 +174,7 @@ index 8ff67efc220de1844ecc6eee46c4e02f161b201f..c5698adff4f385b7dcb04c4027213717
      } else if (constraint.name_.Equals(kCpuUnderuseThreshold) ||
                 constraint.name_.Equals(kCpuOveruseThreshold) ||
                 constraint.name_.Equals(kCpuUnderuseEncodeRsdThreshold) ||
-@@ -758,6 +761,10 @@ void CopyConstraintSet(const MediaTrackConstraintSet* constraints_in,
+@@ -865,6 +868,10 @@ bool ValidateAndCopyConstraintSet(
      CopyBooleanOrDoubleConstraint(constraints_in->zoom(), naked_treatment,
                                    constraint_buffer.zoom);
    }
@@ -182,9 +182,9 @@ index 8ff67efc220de1844ecc6eee46c4e02f161b201f..c5698adff4f385b7dcb04c4027213717
 +    CopyBooleanConstraint(constraints_in->usingAroundCapturer(), naked_treatment,
 +                          constraint_buffer.using_around_capturer);
 +  }
+   return true;
  }
  
- MediaConstraints ConvertTrackConstraintsToMediaConstraints(
 diff --git a/third_party/blink/renderer/modules/mediastream/media_stream_constraints_util_video_content.cc b/third_party/blink/renderer/modules/mediastream/media_stream_constraints_util_video_content.cc
 index eca856b293d4f5a1dc1a23950d09153affed4934..c79a316491fe796d1439e3ef1076dfe0b720f61c 100644
 --- a/third_party/blink/renderer/modules/mediastream/media_stream_constraints_util_video_content.cc
@@ -246,10 +246,10 @@ index 22966e6af699198bf88b99ffe766a9b661beeef9..e82dc4b0f62a1b7c47ad65093027d4be
      // Media Capture Depth Stream Extensions
      // https://w3c.github.io/mediacapture-depth
 diff --git a/third_party/blink/renderer/modules/mediastream/user_media_request.cc b/third_party/blink/renderer/modules/mediastream/user_media_request.cc
-index b7c01a0961d9001b0981fa6007416a11f17fbf78..457c9fce27f37950fd95e82e2e79b51db54f7bf3 100644
+index 59e160d8cca0819dea30020d804a37713cd7b045..e197dbfef63f33c91d026f6efe38ef4508556c9e 100644
 --- a/third_party/blink/renderer/modules/mediastream/user_media_request.cc
 +++ b/third_party/blink/renderer/modules/mediastream/user_media_request.cc
-@@ -225,6 +225,10 @@ void CountAudioConstraintUses(ExecutionContext* context,
+@@ -227,6 +227,10 @@ void CountAudioConstraintUses(ExecutionContext* context,
            &MediaTrackConstraintSetPlatform::goog_da_echo_cancellation)) {
      counter.Count(WebFeature::kMediaStreamConstraintsGoogDAEchoCancellation);
    }

@@ -20,7 +20,7 @@ index 95d2deb058c2315e9c940290943c86e48ccb35c3..70148b66bb3374db84d06b5c818228af
  
  #include <memory>
 diff --git a/modules/desktop_capture/mac/screen_capturer_mac.mm b/modules/desktop_capture/mac/screen_capturer_mac.mm
-index c339b00eaa4d85c6258cd0a89e7b416d478f5db0..9f047b40091a3864c723d5cd25ba90e5cdc823cf 100644
+index 4f1d0b83ace88bf4f191530f8fc44eefbd498c3a..7a890c48ae91c139e68f7be292b316ae2e0e2363 100644
 --- a/modules/desktop_capture/mac/screen_capturer_mac.mm
 +++ b/modules/desktop_capture/mac/screen_capturer_mac.mm
 @@ -12,6 +12,7 @@
@@ -51,7 +51,7 @@ index c339b00eaa4d85c6258cd0a89e7b416d478f5db0..9f047b40091a3864c723d5cd25ba90e5
      if (pid == own_pid) {
        if (
          layer == floating_layer || // screen share overlay
-@@ -293,7 +300,18 @@ DesktopRect GetExcludedWindowPixelBounds(CGWindowID window, float dip_to_pixel_s
+@@ -295,7 +302,18 @@ DesktopRect GetExcludedWindowPixelBounds(CGWindowID window, float dip_to_pixel_s
  
    new_frame->set_capture_time_ms((rtc::TimeNanos() - capture_start_time_nanos) /
                                   rtc::kNumNanosecsPerMillisec);

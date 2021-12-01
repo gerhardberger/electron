@@ -91,10 +91,10 @@ index 6617c69e351bc7fd1e22cb8bc53c8b19dbf4c0f9..be9fbf47da5ab2c212bad639fb1e6343
    // Sets SharedMemoryFactory that will be used to create buffers for the
    // captured frames. The factory can be invoked on a thread other than the one
 diff --git a/modules/desktop_capture/mac/screen_capturer_mac.mm b/modules/desktop_capture/mac/screen_capturer_mac.mm
-index 9f047b40091a3864c723d5cd25ba90e5cdc823cf..4505b8c9c5582085ad49d5597b455697fdc6634b 100644
+index 7a890c48ae91c139e68f7be292b316ae2e0e2363..c165b57195c6e066b935d804176f4a6ce6f95b99 100644
 --- a/modules/desktop_capture/mac/screen_capturer_mac.mm
 +++ b/modules/desktop_capture/mac/screen_capturer_mac.mm
-@@ -387,8 +387,7 @@ DesktopRect GetExcludedWindowPixelBounds(CGWindowID window, float dip_to_pixel_s
+@@ -389,8 +389,7 @@ DesktopRect GetExcludedWindowPixelBounds(CGWindowID window, float dip_to_pixel_s
      copy_region.Translate(-display_bounds.left(), -display_bounds.top());
  
      if (should_exclude_) {

@@ -8,7 +8,7 @@ This patch disables the frame late limitation exposed to screen capture.
 Signed-off-by: gellert <gellert.hegyi@around.co>
 
 diff --git a/content/browser/media/capture/desktop_capture_device.cc b/content/browser/media/capture/desktop_capture_device.cc
-index d5bff8cc67400ea60f9f781518b031515dadefed..a81a2d14b782d2ca43a11dd40ff12e1dcd989df4 100644
+index a30e05a9aac9c6d14430be92ee2824d423e7e26d..cdbac5d5e7c9734fa4a18f82e0c37cbc52c813de 100644
 --- a/content/browser/media/capture/desktop_capture_device.cc
 +++ b/content/browser/media/capture/desktop_capture_device.cc
 @@ -481,9 +481,7 @@ void DesktopCaptureDevice::Core::ScheduleNextCaptureFrame() {

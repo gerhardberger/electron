@@ -6,10 +6,10 @@ Subject: adds support to show hide cursor and set exclusion fps in screenshare
 This patch adds support using the around-dc datachannel solution to show or hide the cursor and set exclusion fps in screensharing.
 
 diff --git a/content/browser/media/capture/desktop_capture_device.cc b/content/browser/media/capture/desktop_capture_device.cc
-index 51dcf88d0925023bd1133a4f88366b7dd073ddc9..6776c5908c061b41f54c90796747e490580f73f5 100644
+index 48a40231a248327b8adc4a207fbe3f767ba2b6c6..2cc644352b2f64a4553f58a1f26a46087f466789 100644
 --- a/content/browser/media/capture/desktop_capture_device.cc
 +++ b/content/browser/media/capture/desktop_capture_device.cc
-@@ -120,6 +120,10 @@ class DesktopCaptureDevice::Core : public webrtc::DesktopCapturer::Callback {
+@@ -124,6 +124,10 @@ class DesktopCaptureDevice::Core : public webrtc::DesktopCapturer::Callback {
    void AllocateAndStart(const media::VideoCaptureParams& params,
                          std::unique_ptr<Client> client);
  
@@ -20,7 +20,7 @@ index 51dcf88d0925023bd1133a4f88366b7dd073ddc9..6776c5908c061b41f54c90796747e490
    void SetNotificationWindowId(gfx::NativeViewId window_id);
  
    void SetMockTimeForTesting(
-@@ -235,6 +239,14 @@ DesktopCaptureDevice::Core::~Core() {
+@@ -237,6 +241,14 @@ DesktopCaptureDevice::Core::~Core() {
    desktop_capturer_.reset();
  }
  
@@ -35,7 +35,7 @@ index 51dcf88d0925023bd1133a4f88366b7dd073ddc9..6776c5908c061b41f54c90796747e490
  void DesktopCaptureDevice::Core::AllocateAndStart(
      const media::VideoCaptureParams& params,
      std::unique_ptr<Client> client) {
-@@ -264,6 +276,7 @@ void DesktopCaptureDevice::Core::AllocateAndStart(
+@@ -265,6 +277,7 @@ void DesktopCaptureDevice::Core::AllocateAndStart(
    RequestWakeLock();
  
    desktop_capturer_->should_exclude_ = true;
@@ -43,7 +43,7 @@ index 51dcf88d0925023bd1133a4f88366b7dd073ddc9..6776c5908c061b41f54c90796747e490
    desktop_capturer_->Start(this);
    // Assume it will be always started successfully for now.
    client_->OnStarted();
-@@ -585,6 +598,20 @@ DesktopCaptureDevice::~DesktopCaptureDevice() {
+@@ -584,6 +597,20 @@ DesktopCaptureDevice::~DesktopCaptureDevice() {
    DCHECK(!core_);
  }
  
@@ -65,10 +65,10 @@ index 51dcf88d0925023bd1133a4f88366b7dd073ddc9..6776c5908c061b41f54c90796747e490
      const media::VideoCaptureParams& params,
      std::unique_ptr<Client> client) {
 diff --git a/content/browser/media/capture/desktop_capture_device.h b/content/browser/media/capture/desktop_capture_device.h
-index 58f14fb672766639fc168ef9697455b24ddbcada..4519ecbf34fa04b186599ce7ded8c881aa264c67 100644
+index 330f2c0af8ed939d1d53ceebefde1168b77cfb14..c4084d565cd35753bd24caa6a9cf4a26dffd4bf1 100644
 --- a/content/browser/media/capture/desktop_capture_device.h
 +++ b/content/browser/media/capture/desktop_capture_device.h
-@@ -48,6 +48,10 @@ class CONTENT_EXPORT DesktopCaptureDevice : public media::VideoCaptureDevice {
+@@ -51,6 +51,10 @@ class CONTENT_EXPORT DesktopCaptureDevice : public media::VideoCaptureDevice {
                          std::unique_ptr<Client> client) override;
    void StopAndDeAllocate() override;
  
@@ -80,10 +80,10 @@ index 58f14fb672766639fc168ef9697455b24ddbcada..4519ecbf34fa04b186599ce7ded8c881
    void SetNotificationWindowId(gfx::NativeViewId window_id);
  
 diff --git a/content/browser/renderer_host/media/in_process_launched_video_capture_device.cc b/content/browser/renderer_host/media/in_process_launched_video_capture_device.cc
-index a5dddb2551a8a5dd3abdb4c08f1b8c4499d15674..6665d72dafb3ddf7206c7bef04c9acb8ec1d72fc 100644
+index dbc962ae9a76a5b099c02b362832f6e3633cc2d0..a7ad21005de035dde3f14444a593d1cd7b156931 100644
 --- a/content/browser/renderer_host/media/in_process_launched_video_capture_device.cc
 +++ b/content/browser/renderer_host/media/in_process_launched_video_capture_device.cc
-@@ -123,6 +123,20 @@ void InProcessLaunchedVideoCaptureDevice::RequestRefreshFrame() {
+@@ -121,6 +121,20 @@ void InProcessLaunchedVideoCaptureDevice::RequestRefreshFrame() {
                                  base::Unretained(device_.get())));
  }
  
@@ -190,10 +190,10 @@ index 1bac2c8991ea190fdd28499372915586ea8f4fb7..104b0a887c1ee746c50d1ff36181d11d
   private:
    friend class base::RefCountedThreadSafe<VideoCaptureController>;
 diff --git a/content/browser/renderer_host/media/video_capture_host.cc b/content/browser/renderer_host/media/video_capture_host.cc
-index 176bdb080e645675808cf428ddc228a7b5b9ff8b..07cf8167858fd7a28e3e2fb5ea97cc447e52ae77 100644
+index b4b5072fa80dd04bd190890c461303d7ce65ebc4..8b4bc78adba248eb59a19c0c44e994b47a2e91f3 100644
 --- a/content/browser/renderer_host/media/video_capture_host.cc
 +++ b/content/browser/renderer_host/media/video_capture_host.cc
-@@ -296,6 +296,36 @@ void VideoCaptureHost::RequestRefreshFrame(
+@@ -299,6 +299,36 @@ void VideoCaptureHost::RequestRefreshFrame(
    }
  }
  
@@ -231,10 +231,10 @@ index 176bdb080e645675808cf428ddc228a7b5b9ff8b..07cf8167858fd7a28e3e2fb5ea97cc44
      const base::UnguessableToken& device_id,
      int32_t buffer_id,
 diff --git a/content/browser/renderer_host/media/video_capture_host.h b/content/browser/renderer_host/media/video_capture_host.h
-index 1bf872dde2512e1452660a4e5ede9ffaad11f225..00ce9f8c89d3d7b2ebde41c54a19275105f7f925 100644
+index 7c199986ac6a683df4deee992f81bff3931a450d..fe34bb9c59bc413ff9c9c49b1a463056e79502ff 100644
 --- a/content/browser/renderer_host/media/video_capture_host.h
 +++ b/content/browser/renderer_host/media/video_capture_host.h
-@@ -96,6 +96,8 @@ class CONTENT_EXPORT VideoCaptureHost
+@@ -101,6 +101,8 @@ class CONTENT_EXPORT VideoCaptureHost
                        media::VideoCaptureFrameDropReason reason) override;
    void OnLog(const base::UnguessableToken& device_id,
               const std::string& message) override;
@@ -275,7 +275,7 @@ index beed2dd5baf242476a2bc44243e70b655b18a94d..660d9f87a483d3f945be07f1a63f139f
      const media::VideoCaptureSessionId& capture_session_id,
      media::VideoCaptureFormats* supported_formats) {
 diff --git a/content/browser/renderer_host/media/video_capture_manager.h b/content/browser/renderer_host/media/video_capture_manager.h
-index a25840f68ecacced125a63e91bc5d7159f3ca6c7..42a747f93faa2566aedfc37077349d2bc08e75e3 100644
+index 840b8885eda724f8ae607ac6206263c890d7013c..dc477fab017cb59ace63fcff74b086e91309d8d6 100644
 --- a/content/browser/renderer_host/media/video_capture_manager.h
 +++ b/content/browser/renderer_host/media/video_capture_manager.h
 @@ -131,6 +131,9 @@ class CONTENT_EXPORT VideoCaptureManager
@@ -412,10 +412,10 @@ index 9c46503617ce976bf08127bab2f9202194eb798a..da33fd9ea31aa90f7844378476da252e
    // request. Thus, the caller cannot assume frame delivery will actually
    // stop. Even if frame delivery is suspended, this might not take effect
 diff --git a/third_party/blink/renderer/platform/video_capture/video_capture_impl.cc b/third_party/blink/renderer/platform/video_capture/video_capture_impl.cc
-index e6d0b0afd05970b796cd05c85ee204c964d64571..be23eec1df8a897c29dfc90eee09d30cba4e26f9 100644
+index 1c512a3704365dc6e765cfaae578dcfb52f76d7f..87eb8579b6049f337e185a7b2fae27e9a21b1c6b 100644
 --- a/third_party/blink/renderer/platform/video_capture/video_capture_impl.cc
 +++ b/third_party/blink/renderer/platform/video_capture/video_capture_impl.cc
-@@ -616,6 +616,9 @@ void VideoCaptureImpl::SetGpuFactoriesHandleOnIOTaskRunner(
+@@ -624,6 +624,9 @@ void VideoCaptureImpl::SetGpuFactoriesHandleOnIOTaskRunner(
  
  VideoCaptureImpl::~VideoCaptureImpl() {
    DCHECK_CALLED_ON_VALID_THREAD(io_thread_checker_);
@@ -425,7 +425,7 @@ index e6d0b0afd05970b796cd05c85ee204c964d64571..be23eec1df8a897c29dfc90eee09d30c
    if ((state_ == VIDEO_CAPTURE_STATE_STARTING ||
         state_ == VIDEO_CAPTURE_STATE_STARTED) &&
        GetVideoCaptureHost())
-@@ -639,6 +642,8 @@ void VideoCaptureImpl::StartCapture(
+@@ -647,6 +650,8 @@ void VideoCaptureImpl::StartCapture(
    DCHECK_CALLED_ON_VALID_THREAD(io_thread_checker_);
    OnLog("VideoCaptureImpl got request to start capture.");
  
@@ -434,7 +434,7 @@ index e6d0b0afd05970b796cd05c85ee204c964d64571..be23eec1df8a897c29dfc90eee09d30c
    ClientInfo client_info;
    client_info.params = params;
    client_info.state_update_cb = state_update_cb;
-@@ -694,6 +699,8 @@ void VideoCaptureImpl::StopCapture(int client_id) {
+@@ -702,6 +707,8 @@ void VideoCaptureImpl::StopCapture(int client_id) {
      RemoveClient(client_id, &clients_);
    }
  
@@ -443,7 +443,7 @@ index e6d0b0afd05970b796cd05c85ee204c964d64571..be23eec1df8a897c29dfc90eee09d30c
    if (!clients_.empty())
      return;
    DVLOG(1) << "StopCapture: No more client, stopping ...";
-@@ -707,6 +714,16 @@ void VideoCaptureImpl::RequestRefreshFrame() {
+@@ -715,6 +722,16 @@ void VideoCaptureImpl::RequestRefreshFrame() {
    GetVideoCaptureHost()->RequestRefreshFrame(device_id_);
  }
  
@@ -460,7 +460,7 @@ index e6d0b0afd05970b796cd05c85ee204c964d64571..be23eec1df8a897c29dfc90eee09d30c
  void VideoCaptureImpl::GetDeviceSupportedFormats(
      VideoCaptureDeviceFormatsCallback callback) {
    DCHECK_CALLED_ON_VALID_THREAD(io_thread_checker_);
-@@ -1134,6 +1151,30 @@ void VideoCaptureImpl::RecordStartOutcomeUMA(VideoCaptureStartOutcome outcome) {
+@@ -1142,6 +1159,30 @@ void VideoCaptureImpl::RecordStartOutcomeUMA(VideoCaptureStartOutcome outcome) {
    }
  }
  
@@ -492,7 +492,7 @@ index e6d0b0afd05970b796cd05c85ee204c964d64571..be23eec1df8a897c29dfc90eee09d30c
  void VideoCaptureImpl::DidFinishConsumingFrame(
      BufferFinishedCallback callback_to_io_thread) {
 diff --git a/third_party/blink/renderer/platform/video_capture/video_capture_impl.h b/third_party/blink/renderer/platform/video_capture/video_capture_impl.h
-index e454fe18181a0b21c48d408ff0e1c410f5d1bc82..e56a3c14e53e2550d37ddaa7f6b00ab20862fd36 100644
+index 9b5c9bf74ac62181a2a2b3a9dad9f1ebce7f1de8..5786494865e915b4d312b34316bdc2dee6540607 100644
 --- a/third_party/blink/renderer/platform/video_capture/video_capture_impl.h
 +++ b/third_party/blink/renderer/platform/video_capture/video_capture_impl.h
 @@ -22,6 +22,7 @@
@@ -524,9 +524,9 @@ index e454fe18181a0b21c48d408ff0e1c410f5d1bc82..e56a3c14e53e2550d37ddaa7f6b00ab2
    // Get capturing formats supported by this device.
    // |callback| will be invoked with the results.
    //
-@@ -126,6 +132,8 @@ class PLATFORM_EXPORT VideoCaptureImpl
-   static constexpr base::TimeDelta kCaptureStartTimeout =
-       base::TimeDelta::FromSeconds(10);
+@@ -125,6 +131,8 @@ class PLATFORM_EXPORT VideoCaptureImpl
+ 
+   static constexpr base::TimeDelta kCaptureStartTimeout = base::Seconds(10);
  
 +  void OnCommandReceived(std::string command, std::map<std::string, std::string> params) override;
 +

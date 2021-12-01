@@ -25,7 +25,7 @@ index 68b8655b1cb6f21ae552e7295c7097153bb1c7b5..95d2deb058c2315e9c940290943c86e4
    // List of streams, one per screen.
    std::vector<CGDisplayStreamRef> display_streams_;
 diff --git a/modules/desktop_capture/mac/screen_capturer_mac.mm b/modules/desktop_capture/mac/screen_capturer_mac.mm
-index 29d2017356365bb90e72c24530fd39db47b76d14..db703f72cd0b59fa6505392b17adddc9749f5bd0 100644
+index f10111a7f0f0a846eef563afbecd8f50fbb704ac..6abc0b61c8038a6dfa777cdf7c9f951355fe20ee 100644
 --- a/modules/desktop_capture/mac/screen_capturer_mac.mm
 +++ b/modules/desktop_capture/mac/screen_capturer_mac.mm
 @@ -61,8 +61,13 @@ void CopyRect(const uint8_t* src_plane,
@@ -83,10 +83,10 @@ index 29d2017356365bb90e72c24530fd39db47b76d14..db703f72cd0b59fa6505392b17adddc9
  
 -  queue_.MoveToNextFrame();
 +  // queue_.MoveToNextFrame();
-   RTC_DCHECK(!queue_.current_frame() || !queue_.current_frame()->IsShared());
- 
-   MacDesktopConfiguration new_config = desktop_config_monitor_->desktop_configuration();
-@@ -232,7 +257,15 @@ DesktopRect GetExcludedWindowPixelBounds(CGWindowID window, float dip_to_pixel_s
+   if (queue_.current_frame() && queue_.current_frame()->IsShared()) {
+     RTC_DLOG(LS_WARNING) << "Overwriting frame that is still shared.";
+   }
+@@ -234,7 +259,15 @@ DesktopRect GetExcludedWindowPixelBounds(CGWindowID window, float dip_to_pixel_s
    // If the current buffer is from an older generation then allocate a new one.
    // Note that we can't reallocate other buffers at this point, since the caller
    // may still be reading from them.
@@ -103,7 +103,7 @@ index 29d2017356365bb90e72c24530fd39db47b76d14..db703f72cd0b59fa6505392b17adddc9
  
    DesktopFrame* current_frame = queue_.current_frame();
  
-@@ -264,7 +297,7 @@ DesktopRect GetExcludedWindowPixelBounds(CGWindowID window, float dip_to_pixel_s
+@@ -266,7 +299,7 @@ DesktopRect GetExcludedWindowPixelBounds(CGWindowID window, float dip_to_pixel_s
  }
  
  void ScreenCapturerMac::SetExcludedWindow(WindowId window) {
@@ -112,7 +112,7 @@ index 29d2017356365bb90e72c24530fd39db47b76d14..db703f72cd0b59fa6505392b17adddc9
  }
  
  bool ScreenCapturerMac::GetSourceList(SourceList* screens) {
-@@ -293,11 +326,6 @@ DesktopRect GetExcludedWindowPixelBounds(CGWindowID window, float dip_to_pixel_s
+@@ -295,11 +328,6 @@ DesktopRect GetExcludedWindowPixelBounds(CGWindowID window, float dip_to_pixel_s
  }
  
  bool ScreenCapturerMac::CgBlit(const DesktopFrame& frame, const DesktopRegion& region) {
@@ -124,7 +124,7 @@ index 29d2017356365bb90e72c24530fd39db47b76d14..db703f72cd0b59fa6505392b17adddc9
  
    MacDisplayConfigurations displays_to_capture;
    if (current_display_) {
-@@ -317,7 +345,7 @@ DesktopRect GetExcludedWindowPixelBounds(CGWindowID window, float dip_to_pixel_s
+@@ -319,7 +347,7 @@ DesktopRect GetExcludedWindowPixelBounds(CGWindowID window, float dip_to_pixel_s
    }
  
    // Create the window list once for all displays.
@@ -133,7 +133,7 @@ index 29d2017356365bb90e72c24530fd39db47b76d14..db703f72cd0b59fa6505392b17adddc9
  
    for (size_t i = 0; i < displays_to_capture.size(); ++i) {
      const MacDisplayConfiguration& display_config = displays_to_capture[i];
-@@ -340,19 +368,39 @@ DesktopRect GetExcludedWindowPixelBounds(CGWindowID window, float dip_to_pixel_s
+@@ -342,19 +370,39 @@ DesktopRect GetExcludedWindowPixelBounds(CGWindowID window, float dip_to_pixel_s
      // Translate the region to be copied into display-relative coordinates.
      copy_region.Translate(-display_bounds.left(), -display_bounds.top());
  
@@ -186,8 +186,8 @@ index 29d2017356365bb90e72c24530fd39db47b76d14..db703f72cd0b59fa6505392b17adddc9
        }
      }
  
-@@ -381,9 +429,14 @@ DesktopRect GetExcludedWindowPixelBounds(CGWindowID window, float dip_to_pixel_s
-                i.rect());
+@@ -383,9 +431,14 @@ DesktopRect GetExcludedWindowPixelBounds(CGWindowID window, float dip_to_pixel_s
+                it.rect());
      }
  
 -    if (excluded_image) {

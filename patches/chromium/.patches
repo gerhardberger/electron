@@ -117,7 +117,6 @@ adds_rnnoise_library.patch
 adds_rnnoise_based_audio_processing.patch
 disables_some_dchecks_for_smooth_testing_build.patch
 allow_handling_of_caption_mouse_events.patch
-disables_goog_agc.patch
 aec_webaudio.patch
 disables_hidden_occluded.patch
 decreases_fifo_size.patch

@@ -6,7 +6,7 @@ Subject: adds around screen capturer
 This patch adds a new entire screen capturer implementation that is based on CGWindowListCreateImageFromArray to capture the display every frame, thus providing perfect exclusion of around windows.
 
 diff --git a/modules/desktop_capture/BUILD.gn b/modules/desktop_capture/BUILD.gn
-index d2a0a9a71230f81b133f11a36e4146eb558a59f2..2f051ecadb4ef86a8c64291a5bf73833ae99b575 100644
+index 067287c01e00e91ba0e8b7b0fe264468bba713eb..95ba4955290abbc9ae58840c8064cceb04dcca36 100644
 --- a/modules/desktop_capture/BUILD.gn
 +++ b/modules/desktop_capture/BUILD.gn
 @@ -294,6 +294,7 @@ if (is_mac) {

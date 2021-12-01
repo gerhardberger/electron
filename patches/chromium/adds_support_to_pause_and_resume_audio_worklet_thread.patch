@@ -68,18 +68,18 @@ index 0cfcf81a327418830f83c5198799c6cdd592540e..e7ec437841854d7a5153f93f1e354fe4
 +
  }  // namespace blink
 diff --git a/third_party/blink/renderer/platform/audio/audio_destination.h b/third_party/blink/renderer/platform/audio/audio_destination.h
-index 3a9dfbb560db7497982c3b8f9833cabb6ff14d45..6f839873c21b894bace6771b192df295e10887fb 100644
+index 2847edda3438ea68e281c5ea926127de36d35206..81627a099a5550aaa828058362fc5fca61a8fd01 100644
 --- a/third_party/blink/renderer/platform/audio/audio_destination.h
 +++ b/third_party/blink/renderer/platform/audio/audio_destination.h
-@@ -42,6 +42,7 @@
- #include "third_party/blink/renderer/platform/wtf/threading_primitives.h"
+@@ -43,6 +43,7 @@
  #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
  #include "third_party/blink/renderer/platform/wtf/thread_safe_ref_counted.h"
+ #include "third_party/blink/renderer/platform/wtf/threading_primitives.h"
 +#include "third_party/webrtc/pc/data_channel_controller.h"
  
- namespace absl {
- template <typename>
-@@ -65,7 +66,8 @@ class WebAudioLatencyHint;
+ namespace blink {
+ 
+@@ -61,7 +62,8 @@ class WebAudioLatencyHint;
  //    AudioWorkletThread.
  class PLATFORM_EXPORT AudioDestination
      : public ThreadSafeRefCounted<AudioDestination>,
@@ -89,7 +89,7 @@ index 3a9dfbb560db7497982c3b8f9833cabb6ff14d45..6f839873c21b894bace6771b192df295
    USING_FAST_MALLOC(AudioDestination);
  
   public:
-@@ -141,6 +143,8 @@ class PLATFORM_EXPORT AudioDestination
+@@ -137,6 +139,8 @@ class PLATFORM_EXPORT AudioDestination
    // This should only be called from the audio thread.
    unsigned RenderQuantumFrames() const { return render_quantum_frames_; }
  
@@ -98,7 +98,7 @@ index 3a9dfbb560db7497982c3b8f9833cabb6ff14d45..6f839873c21b894bace6771b192df295
   private:
    void SetDeviceState(DeviceState);
  
-@@ -200,6 +204,8 @@ class PLATFORM_EXPORT AudioDestination
+@@ -196,6 +200,8 @@ class PLATFORM_EXPORT AudioDestination
    // Modified only on the main thread, so it can be read without holding a lock
    // there.
    DeviceState device_state_;

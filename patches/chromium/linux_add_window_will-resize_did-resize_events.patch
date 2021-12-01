@@ -6,10 +6,10 @@ Subject: linux add window will-resize did-resize events
 This patch adds similar window did-resize and will-resize events to linux as there is for macOS and Windows.
 
 diff --git a/ui/aura/window_tree_host.cc b/ui/aura/window_tree_host.cc
-index 35e0e635d1f167e05eac2734f4d93b665facc67b..df9d9b17f8e4e24634dd431c7789a67e7c2d70d6 100644
+index 27237fb845ab84de04f84eddcd5b79f1c784489d..17ac1d4b1177ff3bc79023cc16450b6ac76f76e0 100644
 --- a/ui/aura/window_tree_host.cc
 +++ b/ui/aura/window_tree_host.cc
-@@ -471,6 +471,24 @@ void WindowTreeHost::OnHostMovedInPixels(
+@@ -550,6 +550,24 @@ void WindowTreeHost::OnHostMovedInPixels(
      observer.OnHostMovedInPixels(this, new_location_in_pixels);
  }
  
@@ -35,10 +35,10 @@ index 35e0e635d1f167e05eac2734f4d93b665facc67b..df9d9b17f8e4e24634dd431c7789a67e
      const gfx::Size& new_size_in_pixels) {
    // The compositor is deleted from WM_DESTROY, but we don't delete things until
 diff --git a/ui/aura/window_tree_host.h b/ui/aura/window_tree_host.h
-index 3492004a54fd9fb8a15637fd9676655e26fa830d..22d8417eb5a6455c41b19fbf0b2944df35c484a0 100644
+index 6e449e363660b6697ec96ca32d4c2d8a5579e5b3..a898289086676b3da13edaf72c85f54c3b266910 100644
 --- a/ui/aura/window_tree_host.h
 +++ b/ui/aura/window_tree_host.h
-@@ -286,6 +286,10 @@ class AURA_EXPORT WindowTreeHost : public ui::internal::InputMethodDelegate,
+@@ -302,6 +302,10 @@ class AURA_EXPORT WindowTreeHost : public ui::internal::InputMethodDelegate,
  
    void OnHostMovedInPixels(const gfx::Point& new_location_in_pixels);
    void OnHostResizedInPixels(const gfx::Size& new_size_in_pixels);
@@ -85,10 +85,10 @@ index e793e0812cfaa765417c8da8afd13cae4ced0b64..4bea4ab9156f13cdfd3081c783f8f0a7
    // It's possible this function may be called recursively. Only notify
    // observers on initial entry. This way observers can safely assume that
 diff --git a/ui/aura/window_tree_host_platform.h b/ui/aura/window_tree_host_platform.h
-index 22926f7506ea35e117baaa7a57123ba18dcada67..e845368c1d91f00a6c505daecf5a202ee0730dc2 100644
+index 40ebc2109f5f7c822979d3861f34e9da7e283645..6b2a4c52bd0cbd699a8e69f11ff95e7fc429fe14 100644
 --- a/ui/aura/window_tree_host_platform.h
 +++ b/ui/aura/window_tree_host_platform.h
-@@ -68,6 +68,12 @@ class AURA_EXPORT WindowTreeHostPlatform : public WindowTreeHost,
+@@ -72,6 +72,12 @@ class AURA_EXPORT WindowTreeHostPlatform : public WindowTreeHost,
  
    // ui::PlatformWindowDelegate:
    void OnBoundsChanged(const BoundsChange& change) override;
@@ -102,7 +102,7 @@ index 22926f7506ea35e117baaa7a57123ba18dcada67..e845368c1d91f00a6c505daecf5a202e
    void DispatchEvent(ui::Event* event) override;
    void OnCloseRequest() override;
 diff --git a/ui/platform_window/platform_window_delegate.h b/ui/platform_window/platform_window_delegate.h
-index 8055d383d26b9dd8e7079022153899dbfba28463..52195cb2157ffa173e81592333a1491fe0201db3 100644
+index 73b1ef6cec862e7a86e0986be585afbf7c0846f2..d0c811f931b4674d468d41fc4bc3922906eddf14 100644
 --- a/ui/platform_window/platform_window_delegate.h
 +++ b/ui/platform_window/platform_window_delegate.h
 @@ -75,6 +75,11 @@ class COMPONENT_EXPORT(PLATFORM_WINDOW) PlatformWindowDelegate {
@@ -118,10 +118,10 @@ index 8055d383d26b9dd8e7079022153899dbfba28463..52195cb2157ffa173e81592333a1491f
    // physical pixels.
    virtual void OnDamageRect(const gfx::Rect& damaged_region) = 0;
 diff --git a/ui/platform_window/x11/x11_window.cc b/ui/platform_window/x11/x11_window.cc
-index b8389ec9f2f6e6a6b411657a58a324aa5cd57925..a667c116d740662dbd0b7f4f3ea68eb97496d99f 100644
+index 3ef183213bc604656d396abf5af535818f8c2833..815299e71725bae5784c69da1e7cad3dd229b92d 100644
 --- a/ui/platform_window/x11/x11_window.cc
 +++ b/ui/platform_window/x11/x11_window.cc
-@@ -1331,6 +1331,14 @@ void X11Window::OnXWindowBoundsChanged(const gfx::Rect& bounds) {
+@@ -1373,6 +1373,14 @@ void X11Window::OnXWindowBoundsChanged(const gfx::Rect& bounds) {
    platform_window_delegate_->OnBoundsChanged(bounds);
  }
  
@@ -136,7 +136,7 @@ index b8389ec9f2f6e6a6b411657a58a324aa5cd57925..a667c116d740662dbd0b7f4f3ea68eb9
  void X11Window::OnXWindowCloseRequested() {
    platform_window_delegate_->OnCloseRequest();
  }
-@@ -2040,6 +2048,19 @@ void X11Window::HandleEvent(const x11::Event& xev) {
+@@ -2077,6 +2085,19 @@ void X11Window::HandleEvent(const x11::Event& xev) {
                                      expose->height);
      OnXWindowDamageEvent(damage_rect_in_pixels);
    } else if (auto* focus = xev.As<x11::FocusEvent>()) {
@@ -156,7 +156,7 @@ index b8389ec9f2f6e6a6b411657a58a324aa5cd57925..a667c116d740662dbd0b7f4f3ea68eb9
      OnFocusEvent(focus->opcode == x11::FocusEvent::In, focus->mode,
                   focus->detail);
    } else if (auto* configure = xev.As<x11::ConfigureNotifyEvent>()) {
-@@ -2270,6 +2291,13 @@ void X11Window::DelayedResize(const gfx::Rect& bounds_in_pixels) {
+@@ -2323,6 +2344,13 @@ void X11Window::DelayedResize(const gfx::Rect& bounds_in_pixels) {
                     ++current_counter_value_);
    }
  
@@ -171,10 +171,10 @@ index b8389ec9f2f6e6a6b411657a58a324aa5cd57925..a667c116d740662dbd0b7f4f3ea68eb9
    NotifyBoundsChanged(bounds_in_pixels);
  
 diff --git a/ui/platform_window/x11/x11_window.h b/ui/platform_window/x11/x11_window.h
-index d3ac2c56bf88089063ef84b81e975911779d741c..e988c1e590d9cb3cc340862ca3a6500906f272e4 100644
+index 67482087785d995765e056d136d88b2fe7495c42..665ee1c2385c558815d2b3022e4f3f7643b136c9 100644
 --- a/ui/platform_window/x11/x11_window.h
 +++ b/ui/platform_window/x11/x11_window.h
-@@ -143,6 +143,10 @@ class X11_WINDOW_EXPORT X11Window
+@@ -147,6 +147,10 @@ class X11_WINDOW_EXPORT X11Window : public PlatformWindow,
    void OnXWindowStateChanged();
    void OnXWindowDamageEvent(const gfx::Rect& damage_rect);
    void OnXWindowBoundsChanged(const gfx::Rect& size);
@@ -185,7 +185,7 @@ index d3ac2c56bf88089063ef84b81e975911779d741c..e988c1e590d9cb3cc340862ca3a65009
    void OnXWindowCloseRequested();
    void OnXWindowIsActiveChanged(bool active);
    void OnXWindowWorkspaceChanged();
-@@ -481,6 +485,9 @@ class X11_WINDOW_EXPORT X11Window
+@@ -497,6 +501,9 @@ class X11_WINDOW_EXPORT X11Window : public PlatformWindow,
  
    base::CancelableOnceCallback<void(x11::Cursor)> on_cursor_loaded_;
  
@@ -193,13 +193,13 @@ index d3ac2c56bf88089063ef84b81e975911779d741c..e988c1e590d9cb3cc340862ca3a65009
 +  bool is_mouse_button_down_ = false;
 +
    base::WeakPtrFactory<X11Window> weak_ptr_factory_{this};
+ };
  
-   DISALLOW_COPY_AND_ASSIGN(X11Window);
 diff --git a/ui/views/widget/desktop_aura/desktop_native_widget_aura.cc b/ui/views/widget/desktop_aura/desktop_native_widget_aura.cc
-index 841458639c07c60be2b1b8a2c0c5edad717d7215..1cffc4e45955d9125df915e8760e548fd186492f 100644
+index 43cbc4940c2a5b698c5c8b7453cc916a362c5c42..a1091b9fb25a8e01810f9ba1401ca2186f95d415 100644
 --- a/ui/views/widget/desktop_aura/desktop_native_widget_aura.cc
 +++ b/ui/views/widget/desktop_aura/desktop_native_widget_aura.cc
-@@ -1308,6 +1308,21 @@ void DesktopNativeWidgetAura::OnHostCloseRequested(aura::WindowTreeHost* host) {
+@@ -1330,6 +1330,21 @@ void DesktopNativeWidgetAura::OnHostCloseRequested(aura::WindowTreeHost* host) {
    GetWidget()->Close();
  }
  
@@ -222,10 +222,10 @@ index 841458639c07c60be2b1b8a2c0c5edad717d7215..1cffc4e45955d9125df915e8760e548f
    // Don't update the bounds of the child layers when animating closed. If we
    // did it would force a paint, which we don't want. We don't want the paint
 diff --git a/ui/views/widget/desktop_aura/desktop_native_widget_aura.h b/ui/views/widget/desktop_aura/desktop_native_widget_aura.h
-index 80f29aad0f8155dfd00ece48d85336e81e9f63a2..79bf946f4393cb3dc2e98f825190888a1ed02cc4 100644
+index a0cf6b85cc0c5ec0e307c8a077b830f51b1f043b..b6dd1e4b6cc618dde25c7e023dcc573a5db09164 100644
 --- a/ui/views/widget/desktop_aura/desktop_native_widget_aura.h
 +++ b/ui/views/widget/desktop_aura/desktop_native_widget_aura.h
-@@ -259,6 +259,12 @@ class VIEWS_EXPORT DesktopNativeWidgetAura
+@@ -263,6 +263,12 @@ class VIEWS_EXPORT DesktopNativeWidgetAura
    // aura::WindowTreeHostObserver:
    void OnHostCloseRequested(aura::WindowTreeHost* host) override;
    void OnHostResized(aura::WindowTreeHost* host) override;
@@ -255,10 +255,10 @@ index fbfefa1e8e5bebdaab2a3073c9c5618113293755..45e26ea5ff143b57afed40b28be0d1cb
    // workspaces state changes.
    virtual void OnNativeWidgetWorkspaceChanged() = 0;
 diff --git a/ui/views/widget/widget.cc b/ui/views/widget/widget.cc
-index 37047c631afc37b46ed83c79d29050a693285911..a6f809e24408005b6840f9d902518abda526ecf5 100644
+index bbbf0478947b941c30b4086cdca3871ee51e5e04..79f6c6c2c656cb22bf96522f4b67e6ab79c821d4 100644
 --- a/ui/views/widget/widget.cc
 +++ b/ui/views/widget/widget.cc
-@@ -1435,6 +1435,25 @@ void Widget::OnNativeWidgetMove() {
+@@ -1431,6 +1431,25 @@ void Widget::OnNativeWidgetMove() {
      observer.OnWidgetBoundsChanged(this, GetWindowBoundsInScreen());
  }
  
@@ -285,10 +285,10 @@ index 37047c631afc37b46ed83c79d29050a693285911..a6f809e24408005b6840f9d902518abd
    TRACE_EVENT0("ui", "Widget::OnNativeWidgetSizeChanged");
  
 diff --git a/ui/views/widget/widget.h b/ui/views/widget/widget.h
-index 6ab943e4b7319e4af2bc33212b633ce2b24b0f71..88a48c2df09805f2b570ef84127b1ff0330a1ea0 100644
+index 31d6c01a839baf217e63bbbc592920cc88f61e5b..47302aa8190856464d8f3fb57938d2c04f3f5623 100644
 --- a/ui/views/widget/widget.h
 +++ b/ui/views/widget/widget.h
-@@ -1002,6 +1002,12 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
+@@ -1006,6 +1006,12 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
    gfx::Size GetMaximumSize() const override;
    void OnNativeWidgetMove() override;
    void OnNativeWidgetSizeChanged(const gfx::Size& new_size) override;
@@ -302,10 +302,10 @@ index 6ab943e4b7319e4af2bc33212b633ce2b24b0f71..88a48c2df09805f2b570ef84127b1ff0
    void OnNativeWidgetWindowShowStateChanged() override;
    void OnNativeWidgetBeginUserBoundsChange() override;
 diff --git a/ui/views/widget/widget_observer.h b/ui/views/widget/widget_observer.h
-index 32a27d0e03487e1aa9f91ae1ebad9ed646ba1891..adede394fde4f871fcbdb3c16f17c35ba6f41620 100644
+index 3a8cf30252ee732ff9364383855753ef359d3c0b..448337145a99d5a5da7adb3c6c7d528df07ca5cf 100644
 --- a/ui/views/widget/widget_observer.h
 +++ b/ui/views/widget/widget_observer.h
-@@ -48,6 +48,9 @@ class VIEWS_EXPORT WidgetObserver : public base::CheckedObserver {
+@@ -53,6 +53,9 @@ class VIEWS_EXPORT WidgetObserver : public base::CheckedObserver {
    virtual void OnWidgetBoundsChanged(Widget* widget,
                                       const gfx::Rect& new_bounds) {}
  

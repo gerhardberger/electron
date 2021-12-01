@@ -19,10 +19,10 @@ index 0c6087a43896cf1f1529251bb4535273eea13c28..5786e6f6f062ce8a434608244d9fad08
  
  void VideoLayerImpl::DidDraw(viz::ClientResourceProvider* resource_provider) {
 diff --git a/components/viz/common/quads/shared_quad_state.h b/components/viz/common/quads/shared_quad_state.h
-index cd63a69930e6a7b53599e594e5efccb45ee03820..c04f8a6c2719763f40ce98bdc5df423045a27bb1 100644
+index 1771abc73c07eb8070c18c21bd9bc34593d8c268..609b598fea0846534a5ca0c50a5c6fdcd2936399 100644
 --- a/components/viz/common/quads/shared_quad_state.h
 +++ b/components/viz/common/quads/shared_quad_state.h
-@@ -74,6 +74,9 @@ class VIZ_COMMON_EXPORT SharedQuadState {
+@@ -75,6 +75,9 @@ class VIZ_COMMON_EXPORT SharedQuadState {
    absl::optional<size_t> overlay_damage_index;
    // The amount to skew quads in this layer. For experimental de-jelly effect.
    float de_jelly_delta_y = 0.0f;
@@ -59,7 +59,7 @@ index 56425cb5faa91f33fb8910076aade5ffa64ab001..c3aaadc850e4bf78a28af2bd2ca956b1
                .GetType() > gfx::RRectF::Type::kSingle) {
          return CA_LAYER_FAILED_QUAD_ROUNDED_CORNER_NOT_UNIFORM;
 diff --git a/components/viz/service/display/direct_renderer.cc b/components/viz/service/display/direct_renderer.cc
-index b6b55e3ef01500fdaed7325048da80739ef55627..20581788e743daa9c9743b08d217b78c4586389c 100644
+index 4282b18cfd96e8ec2acfcf205d87f063ebb4143d..e011cd2551eb7a73a063d3e7b5b875bfa4655276 100644
 --- a/components/viz/service/display/direct_renderer.cc
 +++ b/components/viz/service/display/direct_renderer.cc
 @@ -213,6 +213,9 @@ void DirectRenderer::DrawFrame(
@@ -90,10 +90,10 @@ index b6b55e3ef01500fdaed7325048da80739ef55627..20581788e743daa9c9743b08d217b78c
        mask_filter_info.rounded_corner_bounds();
  
 diff --git a/components/viz/service/display/direct_renderer.h b/components/viz/service/display/direct_renderer.h
-index 22a9122f444f0dcde98e13963060bafe115bf237..d03b0ece3f588a9ac0cb0edb43c88e1030d59807 100644
+index 9776d420551fb44f8de9009725c4bd5a0ce0fea1..674311ca45315f07630d2d743214bc89f9abacf7 100644
 --- a/components/viz/service/display/direct_renderer.h
 +++ b/components/viz/service/display/direct_renderer.h
-@@ -158,6 +158,8 @@ class VIZ_SERVICE_EXPORT DirectRenderer {
+@@ -162,6 +162,8 @@ class VIZ_SERVICE_EXPORT DirectRenderer {
    // Return the bounding rect of previously drawn delegated ink trail.
    gfx::Rect GetDelegatedInkTrailDamageRect();
  
@@ -103,7 +103,7 @@ index 22a9122f444f0dcde98e13963060bafe115bf237..d03b0ece3f588a9ac0cb0edb43c88e10
    friend class BspWalkActionDrawPolygon;
    friend class SkiaDelegatedInkRendererTest;
 diff --git a/components/viz/service/display/gl_renderer.cc b/components/viz/service/display/gl_renderer.cc
-index 22df5e1728e5dc2879c9b96911f6e7340d455b2a..cb67a4b829251d1a76026ba6eb8d6a7b6c584f47 100644
+index d2d0ebc2dd2dbf5cd31bfa5071d82ce112065303..fd2dc2d38f52668c0ee250342ddd701386c823e5 100644
 --- a/components/viz/service/display/gl_renderer.cc
 +++ b/components/viz/service/display/gl_renderer.cc
 @@ -25,6 +25,7 @@
@@ -114,7 +114,7 @@ index 22df5e1728e5dc2879c9b96911f6e7340d455b2a..cb67a4b829251d1a76026ba6eb8d6a7b
  #include "base/trace_event/trace_event.h"
  #include "build/build_config.h"
  #include "cc/base/math_util.h"
-@@ -1674,7 +1675,9 @@ void GLRenderer::ChooseRPDQProgram(DrawRenderPassDrawQuadParams* params,
+@@ -1671,7 +1672,9 @@ void GLRenderer::ChooseRPDQProgram(DrawRenderPassDrawQuadParams* params,
            params->use_aa ? USE_AA : NO_AA, mask_mode, mask_for_background,
            params->use_color_matrix, tint_gl_composited_content_,
            params->apply_shader_based_rounded_corner &&
@@ -125,7 +125,7 @@ index 22df5e1728e5dc2879c9b96911f6e7340d455b2a..cb67a4b829251d1a76026ba6eb8d6a7b
            PATCH_CS(params->contents_and_bypass_color_space),
            PATCH_CS(target_color_space));
  }
-@@ -2148,7 +2151,9 @@ void GLRenderer::DrawSolidColorQuad(const SolidColorDrawQuad* quad,
+@@ -2145,7 +2148,9 @@ void GLRenderer::DrawSolidColorQuad(const SolidColorDrawQuad* quad,
  
    SetUseProgram(ProgramKey::SolidColor(use_aa ? USE_AA : NO_AA,
                                         tint_gl_composited_content_,
@@ -136,7 +136,7 @@ index 22df5e1728e5dc2879c9b96911f6e7340d455b2a..cb67a4b829251d1a76026ba6eb8d6a7b
                  PATCH_CS(CurrentRenderPassColorSpace()),
                  PATCH_CS(CurrentRenderPassColorSpace()));
  
-@@ -2379,7 +2384,9 @@ void GLRenderer::DrawContentQuadAA(const ContentDrawQuadBase* quad,
+@@ -2376,7 +2381,9 @@ void GLRenderer::DrawContentQuadAA(const ContentDrawQuadBase* quad,
                         quad->is_premultiplied ? PREMULTIPLIED_ALPHA
                                                : NON_PREMULTIPLIED_ALPHA,
                         false, false, tint_gl_composited_content_,
@@ -147,7 +147,7 @@ index 22df5e1728e5dc2879c9b96911f6e7340d455b2a..cb67a4b829251d1a76026ba6eb8d6a7b
        PATCH_CS(quad_resource_lock.color_space()),
        PATCH_CS(CurrentRenderPassColorSpace()));
  
-@@ -2479,7 +2486,9 @@ void GLRenderer::DrawContentQuadNoAA(const ContentDrawQuadBase* quad,
+@@ -2476,7 +2483,9 @@ void GLRenderer::DrawContentQuadNoAA(const ContentDrawQuadBase* quad,
                                                : NON_PREMULTIPLIED_ALPHA,
                         !quad->ShouldDrawWithBlending(), has_tex_clamp_rect,
                         tint_gl_composited_content_,
@@ -158,7 +158,7 @@ index 22df5e1728e5dc2879c9b96911f6e7340d455b2a..cb67a4b829251d1a76026ba6eb8d6a7b
        PATCH_CS(quad_resource_lock.color_space()),
        PATCH_CS(CurrentRenderPassColorSpace()));
  
-@@ -2635,7 +2644,9 @@ void GLRenderer::DrawYUVVideoQuad(const YUVVideoDrawQuad* quad,
+@@ -2632,7 +2641,9 @@ void GLRenderer::DrawYUVVideoQuad(const YUVVideoDrawQuad* quad,
    SetUseProgram(
        ProgramKey::YUVVideo(tex_coord_precision, sampler, alpha_texture_mode,
                             uv_texture_mode, tint_gl_composited_content_,
@@ -169,7 +169,7 @@ index 22df5e1728e5dc2879c9b96911f6e7340d455b2a..cb67a4b829251d1a76026ba6eb8d6a7b
        src_color_space, dst_color_space, /*adjust_src_white_level=*/true);
  
    if (current_program_->tint_color_matrix_location() != -1) {
-@@ -2661,6 +2672,33 @@ void GLRenderer::DrawYUVVideoQuad(const YUVVideoDrawQuad* quad,
+@@ -2658,6 +2669,33 @@ void GLRenderer::DrawYUVVideoQuad(const YUVVideoDrawQuad* quad,
                                1.0f / quad->uv_tex_size.height());
    }
  
@@ -203,7 +203,7 @@ index 22df5e1728e5dc2879c9b96911f6e7340d455b2a..cb67a4b829251d1a76026ba6eb8d6a7b
    float ya_vertex_tex_translate_x =
        quad->ya_tex_coord_rect.x() * ya_tex_scale.width();
    float ya_vertex_tex_translate_y =
-@@ -2772,10 +2810,55 @@ void GLRenderer::DrawStreamVideoQuad(const StreamVideoDrawQuad* quad,
+@@ -2769,10 +2807,55 @@ void GLRenderer::DrawStreamVideoQuad(const StreamVideoDrawQuad* quad,
                                                     quad->resource_id());
  
    SetUseProgram(ProgramKey::VideoStream(tex_coord_precision,
@@ -260,7 +260,7 @@ index 22df5e1728e5dc2879c9b96911f6e7340d455b2a..cb67a4b829251d1a76026ba6eb8d6a7b
    DCHECK_EQ(GL_TEXTURE0, GetActiveTextureUnit(gl_));
    gl_->BindTexture(GL_TEXTURE_EXTERNAL_OES, lock.texture_id());
  
-@@ -2904,6 +2987,52 @@ void GLRenderer::FlushTextureQuadCache(BoundGeometry flush_binding) {
+@@ -2901,6 +2984,52 @@ void GLRenderer::FlushTextureQuadCache(BoundGeometry flush_binding) {
    DCHECK_LE(draw_cache_.matrix_data.size(),
              static_cast<size_t>(std::numeric_limits<int>::max()) / 6u);
  
@@ -313,7 +313,7 @@ index 22df5e1728e5dc2879c9b96911f6e7340d455b2a..cb67a4b829251d1a76026ba6eb8d6a7b
    // Draw the quads!
    gl_->DrawElements(GL_TRIANGLES,
                      6 * static_cast<int>(draw_cache_.matrix_data.size()),
-@@ -2956,7 +3085,10 @@ void GLRenderer::EnqueueTextureQuad(const TextureDrawQuad* quad,
+@@ -2953,7 +3082,10 @@ void GLRenderer::EnqueueTextureQuad(const TextureDrawQuad* quad,
        tex_coord_precision, sampler,
        quad->premultiplied_alpha ? PREMULTIPLIED_ALPHA : NON_PREMULTIPLIED_ALPHA,
        quad->background_color != SK_ColorTRANSPARENT, need_tex_clamp_rect,
@@ -325,7 +325,7 @@ index 22df5e1728e5dc2879c9b96911f6e7340d455b2a..cb67a4b829251d1a76026ba6eb8d6a7b
    ResourceId resource_id = quad->resource_id();
  
    size_t max_quads = StaticGeometryBinding::NUM_QUADS;
-@@ -2967,6 +3099,8 @@ void GLRenderer::EnqueueTextureQuad(const TextureDrawQuad* quad,
+@@ -2964,6 +3096,8 @@ void GLRenderer::EnqueueTextureQuad(const TextureDrawQuad* quad,
        draw_cache_.background_color != quad->background_color ||
        draw_cache_.mask_filter_info !=
            quad->shared_quad_state->mask_filter_info ||
@@ -334,7 +334,7 @@ index 22df5e1728e5dc2879c9b96911f6e7340d455b2a..cb67a4b829251d1a76026ba6eb8d6a7b
        draw_cache_.matrix_data.size() >= max_quads ||
        draw_cache_.is_video_frame != quad->is_video_frame) {
      FlushTextureQuadCache(SHARED_BINDING);
-@@ -2977,6 +3111,8 @@ void GLRenderer::EnqueueTextureQuad(const TextureDrawQuad* quad,
+@@ -2974,6 +3108,8 @@ void GLRenderer::EnqueueTextureQuad(const TextureDrawQuad* quad,
      draw_cache_.nearest_neighbor = quad->nearest_neighbor;
      draw_cache_.background_color = quad->background_color;
      draw_cache_.mask_filter_info = quad->shared_quad_state->mask_filter_info;
@@ -343,7 +343,7 @@ index 22df5e1728e5dc2879c9b96911f6e7340d455b2a..cb67a4b829251d1a76026ba6eb8d6a7b
      draw_cache_.is_video_frame = quad->is_video_frame;
    }
  
-@@ -3349,10 +3485,10 @@ void GLRenderer::SetShaderRoundedCorner(
+@@ -3341,10 +3477,10 @@ void GLRenderer::SetShaderRoundedCorner(
                   rect.y(), rect.width(), rect.height());
    gl_->Uniform4f(
        current_program_->rounded_corner_radius_location(),
@@ -359,10 +359,10 @@ index 22df5e1728e5dc2879c9b96911f6e7340d455b2a..cb67a4b829251d1a76026ba6eb8d6a7b
  
  void GLRenderer::DrawQuadGeometryClippedByQuadF(
 diff --git a/components/viz/service/display/gl_renderer_draw_cache.h b/components/viz/service/display/gl_renderer_draw_cache.h
-index 6186975bb8235bfcc044f6b49108668b7e13de6c..89dde6c5123b53c7f73bfa83f22f1c5170f64e80 100644
+index c1bd594f0c8820b90d2a4b227bd5d93a83bee75d..d742d990a8738b7a022d817fe68801daa25a1dc8 100644
 --- a/components/viz/service/display/gl_renderer_draw_cache.h
 +++ b/components/viz/service/display/gl_renderer_draw_cache.h
-@@ -41,6 +41,8 @@ struct TexturedQuadDrawCache {
+@@ -45,6 +45,8 @@ struct TexturedQuadDrawCache {
    bool nearest_neighbor = false;
    SkColor background_color = 0;
    gfx::MaskFilterInfo mask_filter_info;
@@ -504,10 +504,10 @@ index 488151c358783eb0e8fdee57737c5efb73e4660e..8686e2f998dcdf5952c4876623e4376c
  }
  
 diff --git a/components/viz/service/display/program_binding.h b/components/viz/service/display/program_binding.h
-index 04b05dd3e84adb3c8c41b8d12a4c66636ee9ac17..ed1d2163fef918eb71470c784e3cbc197363a462 100644
+index 11c7b55461827cb8544d83f88b76b2296238c7cb..1829d22670b7b88726d2a6212259fd39631fa6ee 100644
 --- a/components/viz/service/display/program_binding.h
 +++ b/components/viz/service/display/program_binding.h
-@@ -79,7 +79,9 @@ class VIZ_SERVICE_EXPORT ProgramKey {
+@@ -80,7 +80,9 @@ class VIZ_SERVICE_EXPORT ProgramKey {
    static ProgramKey DebugBorder();
    static ProgramKey SolidColor(AAMode aa_mode,
                                 bool tint_color,
@@ -518,7 +518,7 @@ index 04b05dd3e84adb3c8c41b8d12a4c66636ee9ac17..ed1d2163fef918eb71470c784e3cbc19
    static ProgramKey Tile(TexCoordPrecision precision,
                           SamplerType sampler,
                           AAMode aa_mode,
-@@ -87,14 +89,19 @@ class VIZ_SERVICE_EXPORT ProgramKey {
+@@ -88,14 +90,19 @@ class VIZ_SERVICE_EXPORT ProgramKey {
                           bool is_opaque,
                           bool has_tex_clamp_rect,
                           bool tint_color,
@@ -540,7 +540,7 @@ index 04b05dd3e84adb3c8c41b8d12a4c66636ee9ac17..ed1d2163fef918eb71470c784e3cbc19
  
    // TODO(ccameron): Merge |mask_for_background| into MaskMode.
    static ProgramKey RenderPass(TexCoordPrecision precision,
-@@ -105,15 +112,21 @@ class VIZ_SERVICE_EXPORT ProgramKey {
+@@ -106,15 +113,21 @@ class VIZ_SERVICE_EXPORT ProgramKey {
                                 bool mask_for_background,
                                 bool has_color_matrix,
                                 bool tint_color,
@@ -565,7 +565,7 @@ index 04b05dd3e84adb3c8c41b8d12a4c66636ee9ac17..ed1d2163fef918eb71470c784e3cbc19
  
    bool operator==(const ProgramKey& other) const;
    bool operator!=(const ProgramKey& other) const;
-@@ -157,6 +170,9 @@ class VIZ_SERVICE_EXPORT ProgramKey {
+@@ -158,6 +171,9 @@ class VIZ_SERVICE_EXPORT ProgramKey {
    bool has_output_color_matrix_ = false;
    bool has_tint_color_matrix_ = false;
    bool has_rounded_corner_ = false;
@@ -575,7 +575,7 @@ index 04b05dd3e84adb3c8c41b8d12a4c66636ee9ac17..ed1d2163fef918eb71470c784e3cbc19
  };
  
  struct ProgramKeyHash {
-@@ -178,7 +194,9 @@ struct ProgramKeyHash {
+@@ -179,7 +195,9 @@ struct ProgramKeyHash {
             (static_cast<size_t>(key.has_tex_clamp_rect_) << 28) ^
             (static_cast<size_t>(key.has_output_color_matrix_) << 29) ^
             (static_cast<size_t>(key.has_tint_color_matrix_) << 30) ^
@@ -586,7 +586,7 @@ index 04b05dd3e84adb3c8c41b8d12a4c66636ee9ac17..ed1d2163fef918eb71470c784e3cbc19
    }
  };
  
-@@ -189,6 +207,8 @@ class VIZ_SERVICE_EXPORT Program : public ProgramBindingBase {
+@@ -193,6 +211,8 @@ class VIZ_SERVICE_EXPORT Program : public ProgramBindingBase {
    void Initialize(ContextProvider* context_provider, const ProgramKey& key) {
      // Set parameters that are common to all sub-classes.
      vertex_shader_.aa_mode_ = key.aa_mode_;
@@ -595,7 +595,7 @@ index 04b05dd3e84adb3c8c41b8d12a4c66636ee9ac17..ed1d2163fef918eb71470c784e3cbc19
      fragment_shader_.aa_mode_ = key.aa_mode_;
      fragment_shader_.blend_mode_ = key.blend_mode_;
      fragment_shader_.tex_coord_precision_ = key.precision_;
-@@ -201,6 +221,9 @@ class VIZ_SERVICE_EXPORT Program : public ProgramBindingBase {
+@@ -205,6 +225,9 @@ class VIZ_SERVICE_EXPORT Program : public ProgramBindingBase {
      fragment_shader_.has_output_color_matrix_ = key.has_output_color_matrix_;
      fragment_shader_.has_tint_color_matrix_ = key.has_tint_color_matrix_;
      fragment_shader_.has_rounded_corner_ = key.has_rounded_corner_;
@@ -605,7 +605,7 @@ index 04b05dd3e84adb3c8c41b8d12a4c66636ee9ac17..ed1d2163fef918eb71470c784e3cbc19
  
      switch (key.type_) {
        case PROGRAM_TYPE_DEBUG_BORDER:
-@@ -331,6 +354,21 @@ class VIZ_SERVICE_EXPORT Program : public ProgramBindingBase {
+@@ -335,6 +358,21 @@ class VIZ_SERVICE_EXPORT Program : public ProgramBindingBase {
    int rounded_corner_radius_location() const {
      return fragment_shader_.rounded_corner_radius_location_;
    }
@@ -627,7 +627,7 @@ index 04b05dd3e84adb3c8c41b8d12a4c66636ee9ac17..ed1d2163fef918eb71470c784e3cbc19
  
    const gfx::ColorTransform* color_transform_for_testing() const {
      return fragment_shader_.color_transform_;
-@@ -395,6 +433,7 @@ class VIZ_SERVICE_EXPORT Program : public ProgramBindingBase {
+@@ -399,6 +437,7 @@ class VIZ_SERVICE_EXPORT Program : public ProgramBindingBase {
      fragment_shader_.has_varying_alpha_ = true;
      fragment_shader_.has_background_color_ = key.has_background_color_;
      fragment_shader_.has_tex_clamp_rect_ = key.has_tex_clamp_rect_;
@@ -635,7 +635,7 @@ index 04b05dd3e84adb3c8c41b8d12a4c66636ee9ac17..ed1d2163fef918eb71470c784e3cbc19
    }
  
    void InitializeRenderPassProgram(const ProgramKey& key) {
-@@ -436,6 +475,7 @@ class VIZ_SERVICE_EXPORT Program : public ProgramBindingBase {
+@@ -440,6 +479,7 @@ class VIZ_SERVICE_EXPORT Program : public ProgramBindingBase {
      fragment_shader_.has_uniform_alpha_ = true;
      fragment_shader_.yuv_alpha_texture_mode_ = key.yuv_alpha_texture_mode_;
      fragment_shader_.uv_texture_mode_ = key.uv_texture_mode_;
@@ -1066,7 +1066,7 @@ index 20b599020ddd41a342e088f93cff5a5f1491225d..5c2bf6cae07a100a18db2dc631d5316d
      SRC("gl_FragColor = ApplyRoundedCorner(gl_FragColor);");
  
 diff --git a/components/viz/service/display/shader.h b/components/viz/service/display/shader.h
-index f64ae80494614b0dc8b2ff7ccb8d32730b6e689b..a7ec1d92a26f1e4a44e1bfe6aa339c54625f377b 100644
+index 2f668ec2a26810052b1044131089dd21d5e13d7b..133df2b6123bca34bddd98bdba026e7eb9c988ca 100644
 --- a/components/viz/service/display/shader.h
 +++ b/components/viz/service/display/shader.h
 @@ -209,6 +209,12 @@ class VIZ_SERVICE_EXPORT VertexShader {
@@ -1082,7 +1082,7 @@ index f64ae80494614b0dc8b2ff7ccb8d32730b6e689b..a7ec1d92a26f1e4a44e1bfe6aa339c54
  };
  
  class VIZ_SERVICE_EXPORT FragmentShader {
-@@ -303,6 +309,17 @@ class VIZ_SERVICE_EXPORT FragmentShader {
+@@ -306,6 +312,17 @@ class VIZ_SERVICE_EXPORT FragmentShader {
    int rounded_corner_rect_location_ = -1;
    int rounded_corner_radius_location_ = -1;
  
@@ -1101,10 +1101,10 @@ index f64ae80494614b0dc8b2ff7ccb8d32730b6e689b..a7ec1d92a26f1e4a44e1bfe6aa339c54
    int resource_multiplier_location_ = -1;
    int resource_offset_location_ = -1;
 diff --git a/components/viz/service/display/skia_renderer.cc b/components/viz/service/display/skia_renderer.cc
-index 67d8f6b28a4edee1764660ede8eb48581c2b897e..b36c01d89583f5aeff5c8efddf24ab1934b4f8d1 100644
+index 20a49431f8f3a3b00441f6adc03fe80db6c5ae77..f5b8fd00c816230e4073e25f325f6fe053f86670 100644
 --- a/components/viz/service/display/skia_renderer.cc
 +++ b/components/viz/service/display/skia_renderer.cc
-@@ -84,6 +84,241 @@ namespace viz {
+@@ -80,6 +80,241 @@ namespace viz {
  
  namespace {
  
@@ -1346,7 +1346,7 @@ index 67d8f6b28a4edee1764660ede8eb48581c2b897e..b36c01d89583f5aeff5c8efddf24ab19
  // Smallest unit that impacts anti-aliasing output. We use this to determine
  // when an exterior edge (with AA) has been clipped (no AA). The specific value
  // was chosen to match that used by gl_renderer.
-@@ -1064,8 +1299,20 @@ void SkiaRenderer::PrepareCanvas(
+@@ -1071,8 +1306,20 @@ void SkiaRenderer::PrepareCanvas(
      current_canvas_->clipRect(gfx::RectToSkRect(*scissor_rect));
    }
  
@@ -1369,7 +1369,7 @@ index 67d8f6b28a4edee1764660ede8eb48581c2b897e..b36c01d89583f5aeff5c8efddf24ab19
  
    if (cdt) {
      SkMatrix m;
-@@ -1952,8 +2199,7 @@ void SkiaRenderer::DrawTextureQuad(const TextureDrawQuad* quad,
+@@ -2006,8 +2253,7 @@ void SkiaRenderer::DrawTextureQuad(const TextureDrawQuad* quad,
                                     DrawQuadParams* params) {
    const gfx::ColorSpace& src_color_space =
        resource_provider()->GetColorSpace(quad->resource_id());
@@ -1379,7 +1379,7 @@ index 67d8f6b28a4edee1764660ede8eb48581c2b897e..b36c01d89583f5aeff5c8efddf24ab19
  
    ScopedSkImageBuilder builder(
        this, quad->resource_id(), /*maybe_concurrent_reads=*/true,
-@@ -2077,7 +2323,13 @@ void SkiaRenderer::DrawTextureQuad(const TextureDrawQuad* quad,
+@@ -2131,7 +2377,13 @@ void SkiaRenderer::DrawTextureQuad(const TextureDrawQuad* quad,
      paint.setColorFilter(std::move(cf));
    }
  
@@ -1394,7 +1394,7 @@ index 67d8f6b28a4edee1764660ede8eb48581c2b897e..b36c01d89583f5aeff5c8efddf24ab19
      // Skia won't perform color conversion.
      const gfx::ColorSpace dst_color_space = CurrentRenderPassColorSpace();
      DCHECK(SkColorSpace::Equals(image->colorSpace(),
-@@ -2096,6 +2348,74 @@ void SkiaRenderer::DrawTextureQuad(const TextureDrawQuad* quad,
+@@ -2150,6 +2402,74 @@ void SkiaRenderer::DrawTextureQuad(const TextureDrawQuad* quad,
    DrawSingleImage(image, valid_texel_bounds, rpdq_params, &paint, params);
  }
  
@@ -1469,7 +1469,7 @@ index 67d8f6b28a4edee1764660ede8eb48581c2b897e..b36c01d89583f5aeff5c8efddf24ab19
  void SkiaRenderer::DrawTileDrawQuad(const TileDrawQuad* quad,
                                      const DrawRPDQParams* rpdq_params,
                                      DrawQuadParams* params) {
-@@ -2201,6 +2521,10 @@ void SkiaRenderer::DrawYUVVideoQuad(const YUVVideoDrawQuad* quad,
+@@ -2263,6 +2583,10 @@ void SkiaRenderer::DrawYUVVideoQuad(const YUVVideoDrawQuad* quad,
    // entire YUV image.
    SkPaint paint = params->paint(color_filter);
  
@@ -1481,21 +1481,21 @@ index 67d8f6b28a4edee1764660ede8eb48581c2b897e..b36c01d89583f5aeff5c8efddf24ab19
  }
  
 diff --git a/components/viz/service/display/skia_renderer.h b/components/viz/service/display/skia_renderer.h
-index b94ffe0bae845928db4f3dc05d71fef72e4b3523..7a6182ccac5d1a2d84bb410390989d2163f72fdb 100644
+index 78b9e6f93340098ce8db9e637b3f65abbdc675f2..c8128b89efd53710fec4c31dd3d51f2aafc140d8 100644
 --- a/components/viz/service/display/skia_renderer.h
 +++ b/components/viz/service/display/skia_renderer.h
-@@ -362,6 +362,9 @@ class VIZ_SERVICE_EXPORT SkiaRenderer : public DirectRenderer {
+@@ -371,6 +371,9 @@ class VIZ_SERVICE_EXPORT SkiaRenderer : public DirectRenderer {
+ 
    bool UsingSkiaForDelegatedInk() const;
    uint32_t debug_tint_modulate_count_ = 0;
- 
++
 +  void SetAroundFilter(SkPaint& paint, const SkImage* image, int filter_id, gfx::RectF bounding_box, gfx::RectF rect, bool is_yuv, gfx::RectF clip_bounds, DrawQuadParams* params);
 +  sk_sp<SkRuntimeEffect> around_shader_cache_;
-+
-   DISALLOW_COPY_AND_ASSIGN(SkiaRenderer);
  };
  
+ }  // namespace viz
 diff --git a/components/viz/service/display/software_renderer.cc b/components/viz/service/display/software_renderer.cc
-index 0ef8e12fe088d27c6f9aadd74bc9c17b4fc5934c..48c4049910bca8df510649f041906a3f3291b637 100644
+index 84d11d3bd40a8a29cb0309ca6d35863bcae2e410..f1b72579f65f184a39088e92bc02d8da6bb11270 100644
 --- a/components/viz/service/display/software_renderer.cc
 +++ b/components/viz/service/display/software_renderer.cc
 @@ -39,6 +39,7 @@
@@ -1798,7 +1798,7 @@ index 0ef8e12fe088d27c6f9aadd74bc9c17b4fc5934c..48c4049910bca8df510649f041906a3f
    // |resource_provider_| can be NULL in resourceless software draws, which
    // should never produce tile quads in the first place.
 diff --git a/components/viz/service/display/software_renderer.h b/components/viz/service/display/software_renderer.h
-index 3e123cda7e4324739bec96e14b00da5fc4ecf1a3..cdedec86dc262e040a61777938ff7174700d98cf 100644
+index 557e52070d50b2c8aad0db0a79bc927ae710efee..221efc680526a8e47fd06011b4dcc917e7d67b54 100644
 --- a/components/viz/service/display/software_renderer.h
 +++ b/components/viz/service/display/software_renderer.h
 @@ -15,6 +15,8 @@
@@ -1810,21 +1810,21 @@ index 3e123cda7e4324739bec96e14b00da5fc4ecf1a3..cdedec86dc262e040a61777938ff7174
  namespace viz {
  class DebugBorderDrawQuad;
  class OutputSurface;
-@@ -126,6 +128,9 @@ class VIZ_SERVICE_EXPORT SoftwareRenderer : public DirectRenderer {
+@@ -128,6 +130,9 @@ class VIZ_SERVICE_EXPORT SoftwareRenderer : public DirectRenderer {
+   SkPaint current_paint_;
    SkSamplingOptions current_sampling_;
    std::unique_ptr<SkCanvas> current_framebuffer_canvas_;
- 
++
 +  void SetAroundFilter(SkPaint& paint, const SkImage* image, int filter_id, gfx::RectF bounding_box, gfx::RectF rect);
 +  sk_sp<SkRuntimeEffect> around_shader_cache_;
-+
-   DISALLOW_COPY_AND_ASSIGN(SoftwareRenderer);
  };
  
+ }  // namespace viz
 diff --git a/components/viz/service/display/surface_aggregator.cc b/components/viz/service/display/surface_aggregator.cc
-index 9b2cf238191075c870b995c70da9ebfbff37783c..397a4ff4a08f83ba26ce04a19d839bb08030cae0 100644
+index 1bfdef68cdebe6876e347f2a6cf11364cc1384ff..ee01a3077a4c84ba72352400b97ec87d253f130b 100644
 --- a/components/viz/service/display/surface_aggregator.cc
 +++ b/components/viz/service/display/surface_aggregator.cc
-@@ -202,7 +202,9 @@ SharedQuadState* CopyAndScaleSharedQuadState(
+@@ -203,7 +203,9 @@ SharedQuadState* CopyAndScaleSharedQuadState(
        source_sqs->are_contents_opaque, source_sqs->opacity,
        source_sqs->blend_mode, source_sqs->sorting_context_id);
    shared_quad_state->is_fast_rounded_corner =
@@ -1885,10 +1885,10 @@ index d2ce07b10ac576de645046b702d93db4378d0020..01974338ff2939ce1323438d7fd8f610
  
  MEDIA_EXPORT bool operator==(const struct VideoTransformation& first,
 diff --git a/media/renderers/video_resource_updater.cc b/media/renderers/video_resource_updater.cc
-index 80cb1a4575df6e69aa62718d69b48257d100167a..9e23f27c17ac38cd1fc20bde2f5ded1ef5bbfe8a 100644
+index 8270054bbdf43849474b78b8d8f7f470fe8e06e5..50a996ad1ff2eaa426a6ffdf749c603c3ee4783d 100644
 --- a/media/renderers/video_resource_updater.cc
 +++ b/media/renderers/video_resource_updater.cc
-@@ -553,7 +553,9 @@ void VideoResourceUpdater::AppendQuads(
+@@ -560,7 +560,9 @@ void VideoResourceUpdater::AppendQuads(
      absl::optional<gfx::Rect> clip_rect,
      bool contents_opaque,
      float draw_opacity,
@@ -1899,7 +1899,7 @@ index 80cb1a4575df6e69aa62718d69b48257d100167a..9e23f27c17ac38cd1fc20bde2f5ded1e
    DCHECK(frame.get());
  
    viz::SharedQuadState* shared_quad_state =
-@@ -562,6 +564,9 @@ void VideoResourceUpdater::AppendQuads(
+@@ -569,6 +571,9 @@ void VideoResourceUpdater::AppendQuads(
        transform, quad_rect, visible_quad_rect, mask_filter_info, clip_rect,
        contents_opaque, draw_opacity, SkBlendMode::kSrcOver, sorting_context_id);
  
@@ -1910,7 +1910,7 @@ index 80cb1a4575df6e69aa62718d69b48257d100167a..9e23f27c17ac38cd1fc20bde2f5ded1e
  
    gfx::Rect visible_rect = frame->visible_rect();
 diff --git a/media/renderers/video_resource_updater.h b/media/renderers/video_resource_updater.h
-index d2ad861f59a84ad215f27bb141e5b2902d08c701..f6ba9f9707427a03b7cf6b0bb09c88ffc61f24bc 100644
+index 37d9297d1e79247c5829f2515923bb8a29121b75..7af04e697d956e1bc6415a1bae95d18f98b5d6bf 100644
 --- a/media/renderers/video_resource_updater.h
 +++ b/media/renderers/video_resource_updater.h
 @@ -24,6 +24,7 @@
@@ -1921,7 +1921,7 @@ index d2ad861f59a84ad215f27bb141e5b2902d08c701..f6ba9f9707427a03b7cf6b0bb09c88ff
  #include "ui/gfx/geometry/size.h"
  
  namespace gfx {
-@@ -126,7 +127,9 @@ class MEDIA_EXPORT VideoResourceUpdater
+@@ -129,7 +130,9 @@ class MEDIA_EXPORT VideoResourceUpdater
                     absl::optional<gfx::Rect> clip_rect,
                     bool context_opaque,
                     float draw_opacity,
@@ -2012,7 +2012,7 @@ index 7d99b7f4aef7a2fb1c2bb80b117b4b265d4d1109..ad885230a88cf78603bbb5b5123d03fb
    // Playback controls.
    void Play() override;
 diff --git a/third_party/blink/public/platform/web_media_player.h b/third_party/blink/public/platform/web_media_player.h
-index 306f13ae8af00091ce12ef1175443cf105e11b17..62e5ff1e4ca2518d962627cf604df0ed1a563668 100644
+index 6dd77aa969ff5625fefe39fd71d7af81fc9cb3eb..f6f7f7b18479b86bfb7e4dcfa1bdc6620b20dc02 100644
 --- a/third_party/blink/public/platform/web_media_player.h
 +++ b/third_party/blink/public/platform/web_media_player.h
 @@ -44,6 +44,7 @@
@@ -2067,10 +2067,10 @@ index 53782ddd9d74d3fb59b400dedbffd53daefb9cee..7d1316060b089e4c70eecea0ceb551a5
    friend class WebMediaPlayerMSTest;
  
 diff --git a/third_party/blink/renderer/core/html/media/html_media_element.cc b/third_party/blink/renderer/core/html/media/html_media_element.cc
-index cfcb19002a16a650b7af41fe882efee418f48aa0..753776fadb5077dad83fced9697b6fc973ca815f 100644
+index 9eb89c135303510a98f2456bc2ee1bb68d0f9333..68caf693f3a1ce7cc634cd10ad8b67c1437dd730 100644
 --- a/third_party/blink/renderer/core/html/media/html_media_element.cc
 +++ b/third_party/blink/renderer/core/html/media/html_media_element.cc
-@@ -702,6 +702,57 @@ bool HTMLMediaElement::IsMouseFocusable() const {
+@@ -708,6 +708,57 @@ bool HTMLMediaElement::IsMouseFocusable() const {
  void HTMLMediaElement::ParseAttribute(
      const AttributeModificationParams& params) {
    const QualifiedName& name = params.name;
@@ -2128,7 +2128,7 @@ index cfcb19002a16a650b7af41fe882efee418f48aa0..753776fadb5077dad83fced9697b6fc9
    if (name == html_names::kSrcAttr) {
      DVLOG(2) << "parseAttribute(" << *this
               << ", kSrcAttr, old=" << params.old_value
-@@ -1424,7 +1475,8 @@ void HTMLMediaElement::StartPlayerLoad() {
+@@ -1430,7 +1481,8 @@ void HTMLMediaElement::StartPlayerLoad() {
    probe::IsCacheDisabled(GetDocument().GetExecutionContext(),
                           &is_cache_disabled);
    auto load_timing = web_media_player_->Load(GetLoadType(), source, CorsMode(),
@@ -2139,7 +2139,7 @@ index cfcb19002a16a650b7af41fe882efee418f48aa0..753776fadb5077dad83fced9697b6fc9
      // Deferred media loading is not part of the spec, but intuition is that
      // this should not hold up the Window's "load" event (similar to user
 diff --git a/third_party/blink/renderer/core/html/media/html_media_element.h b/third_party/blink/renderer/core/html/media/html_media_element.h
-index 4af2fe7c1c04b23a41bca1166ce7b2306483a63d..1d3ce356f7e978436f63a4a85ef326069b029f31 100644
+index a8899d899acf620a7737abe8bcfd0b84f44ebef1..b5e29f87fe7ecf1ba4ad41ab3269980033ab2eb1 100644
 --- a/third_party/blink/renderer/core/html/media/html_media_element.h
 +++ b/third_party/blink/renderer/core/html/media/html_media_element.h
 @@ -755,6 +755,12 @@ class CORE_EXPORT HTMLMediaElement
@@ -2156,10 +2156,10 @@ index 4af2fe7c1c04b23a41bca1166ce7b2306483a63d..1d3ce356f7e978436f63a4a85ef32606
    // controls.
    absl::optional<bool> user_wants_controls_visible_;
 diff --git a/third_party/blink/renderer/modules/mediastream/webmediaplayer_ms.cc b/third_party/blink/renderer/modules/mediastream/webmediaplayer_ms.cc
-index f1a5b76c1d0f3de445b3c796749795487d664def..49e5fdef36ba4bef9b604ae8524e3f8a4092ec28 100644
+index c5f77ac7a9be9967a1966754adbb130c0396b800..96a5f6cc1318cbe2623a8ea6a5f74ffff57c0808 100644
 --- a/third_party/blink/renderer/modules/mediastream/webmediaplayer_ms.cc
 +++ b/third_party/blink/renderer/modules/mediastream/webmediaplayer_ms.cc
-@@ -409,11 +409,32 @@ void WebMediaPlayerMS::OnAudioRenderErrorCallback() {
+@@ -431,11 +431,32 @@ void WebMediaPlayerMS::OnAudioRenderErrorCallback() {
    }
  }
  
@@ -2193,7 +2193,7 @@ index f1a5b76c1d0f3de445b3c796749795487d664def..49e5fdef36ba4bef9b604ae8524e3f8a
    DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
    SendLogMessage(String::Format("%s({load_type=%s})", __func__,
                                  LoadTypeToString(load_type)));
-@@ -431,6 +452,10 @@ WebMediaPlayer::LoadTiming WebMediaPlayerMS::Load(
+@@ -453,6 +474,10 @@ WebMediaPlayer::LoadTiming WebMediaPlayerMS::Load(
        compositor_task_runner_, io_task_runner_, web_stream_,
        std::move(submitter_), surface_layer_mode_, weak_this_);
  
@@ -2205,10 +2205,10 @@ index f1a5b76c1d0f3de445b3c796749795487d664def..49e5fdef36ba4bef9b604ae8524e3f8a
    // is created. In that case, we suspend the request, and wait until now to
    // reiniate it.
 diff --git a/third_party/blink/renderer/modules/mediastream/webmediaplayer_ms_compositor.cc b/third_party/blink/renderer/modules/mediastream/webmediaplayer_ms_compositor.cc
-index 8f9b05c279d6123f682809e2de5da9103af76aa3..59ec4b0504a38226956d2273e45200e699ed7d8f 100644
+index 15d4d34b111f0db13634538dc6b8676ba90c86fc..de76e25d42bbf77fa8ae4511cbe9b0df99065e0f 100644
 --- a/third_party/blink/renderer/modules/mediastream/webmediaplayer_ms_compositor.cc
 +++ b/third_party/blink/renderer/modules/mediastream/webmediaplayer_ms_compositor.cc
-@@ -626,6 +626,10 @@ void WebMediaPlayerMSCompositor::SetCurrentFrame(
+@@ -638,6 +638,10 @@ void WebMediaPlayerMSCompositor::SetCurrentFrame(
    absl::optional<bool> new_opacity;
    new_opacity = media::IsOpaque(frame->format());
  
@@ -2220,10 +2220,10 @@ index 8f9b05c279d6123f682809e2de5da9103af76aa3..59ec4b0504a38226956d2273e45200e6
      // We have a current frame, so determine what has changed.
      is_first_frame = false;
 diff --git a/third_party/blink/renderer/modules/mediastream/webmediaplayer_ms_compositor.h b/third_party/blink/renderer/modules/mediastream/webmediaplayer_ms_compositor.h
-index 5267862f11b3de3c234980ae81955c4336e44526..0b6fc3ce97092b0860f1581e0de2376fb044869d 100644
+index 3a8cdef1cfb01ebb9d1f0cff5eb8a5996303a480..980216b0ec929c1fdd1e4984033ca3143c5a9c54 100644
 --- a/third_party/blink/renderer/modules/mediastream/webmediaplayer_ms_compositor.h
 +++ b/third_party/blink/renderer/modules/mediastream/webmediaplayer_ms_compositor.h
-@@ -135,6 +135,11 @@ class MODULES_EXPORT WebMediaPlayerMSCompositor
+@@ -139,6 +139,11 @@ class MODULES_EXPORT WebMediaPlayerMSCompositor
    // requestVideoFrameCallback() API when the video is offscreen.
    void SetForceBeginFrames(bool enable);
  
@@ -2358,10 +2358,10 @@ index efaa452d2722ef18c67e7025b97f879b4520c74e..5e48e8d5fb21a07c3c6fa2100e8eef9d
  
  }  // namespace blink
 diff --git a/third_party/blink/renderer/platform/graphics/video_frame_submitter.cc b/third_party/blink/renderer/platform/graphics/video_frame_submitter.cc
-index c7424e0dc518feb8710e0f454ff22504b7d3a59c..dcd7fd48138c2936815009077bcce000265ab7e9 100644
+index 2a337e2aea48bb91b78285a700adb16d307d961a..ff087c5cc2d8ae226a6145356f083e45aaf7d0ab 100644
 --- a/third_party/blink/renderer/platform/graphics/video_frame_submitter.cc
 +++ b/third_party/blink/renderer/platform/graphics/video_frame_submitter.cc
-@@ -586,6 +586,13 @@ bool VideoFrameSubmitter::SubmitFrame(
+@@ -600,6 +600,13 @@ bool VideoFrameSubmitter::SubmitFrame(
  
    // Prefer the frame level transform if set.
    auto transform = video_frame->metadata().transformation.value_or(transform_);
@@ -2376,10 +2376,10 @@ index c7424e0dc518feb8710e0f454ff22504b7d3a59c..dcd7fd48138c2936815009077bcce000
        transform.rotation == media::VIDEO_ROTATION_270) {
      frame_size = gfx::Size(frame_size.height(), frame_size.width());
 diff --git a/third_party/blink/renderer/platform/media/web_media_player_impl.cc b/third_party/blink/renderer/platform/media/web_media_player_impl.cc
-index 18b3ef5fe312d655ef6dcb9eb517085d9a0cb10f..15eaf4c511337b2977c990550038c437c3a53949 100644
+index 698178d10e57d7f3456e29a585c1b09d56c89ab3..d6e2f42955aacfc8b6e450f0c9fe9685d9863504 100644
 --- a/third_party/blink/renderer/platform/media/web_media_player_impl.cc
 +++ b/third_party/blink/renderer/platform/media/web_media_player_impl.cc
-@@ -566,7 +566,10 @@ WebMediaPlayer::LoadTiming WebMediaPlayerImpl::Load(
+@@ -562,7 +562,10 @@ WebMediaPlayer::LoadTiming WebMediaPlayerImpl::Load(
      LoadType load_type,
      const WebMediaPlayerSource& source,
      CorsMode cors_mode,

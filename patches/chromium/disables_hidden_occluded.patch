@@ -8,10 +8,10 @@ This patch disables the background throttling in the renderer completely.
 Signed-off-by: gellert <gellert.hegyi@around.co>
 
 diff --git a/content/browser/web_contents/web_contents_impl.cc b/content/browser/web_contents/web_contents_impl.cc
-index b533a7a4fef313577d3065f85955d6cb67b8c54d..12df4c84ae51f8c9443be9befbd0bf25873ab9e7 100644
+index 0a78c70d43791c5c975ac6754651897a77423bff..b3499cd7eff2444444a358bd9712c6066e649331 100644
 --- a/content/browser/web_contents/web_contents_impl.cc
 +++ b/content/browser/web_contents/web_contents_impl.cc
-@@ -2155,7 +2155,7 @@ void WebContentsImpl::WasShown() {
+@@ -2173,7 +2173,7 @@ void WebContentsImpl::WasShown() {
  
  void WebContentsImpl::WasHidden() {
    TRACE_EVENT0("content", "WebContentsImpl::WasHidden");
@@ -20,7 +20,7 @@ index b533a7a4fef313577d3065f85955d6cb67b8c54d..12df4c84ae51f8c9443be9befbd0bf25
  }
  
  bool WebContentsImpl::HasRecentInteractiveInputEvent() {
-@@ -2208,7 +2208,7 @@ void WebContentsImpl::SetPrimaryMainFrameImportance(
+@@ -2230,7 +2230,7 @@ void WebContentsImpl::SetPrimaryMainFrameImportance(
  
  void WebContentsImpl::WasOccluded() {
    TRACE_EVENT0("content", "WebContentsImpl::WasOccluded");

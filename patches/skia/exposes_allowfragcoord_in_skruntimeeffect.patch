@@ -6,7 +6,7 @@ Subject: exposes allowFragCoord in SkRuntimeEffect
 This patch exposes allowFragCoord in SkRuntimeEffect so we can use sk_FragCoord in our video shader filter code.
 
 diff --git a/include/effects/SkRuntimeEffect.h b/include/effects/SkRuntimeEffect.h
-index 08c8e8d5b435b346e9152cf6dc4243518b3a973a..7092993377af3cb647c09b64c744c2d969fba18d 100644
+index b3f21b1d58e628c18146ee4196a5b6f5aa48ba2a..8134cb75628570ae501b20aaf17241b56380ec88 100644
 --- a/include/effects/SkRuntimeEffect.h
 +++ b/include/effects/SkRuntimeEffect.h
 @@ -97,6 +97,13 @@ public:

@@ -6,7 +6,7 @@ Subject: allow handling of caption mouse events
 This patches allows us to handle mouse events in the renderer that happen over the caption part of the window (draggable regions for example).
 
 diff --git a/content/browser/renderer_host/legacy_render_widget_host_win.cc b/content/browser/renderer_host/legacy_render_widget_host_win.cc
-index 8b196e1a10c96443a912eaaeb9327982618efa41..628b920e2d4a464da9bd807bf84f475f52282339 100644
+index 4a894ef70eeb1d8489049aef552c9bae4f24ae62..91c28ef9f50aecc6d4db5731226b4d8da40095b2 100644
 --- a/content/browser/renderer_host/legacy_render_widget_host_win.cc
 +++ b/content/browser/renderer_host/legacy_render_widget_host_win.cc
 @@ -288,12 +288,12 @@ LRESULT LegacyRenderWidgetHostHWND::OnMouseRange(UINT message,
@@ -25,10 +25,10 @@ index 8b196e1a10c96443a912eaaeb9327982618efa41..628b920e2d4a464da9bd807bf84f475f
        tme.dwHoverTime = 0;
        TrackMouseEvent(&tme);
 diff --git a/content/browser/renderer_host/render_widget_host_view_event_handler.cc b/content/browser/renderer_host/render_widget_host_view_event_handler.cc
-index 9043a181d4c0428950d566774d14b415fb3d33c2..d867f5c83a11b8634abf17f3bf849268e16ba8c3 100644
+index c1d9d56076d33c2850bf7efdb5d3881e1bad8bf9..d79001a261d5943a1d5436567431c71ecde3f449 100644
 --- a/content/browser/renderer_host/render_widget_host_view_event_handler.cc
 +++ b/content/browser/renderer_host/render_widget_host_view_event_handler.cc
-@@ -627,7 +627,7 @@ bool RenderWidgetHostViewEventHandler::CanRendererHandleEvent(
+@@ -631,7 +631,7 @@ bool RenderWidgetHostViewEventHandler::CanRendererHandleEvent(
      case WM_NCXBUTTONDOWN:
      case WM_NCXBUTTONUP:
      case WM_NCXBUTTONDBLCLK:
@@ -38,10 +38,10 @@ index 9043a181d4c0428950d566774d14b415fb3d33c2..d867f5c83a11b8634abf17f3bf849268
        break;
    }
 diff --git a/third_party/blink/renderer/core/layout/layout_object.cc b/third_party/blink/renderer/core/layout/layout_object.cc
-index 64e159fcea89bb6fae76de7675bb921dc3b058c8..cfd7be3827eb4463c56a3fea79395951dbb7127f 100644
+index 1ad2dbab47392c356e96eaeee3a409b78dae8e54..0095e96fa653ed90b1fad203c83a2649fdc38eb6 100644
 --- a/third_party/blink/renderer/core/layout/layout_object.cc
 +++ b/third_party/blink/renderer/core/layout/layout_object.cc
-@@ -2963,6 +2963,13 @@ void LayoutObject::StyleDidChange(StyleDifference diff,
+@@ -3043,6 +3043,13 @@ void LayoutObject::StyleDidChange(StyleDifference diff,
          SubtreePaintPropertyUpdateReason::kTransformStyleChanged);
    }
  
@@ -56,10 +56,10 @@ index 64e159fcea89bb6fae76de7675bb921dc3b058c8..cfd7be3827eb4463c56a3fea79395951
      ClearAncestorScrollAnchors(this);
    }
 diff --git a/ui/base/hit_test.h b/ui/base/hit_test.h
-index 8a31b49cf01c6c730c9361cbef181e2b1ef36c84..c01f1701b89cc4b3eaac8e6eeffd78f2df62119b 100644
+index c08affc7a3a0d21d78764675eed814e85d631088..3a1d26b7655ab963fda059ed48da9709592bf643 100644
 --- a/ui/base/hit_test.h
 +++ b/ui/base/hit_test.h
-@@ -37,7 +37,8 @@ enum HitTestCompat {
+@@ -76,7 +76,8 @@ enum HitTestCompat {
    HTTOPRIGHT,
    HTTRANSPARENT,
    HTVSCROLL,
@@ -68,7 +68,7 @@ index 8a31b49cf01c6c730c9361cbef181e2b1ef36c84..c01f1701b89cc4b3eaac8e6eeffd78f2
 +  HTDRAG
  };
  
- #endif  // !defined(OS_WIN)
+ #endif  // defined(OS_WIN)
 diff --git a/ui/events/blink/web_input_event_builders_win.cc b/ui/events/blink/web_input_event_builders_win.cc
 index 265a1029fd85399ecc625e40eccf9ebc85244c15..70534e3eb5ad6a6da8497c8c0eb033ec98b3de54 100644
 --- a/ui/events/blink/web_input_event_builders_win.cc
@@ -190,10 +190,10 @@ index 265a1029fd85399ecc625e40eccf9ebc85244c15..70534e3eb5ad6a6da8497c8c0eb033ec
    WebMouseEvent result(type, modifiers, time_stamp);
    result.pointer_type = pointer_type;
 diff --git a/ui/views/widget/desktop_aura/desktop_native_widget_aura.h b/ui/views/widget/desktop_aura/desktop_native_widget_aura.h
-index 661b6cd232bb331341bb066cc769f7890639fa5c..80f29aad0f8155dfd00ece48d85336e81e9f63a2 100644
+index 8d8087378872f2ab15ace9b2760c867e87bd64b9..a0cf6b85cc0c5ec0e307c8a077b830f51b1f043b 100644
 --- a/ui/views/widget/desktop_aura/desktop_native_widget_aura.h
 +++ b/ui/views/widget/desktop_aura/desktop_native_widget_aura.h
-@@ -109,7 +109,6 @@ class VIEWS_EXPORT DesktopNativeWidgetAura
+@@ -113,7 +113,6 @@ class VIEWS_EXPORT DesktopNativeWidgetAura
    // DesktopWindowTreeHost's transparency.
    void UpdateWindowTransparency();
  
@@ -202,10 +202,10 @@ index 661b6cd232bb331341bb066cc769f7890639fa5c..80f29aad0f8155dfd00ece48d85336e8
    void InitNativeWidget(Widget::InitParams params) override;
    void OnWidgetInitDone() override;
 diff --git a/ui/views/widget/desktop_aura/desktop_window_tree_host_platform.h b/ui/views/widget/desktop_aura/desktop_window_tree_host_platform.h
-index d1e8528638cd5edaa34c4943467336bb1963c06a..de2ea14c6c3566b3eeb4360893264a5b05a12d62 100644
+index 739f14ba0b172f7498ee6c27833067941dc8d976..db117115eee663cfa5c08f4c731027ce374529a3 100644
 --- a/ui/views/widget/desktop_aura/desktop_window_tree_host_platform.h
 +++ b/ui/views/widget/desktop_aura/desktop_window_tree_host_platform.h
-@@ -132,7 +132,6 @@ class VIEWS_EXPORT DesktopWindowTreeHostPlatform
+@@ -141,7 +141,6 @@ class VIEWS_EXPORT DesktopWindowTreeHostPlatform
    // ui::WorkspaceExtensionDelegate:
    void OnWorkspaceChanged() override;
  
@@ -253,7 +253,7 @@ index d9507c3e8b563a272343525ea7b13815e2d43d65..f5f9d4f5a137cccdbe6a9f18ef2d994e
    if (event->IsLeftMouseButton()) {
      previous_click_component = click_component_;
 diff --git a/ui/views/widget/desktop_aura/window_event_filter_linux.h b/ui/views/widget/desktop_aura/window_event_filter_linux.h
-index dc45bd8a5ca7353291ade41a4374654995176457..75fb8d17507a256f7e20649f5b320f47cbd9a0aa 100644
+index 0c27c946fab3f0b1dd8f4e5493171889732bdfbe..5f5692e9b21ef4e9243a1e3ea7514b429ab3aad0 100644
 --- a/ui/views/widget/desktop_aura/window_event_filter_linux.h
 +++ b/ui/views/widget/desktop_aura/window_event_filter_linux.h
 @@ -8,6 +8,7 @@
@@ -264,20 +264,21 @@ index dc45bd8a5ca7353291ade41a4374654995176457..75fb8d17507a256f7e20649f5b320f47
  #include "ui/views/views_export.h"
  
  namespace ui {
-@@ -65,6 +66,8 @@ class VIEWS_EXPORT WindowEventFilterLinux {
+@@ -68,6 +69,9 @@ class VIEWS_EXPORT WindowEventFilterLinux {
+   // initial click. Acting on a double click should only occur for matching
    // components.
    int click_component_ = HTNOWHERE;
- 
-+  int previous_event_type_ = ui::ET_UNKNOWN;
 +
-   DISALLOW_COPY_AND_ASSIGN(WindowEventFilterLinux);
++  // @Around
++  int previous_event_type_ = ui::ET_UNKNOWN;
  };
  
+ }  // namespace views
 diff --git a/ui/views/win/hwnd_message_handler.cc b/ui/views/win/hwnd_message_handler.cc
-index 18acd3724d486f7acdaa6aeedcd8ff3681729746..f9d1727e15b56d323b0686ad52d2ce7bf9be45cb 100644
+index a235cab941ec583a8dc9cb5e4105c2d7baae02df..bda762f9d6f9c483530b77988358648f0413728a 100644
 --- a/ui/views/win/hwnd_message_handler.cc
 +++ b/ui/views/win/hwnd_message_handler.cc
-@@ -835,8 +835,8 @@ void HWNDMessageHandler::ClearNativeFocus() {
+@@ -837,8 +837,8 @@ void HWNDMessageHandler::ClearNativeFocus() {
  }
  
  void HWNDMessageHandler::SetCapture() {
@@ -288,7 +289,7 @@ index 18acd3724d486f7acdaa6aeedcd8ff3681729746..f9d1727e15b56d323b0686ad52d2ce7b
  }
  
  void HWNDMessageHandler::ReleaseCapture() {
-@@ -3146,6 +3146,7 @@ LRESULT HWNDMessageHandler::HandleMouseEventInternal(UINT message,
+@@ -3150,6 +3150,7 @@ LRESULT HWNDMessageHandler::HandleMouseEventInternal(UINT message,
    // so use the weak ptr to check if destruction occurred or not.
    base::WeakPtr<HWNDMessageHandler> ref(msg_handler_weak_factory_.GetWeakPtr());
    bool handled = false;
@@ -296,7 +297,7 @@ index 18acd3724d486f7acdaa6aeedcd8ff3681729746..f9d1727e15b56d323b0686ad52d2ce7b
  
    // Don't send right mouse button up to the delegate when displaying system
    // command menu. This prevents left clicking in the upper left hand corner of
-@@ -3154,9 +3155,17 @@ LRESULT HWNDMessageHandler::HandleMouseEventInternal(UINT message,
+@@ -3158,9 +3159,17 @@ LRESULT HWNDMessageHandler::HandleMouseEventInternal(UINT message,
    if (!handling_mouse_menu_ || message != WM_RBUTTONUP)
      handled = delegate_->HandleMouseEvent(&event);
  
@@ -314,7 +315,7 @@ index 18acd3724d486f7acdaa6aeedcd8ff3681729746..f9d1727e15b56d323b0686ad52d2ce7b
    if (!handled && message == WM_NCLBUTTONDOWN && w_param != HTSYSMENU &&
        w_param != HTCAPTION &&
        delegate_->GetFrameMode() == FrameMode::CUSTOM_DRAWN) {
-@@ -3168,12 +3177,6 @@ LRESULT HWNDMessageHandler::HandleMouseEventInternal(UINT message,
+@@ -3172,12 +3181,6 @@ LRESULT HWNDMessageHandler::HandleMouseEventInternal(UINT message,
      handled = true;
    }
  

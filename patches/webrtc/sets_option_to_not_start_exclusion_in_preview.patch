@@ -32,10 +32,10 @@ index 8a65e5759cc927c8cf53f874cb604403df4aa26e..6617c69e351bc7fd1e22cb8bc53c8b19
    // Sets SharedMemoryFactory that will be used to create buffers for the
    // captured frames. The factory can be invoked on a thread other than the one
 diff --git a/modules/desktop_capture/mac/screen_capturer_mac.mm b/modules/desktop_capture/mac/screen_capturer_mac.mm
-index db703f72cd0b59fa6505392b17adddc9749f5bd0..c339b00eaa4d85c6258cd0a89e7b416d478f5db0 100644
+index 6abc0b61c8038a6dfa777cdf7c9f951355fe20ee..4f1d0b83ace88bf4f191530f8fc44eefbd498c3a 100644
 --- a/modules/desktop_capture/mac/screen_capturer_mac.mm
 +++ b/modules/desktop_capture/mac/screen_capturer_mac.mm
-@@ -368,16 +368,18 @@ DesktopRect GetExcludedWindowPixelBounds(CGWindowID window, float dip_to_pixel_s
+@@ -370,16 +370,18 @@ DesktopRect GetExcludedWindowPixelBounds(CGWindowID window, float dip_to_pixel_s
      // Translate the region to be copied into display-relative coordinates.
      copy_region.Translate(-display_bounds.left(), -display_bounds.top());
  
@@ -62,8 +62,8 @@ index db703f72cd0b59fa6505392b17adddc9749f5bd0..c339b00eaa4d85c6258cd0a89e7b416d
        for(std::vector<CGWindowID>::size_type i = 0; i < excluded_windows_.size(); i++) {
          CGWindowID excluded_window = excluded_windows_[i];
  
-@@ -429,35 +431,37 @@ DesktopRect GetExcludedWindowPixelBounds(CGWindowID window, float dip_to_pixel_s
-                i.rect());
+@@ -431,35 +433,37 @@ DesktopRect GetExcludedWindowPixelBounds(CGWindowID window, float dip_to_pixel_s
+                it.rect());
      }
  
 -    for(std::vector<DesktopRect>::size_type i = 0; i < excluded_window_bounds_list_.size(); i++) {
