@@ -1,0 +1,20 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Kevin Venalainen <kevin.venalainen@around.co>
+Date: Wed, 1 Dec 2021 16:39:14 -0800
+Subject: fix: update vpython numpy to support arm64
+
+Signed-off-by: kevin <kevin.venalainen@around.co>
+
+diff --git a/.vpython3 b/.vpython3
+index 21e15085072f03737725b10588369eb4c2b620c6..dbc02404dee86870e75da45c5719a6dd06fe402f 100644
+--- a/.vpython3
++++ b/.vpython3
+@@ -58,7 +58,7 @@ wheel: <
+ # Chromium tests using Telemetry function properly.
+ wheel: <
+   name: "infra/python/wheels/numpy/${vpython_platform}"
+-  version: "version:1.20.3"
++  version: "version:1.21.1"
+ >
+ wheel: <
+   name: "infra/python/wheels/psutil/${vpython_platform}"
