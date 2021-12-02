@@ -115,15 +115,16 @@ index 0000000000000000000000000000000000000000..fb070f868e4252f64990e51b2e4d8d51
 +}
 diff --git a/modules/audio_processing/around_agc/around_agc.cc b/modules/audio_processing/around_agc/around_agc.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..4301a5efb2748a4ea09f90277f71c83c5d1f6666
+index 0000000000000000000000000000000000000000..e41c04146c5a7887fe89d00df8170ede94c2487f
 --- /dev/null
 +++ b/modules/audio_processing/around_agc/around_agc.cc
-@@ -0,0 +1,101 @@
+@@ -0,0 +1,110 @@
 +#include "./around_agc.h"
 +
 +#include "common_audio/include/audio_util.h"
 +#include "modules/audio_processing/audio_buffer.h"
 +#include "modules/audio_processing/include/audio_frame_view.h"
++#include "modules/audio_processing/include/audio_processing.h"
 +#include "modules/audio_processing/logging/apm_data_dumper.h"
 +#include "rtc_base/atomic_ops.h"
 +#include "rtc_base/checks.h"
@@ -132,20 +133,29 @@ index 0000000000000000000000000000000000000000..4301a5efb2748a4ea09f90277f71c83c
 +
 +int AroundAgc::instance_count_ = 0;
 +
-+constexpr int kSpeechEstimatorAdjacentFramesThreshold = 1;
-+constexpr float kSpeechEstimatorInitialSaturationMarginDb = 10.0f;
-+constexpr float kSpeechEstimatorExtraSaturationMarginDb = 5.0f;
-+constexpr int kGainApplierAdjacentSpeechFramesThreshold = 1;
-+constexpr float kMaxGainChangePerSecondDb = 3.0f;
-+constexpr float kFakeNoiseLevelDbfs = -50.0f;
-+constexpr float kMaxBoostGainDb = 15.0f;
++// See defaults in audio_processing.h
++constexpr AudioProcessing::Config::GainController2::AdaptiveDigital
++    kAroundAgcDefaultConfig = {
++        .enabled = true,
++        // When true, the adaptive digital controller runs but the signal is not
++        // modified.
++        .dry_run = false,
++        .headroom_db = 6.0f,
++        // TODO(bugs.webrtc.org/7494): Consider removing and inferring from
++        // `max_output_noise_level_dbfs`.
++        .max_gain_db = 15.0f,
++        .initial_gain_db = 3.0f,
++        .vad_reset_period_ms = 1500,
++        .adjacent_speech_frames_threshold = 12,
++        .max_gain_change_db_per_second = 3.0f,
++        .max_output_noise_level_dbfs = -50.0f,
++};
 +
 +AroundAgc::AroundAgc()
 +    : data_dumper_(
 +          new ApmDataDumper(rtc::AtomicOps::Increment(&instance_count_))),
 +      adaptive_agc_(data_dumper_.get()),
-+      limiter_(static_cast<size_t>(48000), data_dumper_.get(), "AroundAgc") {
-+}
++      limiter_(static_cast<size_t>(48000), data_dumper_.get(), "AroundAgc") {}
 +
 +AroundAgc::~AroundAgc() = default;
 +
@@ -158,11 +168,10 @@ index 0000000000000000000000000000000000000000..4301a5efb2748a4ea09f90277f71c83c
 +}
 +
 +void AroundAgc::Process(AudioBuffer* audio, const float& vad_probability) {
-+  AudioFrameView<float> frame(audio->channels(),
-+                              audio->num_channels(),
++  AudioFrameView<float> frame(audio->channels(), audio->num_channels(),
 +                              audio->num_frames());
 +
-+  // Run the adaptive AGC first
++  // Compute input signal metrics, using provided vad_probability.
 +  AdaptiveDigitalGainApplier::FrameInfo info;
 +  float limiter_envelope = limiter_.LastAudioLevel();
 +  float peak = 0.f;
@@ -171,26 +180,33 @@ index 0000000000000000000000000000000000000000..4301a5efb2748a4ea09f90277f71c83c
 +    peak = std::max(std::fabs(x), peak);
 +    rms += x * x;
 +  }
-+  VadLevelAnalyzer::Result vad_result = {vad_probability,
-+                    FloatS16ToDbfs(std::sqrt(rms / frame.samples_per_channel())),
-+                    FloatS16ToDbfs(peak)};
++  VadLevelAnalyzer::Result vad_result = {
++      vad_probability,
++      FloatS16ToDbfs(std::sqrt(rms / frame.samples_per_channel())),
++      FloatS16ToDbfs(peak)};
 +  info.speech_probability = vad_result.speech_probability;
++
++  // Estimate the active speech level.
 +  adaptive_agc_.speech_level_estimator_.Update(vad_result);
 +  info.speech_level_dbfs = adaptive_agc_.speech_level_estimator_.level_dbfs();
-+  info.speech_level_reliable = adaptive_agc_.speech_level_estimator_.IsConfident();
-+  info.noise_rms_dbfs = kFakeNoiseLevelDbfs; // Set to fake noise level for max boost limiting.
++  info.speech_level_reliable =
++      adaptive_agc_.speech_level_estimator_.IsConfident();
++
++  // Estimate background noise level.
++  info.noise_rms_dbfs = adaptive_agc_.noise_level_estimator_->Analyze(frame);
++
++  // Estimate headroom available.
++  adaptive_agc_.saturation_protector_->Analyze(
++      info.speech_probability, vad_result.peak_dbfs, info.speech_level_dbfs);
 +  info.headroom_db = adaptive_agc_.saturation_protector_->HeadroomDb();
-+  info.limiter_envelope_dbfs =
-+      limiter_envelope > 0.0f ? FloatS16ToDbfs(limiter_envelope) : -90.f;
++  info.limiter_envelope_dbfs = FloatS16ToDbfs(limiter_envelope);
 +  adaptive_agc_.gain_applier_.Process(info, frame);
-+  adaptive_agc_.saturation_protector_->Analyze(info.speech_probability, vad_result.peak_dbfs,
-+                                 info.speech_level_dbfs);
 +
 +  // Then the limiter
 +  limiter_.Process(frame);
 +
 +  // Finally, scale everything slightly to ensure headroom for encoding
-+  constexpr float HEADROOM_SCALE = 0.94406f; // -0.5dB
++  constexpr float HEADROOM_SCALE = 0.94406f;  // -0.5dB
 +  for (auto& x : frame.channel(0)) {
 +    x *= HEADROOM_SCALE;
 +  }
@@ -202,27 +218,20 @@ index 0000000000000000000000000000000000000000..4301a5efb2748a4ea09f90277f71c83c
 +}
 +
 +AroundAgc::AdaptiveAgc::AdaptiveAgc(ApmDataDumper* apm_data_dumper)
-+    : speech_level_estimator_(apm_data_dumper,
-+                              kSpeechEstimatorAdjacentFramesThreshold),
-+      gain_applier_(apm_data_dumper,
-+                    kGainApplierAdjacentSpeechFramesThreshold,
-+                    kMaxGainChangePerSecondDb,
-+                    kFakeNoiseLevelDbfs + kMaxBoostGainDb,
-+                    /* dry_run */ false),
-+      noise_level_estimator_(CreateStationaryNoiseEstimator(apm_data_dumper)),
-+      saturation_protector_(
-+          CreateSaturationProtector(kSpeechEstimatorInitialSaturationMarginDb,
-+                                    kSpeechEstimatorExtraSaturationMarginDb,
-+                                    kSpeechEstimatorAdjacentFramesThreshold,
-+                                    apm_data_dumper)) {
-+}
++    : speech_level_estimator_(apm_data_dumper, kAroundAgcDefaultConfig),
++      gain_applier_(apm_data_dumper, kAroundAgcDefaultConfig),
++      noise_level_estimator_(CreateNoiseFloorEstimator(apm_data_dumper)),
++      saturation_protector_(CreateSaturationProtector(
++          kSaturationProtectorInitialHeadroomDb,
++          kAroundAgcDefaultConfig.adjacent_speech_frames_threshold,
++          apm_data_dumper)) {}
 +
 +AroundAgc::AdaptiveAgc::~AdaptiveAgc() = default;
 +
-+}
++}  // namespace webrtc
 diff --git a/modules/audio_processing/around_agc/around_agc.h b/modules/audio_processing/around_agc/around_agc.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..29001e54b84d658891b26bc443e2ce5d0c61c8bf
+index 0000000000000000000000000000000000000000..ceead582ed88e2fee39fe592c21310187978b043
 --- /dev/null
 +++ b/modules/audio_processing/around_agc/around_agc.h
 @@ -0,0 +1,52 @@
@@ -258,7 +267,7 @@ index 0000000000000000000000000000000000000000..29001e54b84d658891b26bc443e2ce5d
 +
 + private:
 +  struct AdaptiveAgc {
-+    AdaptiveAgc(ApmDataDumper* apm_data_dumper);
++    explicit AdaptiveAgc(ApmDataDumper* apm_data_dumper);
 +    ~AdaptiveAgc();
 +
 +    AdaptiveModeLevelEstimator speech_level_estimator_;
@@ -912,16 +921,17 @@ index 0000000000000000000000000000000000000000..d0142827b62757027b88fbf709dda1a4
 +} // namespace webrtc
 diff --git a/modules/audio_processing/around_denoise/around_denoise.h b/modules/audio_processing/around_denoise/around_denoise.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..8fb7563319fbd6844dad20f4111805549b8187dc
+index 0000000000000000000000000000000000000000..3884d45d36f1f6cd7777eef71722df97801420e8
 --- /dev/null
 +++ b/modules/audio_processing/around_denoise/around_denoise.h
-@@ -0,0 +1,132 @@
+@@ -0,0 +1,133 @@
 +#ifndef MODULES_AUDIO_PROCESSING_AROUND_DENOISE_H_
 +#define MODULES_AUDIO_PROCESSING_AROUND_DENOISE_H_
 +
 +#include "common_audio/resampler/include/push_resampler.h"
 +#include "modules/audio_processing/include/audio_processing.h"
 +#include "rtc_base/constructor_magic.h"
++#include <map>
 +
 +extern "C" {
 +#include "common_audio/ring_buffer.h"
