@@ -1101,15 +1101,15 @@ index 2f668ec2a26810052b1044131089dd21d5e13d7b..133df2b6123bca34bddd98bdba026e7e
    int resource_multiplier_location_ = -1;
    int resource_offset_location_ = -1;
 diff --git a/components/viz/service/display/skia_renderer.cc b/components/viz/service/display/skia_renderer.cc
-index 20a49431f8f3a3b00441f6adc03fe80db6c5ae77..f5b8fd00c816230e4073e25f325f6fe053f86670 100644
+index 20a49431f8f3a3b00441f6adc03fe80db6c5ae77..cf63bfb39be71c25bea58b3ecf3572961cec72d7 100644
 --- a/components/viz/service/display/skia_renderer.cc
 +++ b/components/viz/service/display/skia_renderer.cc
 @@ -80,6 +80,241 @@ namespace viz {
  
  namespace {
  
-+const char *kAroundShader = R"(
-+  uniform shader input;
++const char* kAroundShader = R"(
++  uniform shader child;
 +
 +  uniform half filter_id;
 +  uniform half offset_x;
@@ -1238,7 +1238,7 @@ index 20a49431f8f3a3b00441f6adc03fe80db6c5ae77..f5b8fd00c816230e4073e25f325f6fe0
 +    float2 offset = float2(offset_x, offset_y);
 +    float2 scale = float2(zoom, zoom);
 +    float2 new_coord = coord * scale + offset;
-+    half4 texelColor = sample(input, new_coord);
++    half4 texelColor = child.eval(new_coord);
 +
 +    if (is_yuv == 1) {
 +      float y = 1.1643 * (texelColor.r - 0.0625);
@@ -1495,7 +1495,7 @@ index 78b9e6f93340098ce8db9e637b3f65abbdc675f2..c8128b89efd53710fec4c31dd3d51f2a
  
  }  // namespace viz
 diff --git a/components/viz/service/display/software_renderer.cc b/components/viz/service/display/software_renderer.cc
-index 84d11d3bd40a8a29cb0309ca6d35863bcae2e410..f1b72579f65f184a39088e92bc02d8da6bb11270 100644
+index 84d11d3bd40a8a29cb0309ca6d35863bcae2e410..e636014219c80189060c402a2d11325a34e4d5bc 100644
 --- a/components/viz/service/display/software_renderer.cc
 +++ b/components/viz/service/display/software_renderer.cc
 @@ -39,6 +39,7 @@
@@ -1506,13 +1506,12 @@ index 84d11d3bd40a8a29cb0309ca6d35863bcae2e410..f1b72579f65f184a39088e92bc02d8da
  #include "third_party/skia/include/effects/SkShaderMaskFilter.h"
  #include "ui/gfx/geometry/axis_transform2d.h"
  #include "ui/gfx/geometry/rect_conversions.h"
-@@ -76,6 +77,230 @@ class AnimatedImagesProvider : public cc::ImageProvider {
+@@ -76,6 +77,229 @@ class AnimatedImagesProvider : public cc::ImageProvider {
  
  }  // namespace
  
-+
-+const char *kAroundShader = R"(
-+  uniform shader input;
++const char* kAroundShader = R"(
++  uniform shader child;
 +
 +  uniform int filter_id;
 +  uniform half offset_x;
@@ -1642,7 +1641,7 @@ index 84d11d3bd40a8a29cb0309ca6d35863bcae2e410..f1b72579f65f184a39088e92bc02d8da
 +    float2 offset = float2(offset_x, offset_y);
 +    float2 scale = float2(zoom, zoom);
 +    float2 new_coord = coord * scale + offset;
-+    half4 texelColor = sample(input, new_coord);
++    half4 texelColor = child.eval(new_coord);
 +
 +    float contrast = 1.0;
 +    float brightness = 0.0;
@@ -1737,7 +1736,7 @@ index 84d11d3bd40a8a29cb0309ca6d35863bcae2e410..f1b72579f65f184a39088e92bc02d8da
  SoftwareRenderer::SoftwareRenderer(
      const RendererSettings* settings,
      const DebugRendererSettings* debug_settings,
-@@ -464,6 +689,7 @@ void SoftwareRenderer::DrawTextureQuad(const TextureDrawQuad* quad) {
+@@ -464,6 +688,7 @@ void SoftwareRenderer::DrawTextureQuad(const TextureDrawQuad* quad) {
      current_canvas_->saveLayerAlpha(&quad_rect, current_paint_.getAlpha());
      current_paint_.setAlpha(0xFF);
    }
@@ -1745,7 +1744,7 @@ index 84d11d3bd40a8a29cb0309ca6d35863bcae2e410..f1b72579f65f184a39088e92bc02d8da
    if (blend_background) {
      SkPaint background_paint;
      background_paint.setColor(quad->background_color);
-@@ -471,6 +697,11 @@ void SoftwareRenderer::DrawTextureQuad(const TextureDrawQuad* quad) {
+@@ -471,6 +696,11 @@ void SoftwareRenderer::DrawTextureQuad(const TextureDrawQuad* quad) {
    }
    SkSamplingOptions sampling(quad->nearest_neighbor ? SkFilterMode::kNearest
                                                      : SkFilterMode::kLinear);
@@ -1757,7 +1756,7 @@ index 84d11d3bd40a8a29cb0309ca6d35863bcae2e410..f1b72579f65f184a39088e92bc02d8da
    current_canvas_->drawImageRect(image, sk_uv_rect, quad_rect, sampling,
                                   &current_paint_,
                                   SkCanvas::kStrict_SrcRectConstraint);
-@@ -478,6 +709,39 @@ void SoftwareRenderer::DrawTextureQuad(const TextureDrawQuad* quad) {
+@@ -478,6 +708,39 @@ void SoftwareRenderer::DrawTextureQuad(const TextureDrawQuad* quad) {
      current_canvas_->restore();
  }
  
