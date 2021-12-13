@@ -4,8 +4,7 @@ workflow:
     - if: '$CI_COMMIT_BRANCH == "prod-release"'
     - if: '$CI_COMMIT_BRANCH == "ci/run-clean-build"'
     - if: '$CI_COMMIT_BRANCH == "ci/symbols-test"'
-    - if: '$CI_COMMIT_BRANCH == "around-14.0.0-beta.20"'
-    - if: '$CI_COMMIT_BRANCH == "around-14.0.1"'
+    - if: '$CI_COMMIT_BRANCH == "electron-vnext-ci"'
 
 stages:
   - clean
