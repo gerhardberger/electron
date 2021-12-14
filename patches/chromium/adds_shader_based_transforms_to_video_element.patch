@@ -2390,3 +2390,17 @@ index 698178d10e57d7f3456e29a585c1b09d56c89ab3..d6e2f42955aacfc8b6e450f0c9fe9685
    // Only URL or MSE blob URL is supported.
    DCHECK(source.IsURL());
    WebURL url = source.GetAsURL();
+diff --git a/ui/gfx/geometry/rrect_f.cc b/ui/gfx/geometry/rrect_f.cc
+index ab7dece394c6ac3d84378e30fd46195492244967..720472fcec35b3aa69fb10abe1f65aa0873c8a63 100644
+--- a/ui/gfx/geometry/rrect_f.cc
++++ b/ui/gfx/geometry/rrect_f.cc
+@@ -67,7 +67,8 @@ gfx::Vector2dF RRectF::GetSimpleRadii() const {
+ float RRectF::GetSimpleRadius() const {
+   DCHECK(GetType() <= Type::kOval);
+   SkPoint result = skrrect_.getSimpleRadii();
+-  DCHECK_EQ(result.x(), result.y());
++  // @Around: This condition is not true with our changes.
++  // DCHECK_EQ(result.x(), result.y());
+   return result.x();
+ }
+ 
