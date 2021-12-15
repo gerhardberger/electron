@@ -16,3 +16,4 @@ patches/**/.patches merge=union
 *.py text eol=lf
 *.ps1 text eol=lf
 *.md text eol=lf
+*.idl text eol=lf
