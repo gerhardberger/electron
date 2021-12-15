@@ -185,29 +185,42 @@ bool getSystemDefaultAudioDeviceName(
   return getAudioDeviceNameFromDeviceId(scope, deviceId, deviceName, error);
 }
 
-void setSystemMuted(bool muted,
+bool setSystemMuted(bool muted,
                     AudioDeviceID defaultDeviceID,
-                    AudioObjectPropertyScope scope) {
+                    AudioObjectPropertyScope scope,
+                    std::string& error /*output*/) {
   if (defaultDeviceID == kAudioObjectUnknown) {
-    return;
+    error = "Device ID is null";
+    return false;
   }
 
   AudioObjectPropertyAddress address{
       .mSelector = kAudioDevicePropertyMute,
       .mScope = scope,
       .mElement = kAudioObjectPropertyElementMaster};
+
+  if (!AudioObjectHasProperty(defaultDeviceID, &address)) {
+    error = "Device doesn't support mute";
+    return false;
+  }
 
   UInt32 newValue = muted ? 1 : 0;
   OSStatus err = AudioObjectSetPropertyData(defaultDeviceID, &address, 0, NULL,
                                             sizeof(newValue), &newValue);
   if (err != noErr) {
-    NSLog(@"Could not set audio muted");
+    error = "Unknown error setting mute: OSStatus: " + std::to_string(err);
+    return false;
   }
+
+  return true;
 }
 
-bool isSystemMuted(AudioDeviceID defaultDeviceID,
-                   AudioObjectPropertyScope scope) {
+bool isSystemMuted(bool& muted,
+                   AudioDeviceID defaultDeviceID,
+                   AudioObjectPropertyScope scope,
+                   std::string& error /*output*/) {
   if (defaultDeviceID == kAudioObjectUnknown) {
+    error = "Device ID is null";
     return false;
   }
 
@@ -216,21 +229,31 @@ bool isSystemMuted(AudioDeviceID defaultDeviceID,
       .mScope = scope,
       .mElement = kAudioObjectPropertyElementMaster};
 
-  UInt32 muted = 0;
-  UInt32 mutedSize = sizeof(muted);
-  OSStatus err = AudioObjectGetPropertyData(defaultDeviceID, &address, 0, NULL,
-                                            &mutedSize, &muted);
-  if (err != noErr) {
+  if (!AudioObjectHasProperty(defaultDeviceID, &address)) {
+    error = "Device doesn't support mute";
     return false;
   }
 
-  return muted != 0;
+  UInt32 mutedValue = 0;
+  UInt32 mutedSize = sizeof(mutedValue);
+  OSStatus err = AudioObjectGetPropertyData(defaultDeviceID, &address, 0, NULL,
+                                            &mutedSize, &mutedValue);
+  if (err != noErr) {
+    error = "Unknown error getting mute: OSStatus: " + std::to_string(err);
+    return false;
+  }
+
+  muted = mutedValue != 0;
+  return true;
 }
 
-float getSystemVolume(AudioDeviceID defaultDeviceID,
-                      AudioObjectPropertyScope scope) {
+bool getSystemVolume(float& volume,
+                     AudioDeviceID defaultDeviceID,
+                     AudioObjectPropertyScope scope,
+                     std::string& error /*output*/) {
   if (defaultDeviceID == kAudioObjectUnknown) {
-    return 0.0;
+    error = "Device ID is null";
+    return false;
   }
 
   AudioObjectPropertyAddress address{
@@ -238,44 +261,69 @@ float getSystemVolume(AudioDeviceID defaultDeviceID,
       .mScope = scope,
       .mElement = kAudioObjectPropertyElementMaster};
 
-  float volume = 0;
+  if (!AudioObjectHasProperty(defaultDeviceID, &address)) {
+    error = "Device doesn't support volume control";
+    return false;
+  }
+
   UInt32 size = sizeof(volume);
   OSStatus err = AudioObjectGetPropertyData(defaultDeviceID, &address, 0, NULL,
                                             &size, &volume);
   if (err != noErr) {
-    return 0.0;
+    error = "Unknown error setting volume: OSStatus: " + std::to_string(err);
+    return false;
   }
 
-  return volume > 1.0 ? 1.0 : (volume < 0.0 ? 0.0 : volume);
+  volume = volume > 1.0 ? 1.0 : (volume < 0.0 ? 0.0 : volume);
+  return true;
 }
 
-void setSystemVolume(float volume,
+bool setSystemVolume(float volume,
                      AudioDeviceID defaultDeviceID,
-                     AudioObjectPropertyScope scope) {
+                     AudioObjectPropertyScope scope,
+                     std::string& error /*output*/) {
   if (defaultDeviceID == kAudioObjectUnknown) {
-    return;
+    error = "Device ID is null";
+    return false;
   }
 
   AudioObjectPropertyAddress address{
       .mSelector = kAudioHardwareServiceDeviceProperty_VirtualMasterVolume,
       .mScope = scope,
       .mElement = kAudioObjectPropertyElementMaster};
+
+  if (!AudioObjectHasProperty(defaultDeviceID, &address)) {
+    error = "Device doesn't support volume control";
+    return false;
+  }
 
   float newValue = volume > 1.0 ? 1.0 : (volume < 0.0 ? 0.0 : volume);
   OSStatus err = AudioObjectSetPropertyData(defaultDeviceID, &address, 0, NULL,
                                             sizeof(newValue), &newValue);
   if (err != noErr) {
-    NSLog(@"Could not set audio volume");
-    return;
+    error = "Unknown error setting volume: OSStatus: " + std::to_string(err);
+    return false;
   }
 
-  if (newValue == 0.0) {
-    setSystemMuted(true, defaultDeviceID, scope);
+  // If the newVolume is now 0.0, try to mute the device. If newVolume is >0.0
+  // and device is muted, try to unmute. Warn on failures but don't throw.
+  address.mSelector = kAudioDevicePropertyMute;
+  if (newValue == 0.0f) {
+    if (!setSystemMuted(true, defaultDeviceID, scope, error)) {
+      NSLog(@"Failed to mute the device: %s", error.c_str());
+    }
+  } else if (newValue > 0.0f) {
+    bool isMuted = false;
+    if (isSystemMuted(isMuted, defaultDeviceID, scope, error)) {
+      if (isMuted && !setSystemMuted(false, defaultDeviceID, scope, error)) {
+        NSLog(@"Failed to mute the device: %s", error.c_str());
+      }
+    } else {
+      NSLog(@"Failed to get mute state: %s", error.c_str());
+    }
   }
 
-  if (newValue > 0.0 && isSystemMuted(defaultDeviceID, scope)) {
-    setSystemMuted(false, defaultDeviceID, scope);
-  }
+  return true;
 }
 
 static OSStatus onOutputVolumeChange(
@@ -376,54 +424,135 @@ void App::SetupAudioEventPassing() {
 void App::TeardownAudioEventPassing() {}
 
 float App::GetSystemOutputVolume() {
-  return getSystemVolume(
-      obtainDefaultAudioDevice(kAudioHardwarePropertyDefaultOutputDevice),
-      kAudioDevicePropertyScopeOutput);
+  std::string error;
+  float volume = 0.0f;
+
+  if (!getSystemVolume(
+          volume,
+          obtainDefaultAudioDevice(kAudioHardwarePropertyDefaultOutputDevice),
+          kAudioDevicePropertyScopeOutput, error)) {
+    v8::Isolate* isolate = JavascriptEnvironment::GetIsolate();
+    v8::Locker locker(isolate);
+    v8::HandleScope scope(isolate);
+    gin_helper::ErrorThrower(isolate).ThrowError(error);
+  }
+
+  return volume;
 }
 
 float App::GetSystemInputVolume() {
-  return getSystemVolume(
-      obtainDefaultAudioDevice(kAudioHardwarePropertyDefaultInputDevice),
-      kAudioDevicePropertyScopeInput);
+  std::string error;
+  float volume = 0.0f;
+
+  if (!getSystemVolume(
+          volume,
+          obtainDefaultAudioDevice(kAudioHardwarePropertyDefaultInputDevice),
+          kAudioDevicePropertyScopeInput, error)) {
+    v8::Isolate* isolate = JavascriptEnvironment::GetIsolate();
+    v8::Locker locker(isolate);
+    v8::HandleScope scope(isolate);
+    gin_helper::ErrorThrower(isolate).ThrowError(error);
+  }
+
+  return volume;
 }
 
 void App::SetSystemOutputVolume(float volume) {
-  return setSystemVolume(
-      volume,
-      obtainDefaultAudioDevice(kAudioHardwarePropertyDefaultOutputDevice),
-      kAudioDevicePropertyScopeOutput);
+  std::string error;
+
+  if (!setSystemVolume(
+          volume,
+          obtainDefaultAudioDevice(kAudioHardwarePropertyDefaultOutputDevice),
+          kAudioDevicePropertyScopeOutput, error)) {
+    v8::Isolate* isolate = JavascriptEnvironment::GetIsolate();
+    v8::Locker locker(isolate);
+    v8::HandleScope scope(isolate);
+    gin_helper::ErrorThrower(isolate).ThrowError(error);
+  }
+
+  return;
 }
 
 void App::SetSystemInputVolume(float volume) {
-  return setSystemVolume(
-      volume,
-      obtainDefaultAudioDevice(kAudioHardwarePropertyDefaultInputDevice),
-      kAudioDevicePropertyScopeInput);
+  std::string error;
+
+  if (!setSystemVolume(
+          volume,
+          obtainDefaultAudioDevice(kAudioHardwarePropertyDefaultInputDevice),
+          kAudioDevicePropertyScopeInput, error)) {
+    v8::Isolate* isolate = JavascriptEnvironment::GetIsolate();
+    v8::Locker locker(isolate);
+    v8::HandleScope scope(isolate);
+    gin_helper::ErrorThrower(isolate).ThrowError(error);
+  }
+
+  return;
 }
 
 bool App::IsSystemOutputMuted() {
-  return isSystemMuted(
-      obtainDefaultAudioDevice(kAudioHardwarePropertyDefaultOutputDevice),
-      kAudioDevicePropertyScopeOutput);
+  bool muted = false;
+  std::string error;
+
+  if (!isSystemMuted(
+          muted,
+          obtainDefaultAudioDevice(kAudioHardwarePropertyDefaultOutputDevice),
+          kAudioDevicePropertyScopeOutput, error)) {
+    v8::Isolate* isolate = JavascriptEnvironment::GetIsolate();
+    v8::Locker locker(isolate);
+    v8::HandleScope scope(isolate);
+    gin_helper::ErrorThrower(isolate).ThrowError(error);
+  }
+
+  return muted;
 }
 
 bool App::IsSystemInputMuted() {
-  return isSystemMuted(
-      obtainDefaultAudioDevice(kAudioHardwarePropertyDefaultInputDevice),
-      kAudioDevicePropertyScopeInput);
+  bool muted = false;
+  std::string error;
+
+  if (!isSystemMuted(
+          muted,
+          obtainDefaultAudioDevice(kAudioHardwarePropertyDefaultInputDevice),
+          kAudioDevicePropertyScopeInput, error)) {
+    v8::Isolate* isolate = JavascriptEnvironment::GetIsolate();
+    v8::Locker locker(isolate);
+    v8::HandleScope scope(isolate);
+    gin_helper::ErrorThrower(isolate).ThrowError(error);
+  }
+
+  return muted;
 }
 
 void App::SetSystemOutputMuted(bool muted) {
-  return setSystemMuted(
-      muted,
-      obtainDefaultAudioDevice(kAudioHardwarePropertyDefaultOutputDevice),
-      kAudioDevicePropertyScopeOutput);
+  std::string error;
+
+  if (!setSystemMuted(
+          muted,
+          obtainDefaultAudioDevice(kAudioHardwarePropertyDefaultOutputDevice),
+          kAudioDevicePropertyScopeOutput, error)) {
+    v8::Isolate* isolate = JavascriptEnvironment::GetIsolate();
+    v8::Locker locker(isolate);
+    v8::HandleScope scope(isolate);
+    gin_helper::ErrorThrower(isolate).ThrowError(error);
+  }
+
+  return;
 }
 
 void App::SetSystemInputMuted(bool muted) {
-  return setSystemMuted(
-      muted, obtainDefaultAudioDevice(kAudioHardwarePropertyDefaultInputDevice),
-      kAudioDevicePropertyScopeInput);
+  std::string error;
+
+  if (!setSystemMuted(
+          muted,
+          obtainDefaultAudioDevice(kAudioHardwarePropertyDefaultInputDevice),
+          kAudioDevicePropertyScopeInput, error)) {
+    v8::Isolate* isolate = JavascriptEnvironment::GetIsolate();
+    v8::Locker locker(isolate);
+    v8::HandleScope scope(isolate);
+    gin_helper::ErrorThrower(isolate).ThrowError(error);
+  }
+
+  return;
 }
 
 void App::SetSystemOutputDevice(const std::u16string& device_name) {
