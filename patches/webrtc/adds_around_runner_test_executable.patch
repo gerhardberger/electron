@@ -73,145 +73,217 @@ index 0000000000000000000000000000000000000000..c1d77f5fc2c4aa22ca325231ebc65431
 +}
 diff --git a/modules/audio_processing/around_runner/around_args.h b/modules/audio_processing/around_runner/around_args.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..0295086aff9e00031c8fac9477b78ef3498aaba0
+index 0000000000000000000000000000000000000000..f7a6c7bd0ade485950d7a35305d99e7d78537d91
 --- /dev/null
 +++ b/modules/audio_processing/around_runner/around_args.h
-@@ -0,0 +1,127 @@
+@@ -0,0 +1,197 @@
 +#pragma once
 +
 +#include <stdio.h>
-+#include <string>
++
 +#include <iostream>
-+#include "ketopt.h"
++#include <string>
++
 +#include "absl/types/optional.h"
++#include "ketopt.h"
 +
 +using namespace std;
 +
 +#if !defined(endline)
-+# if defined(WEBRTC_WIN)
-+#   define endline "\r\n"
-+# else
-+#   define endline "\n"
-+# endif
++#if defined(WEBRTC_WIN)
++#define endline "\r\n"
++#else
++#define endline "\n"
++#endif
 +#endif
 +
 +struct around_args {
 +  bool fullyParsed = true;
-+  string input = "";
-+  string loopback = "";
-+  string output = "";
++  absl::optional<string> input;
++  absl::optional<string> loopback;
++  absl::optional<string> output;
 +  bool verbose = false;
 +
-+  absl::optional<bool> aec; //WebRTC AEC
-+  absl::optional<bool> ns; //WebRTC NS
-+  absl::optional<int> ns_level; // WebRTC NS::level
-+  absl::optional<float> rnnoise_level; // Around RNNoise maximum suppression limit
++  absl::optional<bool> aec;                // WebRTC AEC
++  absl::optional<bool> ns;                 // WebRTC NS
++  absl::optional<int> ns_level;            // WebRTC NS::level
++  absl::optional<bool> around_processing;  // Around custom processing
++  absl::optional<float>
++      rnnoise_level;  // Around RNNoise maximum suppression limit
 +
 +  string ToString() const {
 +    string s;
 +    s.reserve(256);
-+    s
-+      .append(" input: ").append(input).append(endline)
-+      .append(" loopback: ").append(loopback).append(endline)
-+      .append(" output: ").append(output).append(endline)
-+      .append(" verbose: ").append(to_string(verbose)).append(endline)
-+      .append(" aec: ").append(aec ? to_string(*aec) : "(default)").append(endline)
-+      .append(" ns: ").append(ns ? to_string(*ns) : "(default)").append(endline)
-+      .append(" ns_level: ").append(ns_level ? to_string(*ns_level) : "(default)").append(endline)
-+      .append(" rnnoise_level: ").append(rnnoise_level ? to_string(*rnnoise_level) : "(default)").append(endline);
++    s.append(" input: ")
++        .append(input.value_or(""))
++        .append(endline)
++        .append(" loopback: ")
++        .append(loopback.value_or(""))
++        .append(endline)
++        .append(" output: ")
++        .append(output.value_or(""))
++        .append(endline)
++        .append(" verbose: ")
++        .append(to_string(verbose))
++        .append(endline)
++        .append(" aec: ")
++        .append(aec ? to_string(aec.value()) : "(default)")
++        .append(endline)
++        .append(" ns: ")
++        .append(ns ? to_string(ns.value()) : "(default)")
++        .append(endline)
++        .append(" ns_level: ")
++        .append(ns_level ? to_string(ns_level.value()) : "(default)")
++        .append(endline)
++        .append(" around_processing: ")
++        .append(around_processing ? to_string(around_processing.value())
++                                  : "(default)")
++        .append(endline)
++        .append(" rnnoise_level: ")
++        .append(rnnoise_level ? to_string(rnnoise_level.value()) : "(default)")
++        .append(endline);
 +    return s;
 +  }
 +};
 +
-+std::string HelpString()
-+{
++std::string HelpString() {
 +  string s;
 +  s.reserve(1024);
-+  s
-+    .append("Around Runner help page:").append(endline)
-+    .append("-i,--input: Input .wav file, represents microphone signal").append(endline)
-+    .append("-l,--loopback: Loopback speaker .wav file, unused if AEC is disabled").append(endline)
-+    .append("-o,--output: Output .wav file").append(endline)
-+    .append("-v,--verbose: Flag setting verbose output if present").append(endline)
-+    .append("--aec=x: Forces feature to disabled if x=0, else enabled. Feature default if not present.").append(endline)
-+    .append("--ns=x: Forces feature to disabled if x=0, else enabled. Feature default if not present.").append(endline)
-+    .append("--ns_level=x: Sets NoiseSuppression::Level, with argument corresponding to the enum values. (Low = 0, VeryHigh = 3)").append(endline)
-+    .append("--rnnoise_level=x: Sets maximum RNNoise suppression, with argument corresponding to dB. (Default = 15.0, Off = 0.0, Low = 10.0)").append(endline)
-+  ;
++  s.append("Around Runner help page:")
++      .append(endline)
++      .append("-i,--input: Input .wav file, represents microphone signal")
++      .append(endline)
++      .append(
++          "-l,--loopback: Loopback speaker .wav file, unused if AEC is "
++          "disabled")
++      .append(endline)
++      .append("-o,--output: Output .wav file")
++      .append(endline)
++      .append("-v,--verbose: Flag setting verbose output if present")
++      .append(endline)
++      .append(
++          "--aec=x: Forces feature to disabled if x=0, else enabled. Feature "
++          "default if not present.")
++      .append(endline)
++      .append(
++          "--ns=x: Forces feature to disabled if x=0, else enabled. Feature "
++          "default if not present.")
++      .append(endline)
++      .append(
++          "--ns_level=x: Sets NoiseSuppression::Level, with argument "
++          "corresponding to the enum values. (Low = 0, VeryHigh = 3)")
++      .append(endline)
++      .append(
++          "--around_processing=x: If 0, completely disables Around processing. "
++          "Useful for training data generation. Default enabled if not "
++          "present.")
++      .append(endline)
++      .append(
++          "--rnnoise_level=x: Sets maximum RNNoise suppression, with argument "
++          "corresponding to dB. (Default = 15.0, Off = 0.0, Low = 10.0)")
++      .append(endline);
 +  return s;
 +}
 +
 +enum longargs : int {
-+  input = 301, // Ensure greater than the largest ASCII character code
++  input = 301,  // Ensure greater than the largest ASCII character code
 +  loopback,
 +  output,
 +  verbose,
 +  aec,
 +  ns,
 +  ns_level,
++  around_processing,
 +  rnnoise_level,
 +};
 +
-+#define LONGOPT(x, arg_type) {#x, arg_type, x}
++#define LONGOPT(x, arg_type) \
++  { #x, arg_type, x }
 +
 +static const ko_longopt_t longopts[] = {
-+  LONGOPT(input, ko_required_argument),
-+  LONGOPT(loopback, ko_required_argument),
-+  LONGOPT(output, ko_required_argument),
-+  LONGOPT(verbose, ko_no_argument),
-+  LONGOPT(aec, ko_required_argument),
-+  LONGOPT(ns, ko_required_argument),
-+  LONGOPT(ns_level, ko_required_argument),
-+  LONGOPT(rnnoise_level, ko_required_argument),
-+};
++    LONGOPT(input, ko_required_argument),
++    LONGOPT(loopback, ko_required_argument),
++    LONGOPT(output, ko_required_argument),
++    LONGOPT(verbose, ko_no_argument),
++    LONGOPT(aec, ko_required_argument),
++    LONGOPT(ns, ko_required_argument),
++    LONGOPT(ns_level, ko_required_argument),
++    LONGOPT(around_processing, ko_required_argument),
++    LONGOPT(rnnoise_level, ko_required_argument),
++    {NULL, 0, 0}};
 +
 +static const char shortopts[] = "i:l:o:v";
 +
-+around_args parse_args(int argc, char* argv[])
-+{
++around_args parse_args(int argc, char* argv[]) {
 +  around_args args;
 +  ketopt_t opt = KETOPT_INIT;
 +  int c;
-+  while ((c = ketopt(&opt, argc, argv, true, shortopts, longopts)) >= 0) {
-+    switch (c)
-+    {
-+    case 'i':
-+    case longargs::input:
-+      args.input = opt.arg; break;
-+    case 'l':
-+    case longargs::loopback:
-+      args.loopback = opt.arg; break;
-+    case 'o':
-+    case longargs::output:
-+      args.output = opt.arg; break;
-+    case 'v':
-+    case longargs::verbose:
-+      args.verbose = true; break;
-+    case longargs::aec:
-+      args.aec = atoi(opt.arg); break;
-+    case longargs::ns:
-+      args.ns = atoi(opt.arg); break;
-+    case longargs::ns_level:
-+      args.ns_level = atoi(opt.arg); break;
-+    case longargs::rnnoise_level:
-+      args.rnnoise_level = static_cast<float>(atof(opt.arg)); break;
-+    case '?':
-+      cerr << "Unknown option: " << (opt.opt ? (char)opt.opt : ':') << endl; args.fullyParsed = false; break;
-+    case ':':
-+      cerr << "Missing argument: " << (opt.opt ? (char)opt.opt : ':') << endl; args.fullyParsed = false; break;
++  int loopsRemaining = argc;
++  cout << "Calling ketopt" << endl;
++  while ((c = ketopt(&opt, argc, argv, true, shortopts, longopts)) >= 0 &&
++         loopsRemaining) {
++    switch (c) {
++      case 'i':
++      case longargs::input:
++        args.input = opt.arg;
++        break;
++      case 'l':
++      case longargs::loopback:
++        args.loopback = opt.arg;
++        break;
++      case 'o':
++      case longargs::output:
++        args.output = opt.arg;
++        break;
++      case 'v':
++      case longargs::verbose:
++        args.verbose = true;
++        break;
++      case longargs::aec:
++        args.aec = static_cast<bool>(atoi(opt.arg));
++        break;
++      case longargs::ns:
++        args.ns = static_cast<bool>(atoi(opt.arg));
++        break;
++      case longargs::ns_level:
++        args.ns_level = atoi(opt.arg);
++        break;
++      case longargs::around_processing:
++        args.around_processing = static_cast<bool>(atoi(opt.arg));
++        break;
++      case longargs::rnnoise_level:
++        args.rnnoise_level = static_cast<float>(atof(opt.arg));
++        break;
++      case '?':
++        cerr << "Unknown option: "
++             << (opt.opt ? static_cast<char>(opt.opt) : ':') << endl;
++        args.fullyParsed = false;
++        break;
++      case ':':
++        cerr << "Missing argument: "
++             << (opt.opt ? static_cast<char>(opt.opt) : ':') << endl;
++        args.fullyParsed = false;
++        break;
++    }
++
++    if (--loopsRemaining <= 0) {
++      cerr << "Argument parsing failed." << endl;
++      args.fullyParsed = false;
++      return args;
 +    }
 +  }
 +  return args;
 +}
-+
 diff --git a/modules/audio_processing/around_runner/around_runner.cc b/modules/audio_processing/around_runner/around_runner.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..fd6f500be940cabf3a3152857f888b33009be13f
+index 0000000000000000000000000000000000000000..c44e19439e6f31d5f4c8e59b69dd437d2a2ad7f5
 --- /dev/null
 +++ b/modules/audio_processing/around_runner/around_runner.cc
-@@ -0,0 +1,330 @@
+@@ -0,0 +1,384 @@
 +#include <cstddef>
 +#include <iostream>
++
++#include "modules/video_coding/jitter_buffer_common.h"
 +
 +#ifndef WEBRTC_APM_DEBUG_DUMP
 +#define WEBRTC_APM_DEBUG_DUMP 1
@@ -219,28 +291,27 @@ index 0000000000000000000000000000000000000000..fd6f500be940cabf3a3152857f888b33
 +
 +#define UNREFERENCED_PARAMETER(x) (x)
 +
-+#define IF_TRUE_LOGERR_RETURN(condition)                        \
-+    if (condition)                                              \
-+    {                                                           \
-+        cerr << "Error: " << #condition << endline;                \
-+        return -1;                                              \
-+    }
++#define IF_TRUE_LOGERR_RETURN(condition)        \
++  if (condition) {                              \
++    cerr << "Error: " << #condition << endline; \
++    return -1;                                  \
++  }
 +
 +#if !defined(endline)
-+# if defined(WEBRTC_WIN)
-+#   define endline "\r\n"
-+# else
-+#   define endline "\n"
-+# endif
++#if defined(WEBRTC_WIN)
++#define endline "\r\n"
++#else
++#define endline "\n"
++#endif
 +#endif
 +
-+#include "mocks.h"
-+#include "../include/audio_processing.h"
 +#include "../audio_processing_impl.h"
++#include "../include/audio_processing.h"
++#include "../test/audio_processing_builder_for_testing.h"
++#include "common_audio/wav_file.h"
++#include "mocks.h"
 +#include "rtc_base/logging.h"
 +#include "rtc_base/ref_counted_object.h"
-+#include "common_audio/wav_file.h"
-+#include "../test/audio_processing_builder_for_testing.h"
 +
 +#pragma GCC diagnostic push
 +#pragma GCC diagnostic ignored "-Wunused-function"
@@ -252,109 +323,102 @@ index 0000000000000000000000000000000000000000..fd6f500be940cabf3a3152857f888b33
 +using namespace rtc;
 +using namespace std;
 +
-+class AudioProcessingImplComplete : public AudioProcessingImpl {
-+ public:
-+  explicit AudioProcessingImplComplete(const webrtc::Config& config)
-+    : AudioProcessingImpl(config) {}
-+
-+  void AddRef() const override
-+  {
-+  }
-+
-+  RefCountReleaseStatus Release() const override
-+  {
-+    return RefCountReleaseStatus::kOtherRefsRemained;
-+  }
-+};
-+
-+unique_ptr<WavReader> MakeWavReader(const string& filename)
-+{
++unique_ptr<WavReader> MakeWavReader(const string& filename) {
 +  cout << "opening file: " << filename << endline;
 +  auto res = make_unique<WavReader>(filename);
-+  cout << "Format: " << res->num_channels() << "ch/" << res->sample_rate() << "hz" << endline;
++  cout << "Format: " << res->num_channels() << "ch/" << res->sample_rate()
++       << "hz" << endline;
 +  return res;
 +}
 +
 +unique_ptr<WavWriter> MakeWavWriter(const string& filename,
 +                                    int sample_rate,
-+                                    size_t num_channels)
-+{
-+  cout << "writing file: " << filename << endline
-+    << "Format: " << num_channels << "ch/" << sample_rate << "hz" << endline;
-+  return make_unique<WavWriter>(filename, sample_rate, num_channels, WavFile::SampleFormat::kFloat);
++                                    size_t num_channels) {
++  cout << "writing file: " << filename << endline << "Format: " << num_channels
++       << "ch/" << sample_rate << "hz" << endline;
++  return make_unique<WavWriter>(filename, sample_rate, num_channels,
++                                WavFile::SampleFormat::kFloat);
 +}
 +
-+// Deinterleaves sample-interleaved data to channel-sequential blocks. Pointers must not overlap.
-+void Deinterleave(const float* in, float* out, const int frames, const int channels)
-+{
++// Deinterleaves sample-interleaved data to channel-sequential blocks. Pointers
++// must not overlap.
++void Deinterleave(const float* in,
++                  float* out,
++                  const int frames,
++                  const int channels) {
 +  // Helper pointers to output per channel.
 +  vector<float*> pOut(channels);
-+  for (int i = 0; i < channels; i++)
-+  {
++  for (int i = 0; i < channels; i++) {
 +    pOut[i] = out + (i * frames);
 +  }
 +
-+  for (int f = 0; f < frames; f++)
-+  {
-+    for (int c = 0; c < channels; c++)
-+    {
++  for (int f = 0; f < frames; f++) {
++    for (int c = 0; c < channels; c++) {
 +      *pOut[c]++ = *in++;
 +    }
 +  }
 +}
 +
-+// Interleaves channel-sequential data to sample-interleaved data. Pointers must not overlap.
-+void Interleave(const float* in, float* out, const int frames, const int channels)
-+{
++// Interleaves channel-sequential data to sample-interleaved data. Pointers must
++// not overlap.
++void Interleave(const float* in,
++                float* out,
++                const int frames,
++                const int channels) {
 +  // Helper pointers to input per channel.
 +  vector<const float*> pIn(channels);
-+  for (int i = 0; i < channels; i++)
-+  {
++  for (int i = 0; i < channels; i++) {
 +    pIn[i] = in + (i * frames);
 +  }
 +
-+  for (int f = 0; f < frames; f++)
-+  {
-+    for (int c = 0; c < channels; c++)
-+    {
++  for (int f = 0; f < frames; f++) {
++    for (int c = 0; c < channels; c++) {
 +      *out++ = *pIn[c]++;
 +    }
 +  }
 +}
 +
 +// Scales input data by a value, writing to out. In and out are OK to overlap.
-+void Scale(const float* in, float* out, const float scaleVal, const int frames, const int channels)
-+{
-+  for (int i = 0; i < frames * channels; i++)
-+  {
++void Scale(const float* in,
++           float* out,
++           const float scaleVal,
++           const int frames,
++           const int channels) {
++  for (int i = 0; i < frames * channels; i++) {
 +    out[i] = in[i] * scaleVal;
 +  }
 +}
 +
-+AudioProcessing::Config& SetConfigDefaults(AudioProcessing::Config& config)
-+{
++// Sets up Audio Processing to match what we see in Electron.
++// @Around: Updated for E16 on 21/12/2021.
++AudioProcessing::Config& SetConfigDefaults(AudioProcessing::Config& config) {
 +  config.pipeline.maximum_internal_processing_rate = 48000;
 +  config.pipeline.multi_channel_render = true;
-+  config.pipeline.multi_channel_capture = false;
++  config.pipeline.multi_channel_capture = true;
 +
 +  config.pre_amplifier.enabled = false;
++
++  config.capture_level_adjustment.enabled = false;
 +
 +  config.high_pass_filter.enabled = true;
 +
 +  config.echo_canceller.enabled = true;
 +
 +  config.noise_suppression.enabled = true;
-+  config.noise_suppression.level = AudioProcessing::Config::NoiseSuppression::kModerate;
++  config.noise_suppression.level =
++      AudioProcessing::Config::NoiseSuppression::kHigh;
 +
 +  config.transient_suppression.enabled = true;
 +
 +  config.voice_detection.enabled = false;
 +
 +  config.gain_controller1.enabled = true;
-+  config.gain_controller1.mode = AudioProcessing::Config::GainController1::kAdaptiveDigital;
-+  config.gain_controller1.analog_gain_controller.enabled = false;
++  config.gain_controller1.analog_gain_controller.startup_min_volume = 0;
++  config.gain_controller1.analog_gain_controller.enable_digital_adaptive =
++      false;
 +
-+  config.gain_controller2.enabled = false;
++  config.gain_controller2.enabled = true;
++  config.gain_controller2.adaptive_digital.enabled = true;
 +
 +  config.residual_echo_detector.enabled = false;
 +
@@ -365,43 +429,67 @@ index 0000000000000000000000000000000000000000..fd6f500be940cabf3a3152857f888b33
 +  return config;
 +}
 +
-+int main(int argc, char* argv[])
-+{
-+  if (argc <= 1)
-+  {
++// Applies command line arguments given to runner to the current config.
++AudioProcessing::Config& ApplyRunnerArgs(AudioProcessing::Config& config,
++                                         const around_args& args) {
++  if (args.aec)
++    config.echo_canceller.enabled = *args.aec;
++  if (args.ns)
++    config.noise_suppression.enabled = *args.ns;
++  if (args.ns_level)
++    config.noise_suppression.level =
++        static_cast<AudioProcessing::Config::NoiseSuppression::Level>(
++            *args.ns_level);
++  if (args.around_processing)
++    config.around_audio_processing.enabled = *args.around_processing;
++  if (args.rnnoise_level)
++    config.around_audio_processing.noise_suppression_db = *args.rnnoise_level;
++
++  return config;
++}
++
++int main(int argc, char* argv[]) {
++  if (argc <= 1) {
 +    cout << HelpString() << endline;
 +    return 0;
 +  }
 +
 +  auto args = parse_args(argc, argv);
 +
-+  if (!args.fullyParsed)
-+  {
-+    cout << "Failed to parse some args, aborting. Check that long options have '--' instead of '-'." << endline;
++  if (!args.fullyParsed) {
++    cout << "Failed to parse some args, aborting. Check that long options have "
++            "'--' instead of '-'."
++         << endline;
 +    cout << "Parsed arguments:" << endline << args.ToString() << endline;
 +    return -1;
 +  }
 +
-+  if (args.verbose)
-+  {
++  if (args.verbose) {
 +    cout << args.ToString() << endline;
 +    rtc::LogMessage::LogToDebug(rtc::LS_VERBOSE);
 +  }
 +
++  if (!args.input) {
++    cout << "Missing input filename." << endline;
++    return -1;
++  }
++
++  if (!args.output) {
++    cout << "Missing output filename." << endline;
++    return -1;
++  }
++
 +  // If no loopback file provided, pretend silence.
-+  bool useLoopbackFile = args.loopback != "" ? true : false;
++  bool useLoopbackFile = args.loopback.has_value();
 +
 +  // Input files
 +  cout << "[Input] ";
-+  auto inFile = MakeWavReader(args.input);
++  auto inFile = MakeWavReader(args.input.value());
 +  std::unique_ptr<WavReader> revInFile;
-+  if (useLoopbackFile)
-+  {
++  if (useLoopbackFile) {
 +    cout << "[Loopback] ";
-+    revInFile = MakeWavReader(args.loopback);
-+  }
-+  else
-+  {
++    revInFile = MakeWavReader(args.loopback.value());
++  } else {
 +    cout << "[Loopback] No file provided, using silence" << endline;
 +  }
 +
@@ -410,134 +498,170 @@ index 0000000000000000000000000000000000000000..fd6f500be940cabf3a3152857f888b33
 +  auto input_channels = inFile->num_channels();
 +  auto output_sample_rate = input_sample_rate;
 +  auto output_channels = input_channels;
-+  auto rev_input_sample_rate = useLoopbackFile ? revInFile->sample_rate() : input_sample_rate;
-+  auto rev_input_channels = useLoopbackFile ? revInFile->num_channels() : input_channels;
++  auto rev_input_sample_rate =
++      useLoopbackFile ? revInFile->sample_rate() : input_sample_rate;
++  auto rev_input_channels =
++      useLoopbackFile ? revInFile->num_channels() : input_channels;
 +  auto rev_output_sample_rate = rev_input_sample_rate;
 +  auto rev_output_channels = rev_input_channels;
 +
 +  // Make the APM
-+  rtc::scoped_refptr<AudioProcessingImpl> ap =
-+      new rtc::RefCountedObject<AudioProcessingImpl>(webrtc::Config());
-+  IF_TRUE_LOGERR_RETURN(AudioProcessing::kNoError != ap->Initialize());
++  rtc::scoped_refptr<AudioProcessing> ap = AudioProcessingBuilder().Create();
 +
 +  // Set stream formats
-+  ProcessingConfig proc;
-+  proc.input_stream() = StreamConfig(input_sample_rate, input_channels, false);
-+  proc.output_stream() = StreamConfig(output_sample_rate, output_channels, false);
-+  proc.reverse_input_stream() = StreamConfig(rev_input_sample_rate, rev_input_channels, false);
-+  proc.reverse_output_stream() = StreamConfig(rev_output_sample_rate, rev_output_channels, false);
-+  ap->Initialize(proc);
++  ProcessingConfig procConfig;
++  procConfig.input_stream() =
++      StreamConfig(input_sample_rate, input_channels, false);
++  procConfig.output_stream() =
++      StreamConfig(output_sample_rate, output_channels, false);
++  procConfig.reverse_input_stream() =
++      StreamConfig(rev_input_sample_rate, rev_input_channels, false);
++  procConfig.reverse_output_stream() =
++      StreamConfig(rev_output_sample_rate, rev_output_channels, false);
 +
-+  // Apply any needed pipeline config
-+  auto config = ap->GetConfig();
++  // Initialize default pipeline config, then apply runner args.
++  AudioProcessing::Config config;
 +  SetConfigDefaults(config);
-+  if (args.aec) config.echo_canceller.enabled = *args.aec;
-+  if (args.ns) config.noise_suppression.enabled = *args.ns;
-+  if (args.ns_level) config.noise_suppression.level =
-+    static_cast<AudioProcessing::Config::NoiseSuppression::Level>(*args.ns_level);
-+  if (args.rnnoise_level) config.around_audio_processing.noise_suppression_db = *args.rnnoise_level;
++  ApplyRunnerArgs(config, args);
 +  ap->ApplyConfig(config);
 +
 +  // Output files
 +  cout << "[Output]: ";
-+  auto outFile = MakeWavWriter(args.output, proc.output_stream().sample_rate_hz(), proc.output_stream().num_channels());
++  auto outFile = MakeWavWriter(args.output.value(),
++                               procConfig.output_stream().sample_rate_hz(),
++                               procConfig.output_stream().num_channels());
 +
 +  // Print config
-+  if (args.verbose)
-+  {
++  if (args.verbose) {
 +    cout << ap->GetConfig().ToString() << endline;
 +  }
 +
 +  // Setup needed buffers
-+  vector<float> inInterleaved(proc.input_stream().num_samples(), 0.0f);
-+  vector<float> outInterleaved(proc.output_stream().num_samples(), 0.0f);
-+  vector<float> revInInterleaved(proc.reverse_input_stream().num_samples(), 0.0f);
-+  vector<float> revOutInterleaved(proc.reverse_output_stream().num_samples(), 0.0f);
++  vector<float> inInterleaved(procConfig.input_stream().num_samples(), 0.0f);
++  vector<float> outInterleaved(procConfig.output_stream().num_samples(), 0.0f);
++  vector<float> revInInterleaved(
++      procConfig.reverse_input_stream().num_samples(), 0.0f);
++  vector<float> revOutInterleaved(
++      procConfig.reverse_output_stream().num_samples(), 0.0f);
 +
-+  vector<float> inDeinterleaved(proc.input_stream().num_samples(), 0.0f);
-+  vector<float> outDeinterleaved(proc.output_stream().num_samples(), 0.0f);
-+  vector<float> revInDeinterleaved(proc.reverse_input_stream().num_samples(), 0.0f);
-+  vector<float> revOutDeinterleaved(proc.reverse_output_stream().num_samples(), 0.0f);
++  vector<float> inDeinterleaved(procConfig.input_stream().num_samples(), 0.0f);
++  vector<float> outDeinterleaved(procConfig.output_stream().num_samples(),
++                                 0.0f);
++  vector<float> revInDeinterleaved(
++      procConfig.reverse_input_stream().num_samples(), 0.0f);
++  vector<float> revOutDeinterleaved(
++      procConfig.reverse_output_stream().num_samples(), 0.0f);
 +
-+  vector<float*> inBuffers(proc.input_stream().num_channels());
-+  vector<float*> outBuffers(proc.output_stream().num_channels());
-+  vector<float*> revInBuffers(proc.reverse_input_stream().num_channels());
-+  vector<float*> revOutBuffers(proc.reverse_output_stream().num_channels());
++  vector<float*> inBuffers(procConfig.input_stream().num_channels());
++  vector<float*> outBuffers(procConfig.output_stream().num_channels());
++  vector<float*> revInBuffers(procConfig.reverse_input_stream().num_channels());
++  vector<float*> revOutBuffers(
++      procConfig.reverse_output_stream().num_channels());
 +
-+  for (size_t i = 0; i < inBuffers.size(); i++)
-+  { inBuffers[i] = &inDeinterleaved[i * proc.input_stream().num_frames()]; }
-+  for (size_t i = 0; i < outBuffers.size(); i++)
-+  { outBuffers[i] = &outDeinterleaved[i * proc.output_stream().num_frames()]; }
-+  for (size_t i = 0; i < revInBuffers.size(); i++)
-+  { revInBuffers[i] = &revInDeinterleaved[i * proc.reverse_input_stream().num_frames()]; }
-+  for (size_t i = 0; i < revOutBuffers.size(); i++)
-+  { revOutBuffers[i] = &revOutDeinterleaved[i * proc.reverse_output_stream().num_frames()]; }
++  for (size_t i = 0; i < inBuffers.size(); i++) {
++    inBuffers[i] = &inDeinterleaved[i * procConfig.input_stream().num_frames()];
++  }
++  for (size_t i = 0; i < outBuffers.size(); i++) {
++    outBuffers[i] =
++        &outDeinterleaved[i * procConfig.output_stream().num_frames()];
++  }
++  for (size_t i = 0; i < revInBuffers.size(); i++) {
++    revInBuffers[i] =
++        &revInDeinterleaved[i * procConfig.reverse_input_stream().num_frames()];
++  }
++  for (size_t i = 0; i < revOutBuffers.size(); i++) {
++    revOutBuffers[i] =
++        &revOutDeinterleaved[i *
++                             procConfig.reverse_output_stream().num_frames()];
++  }
 +
 +  // Process
 +  size_t inSamplesProcessed = 0;
 +  size_t revSamplesProcessed = 0;
 +  bool moreData = true;
-+  while (moreData)
-+  {
++  while (moreData) {
 +    // Read new file data
-+    size_t numInputSamplesActual = inFile->ReadSamples(proc.input_stream().num_samples(), inInterleaved.data());
-+    if (numInputSamplesActual < proc.input_stream().num_samples())
++    size_t numInputSamplesActual = inFile->ReadSamples(
++        procConfig.input_stream().num_samples(), inInterleaved.data());
++    if (numInputSamplesActual < procConfig.input_stream().num_samples())
 +      moreData = false;
 +    size_t numRevInputSamplesActual = 0U;
-+    if (useLoopbackFile)
-+    {
-+      numRevInputSamplesActual = revInFile->ReadSamples(proc.reverse_input_stream().num_samples(), revInInterleaved.data());
-+      if (numRevInputSamplesActual < proc.reverse_input_stream().num_samples())
++    if (useLoopbackFile) {
++      numRevInputSamplesActual = revInFile->ReadSamples(
++          procConfig.reverse_input_stream().num_samples(),
++          revInInterleaved.data());
++      if (numRevInputSamplesActual <
++          procConfig.reverse_input_stream().num_samples())
 +        moreData = false;
 +    }
 +
 +    // Deinterleave
 +    Deinterleave(inInterleaved.data(), inDeinterleaved.data(),
-+      proc.input_stream().num_frames(), proc.input_stream().num_channels());
++                 procConfig.input_stream().num_frames(),
++                 procConfig.input_stream().num_channels());
 +    Deinterleave(revInInterleaved.data(), revInDeinterleaved.data(),
-+      proc.reverse_input_stream().num_frames(), proc.reverse_input_stream().num_channels());
++                 procConfig.reverse_input_stream().num_frames(),
++                 procConfig.reverse_input_stream().num_channels());
 +
-+    // Scale, since WebRTC processing needs [0, 1] and WavReader scales to [0, 32767]
-+    Scale(inDeinterleaved.data(), inDeinterleaved.data(), 1.0f/32767.0f,
-+      proc.input_stream().num_frames(), proc.input_stream().num_channels());
-+    Scale(revInDeinterleaved.data(), revInDeinterleaved.data(), 1.0f/32767.0f,
-+      proc.reverse_input_stream().num_frames(), proc.reverse_input_stream().num_channels());
++    // Scale, since WebRTC processing needs [0, 1] and WavReader scales to [0,
++    // 32767]
++    Scale(inDeinterleaved.data(), inDeinterleaved.data(), 1.0f / 32767.0f,
++          procConfig.input_stream().num_frames(),
++          procConfig.input_stream().num_channels());
++    Scale(revInDeinterleaved.data(), revInDeinterleaved.data(), 1.0f / 32767.0f,
++          procConfig.reverse_input_stream().num_frames(),
++          procConfig.reverse_input_stream().num_channels());
 +
-+    // Process
++    // Process. Per audio_processing.h reverse stream should go first.
 +    int processResult = AudioProcessing::kNoError;
-+    processResult = ap->ProcessStream(inBuffers.data(), proc.input_stream(), proc.output_stream(), outBuffers.data());
-+    if (processResult != AudioProcessing::kNoError)
-+    {
-+      cout << "ProcessStream error: " << processResult << endline;
++    processResult = ap->ProcessReverseStream(
++        revInBuffers.data(), procConfig.reverse_input_stream(),
++        procConfig.reverse_output_stream(), revOutBuffers.data());
++    if (processResult != AudioProcessing::kNoError) {
++      cout << "ProcessReverseStream error: " << processResult << endline;
 +      moreData = false;
 +    }
-+    processResult = ap->ProcessReverseStream(revInBuffers.data(), proc.reverse_input_stream(), proc.reverse_output_stream(), revOutBuffers.data());
-+    if (processResult != AudioProcessing::kNoError)
-+    {
-+      cout << "ProcessReverseStream error: " << processResult << endline;
++
++    // Always mock full volume & small delay.
++    ap->set_stream_analog_level(255);
++    ap->set_stream_delay_ms(1);
++
++    processResult =
++        ap->ProcessStream(inBuffers.data(), procConfig.input_stream(),
++                          procConfig.output_stream(), outBuffers.data());
++    if (processResult != AudioProcessing::kNoError) {
++      cout << "ProcessStream error: " << processResult << endline;
 +      moreData = false;
 +    }
 +
 +    // Interleave
 +    Interleave(outDeinterleaved.data(), outInterleaved.data(),
-+      proc.output_stream().num_frames(), proc.output_stream().num_channels());
++               procConfig.output_stream().num_frames(),
++               procConfig.output_stream().num_channels());
 +    Interleave(revOutDeinterleaved.data(), revOutInterleaved.data(),
-+      proc.reverse_output_stream().num_frames(), proc.reverse_output_stream().num_channels());
++               procConfig.reverse_output_stream().num_frames(),
++               procConfig.reverse_output_stream().num_channels());
 +
 +    // Re-scale back to [0, 32767] since WavWriter expects this range.
 +    Scale(outInterleaved.data(), outInterleaved.data(), 32767.0f,
-+      proc.output_stream().num_frames(), proc.output_stream().num_channels());
++          procConfig.output_stream().num_frames(),
++          procConfig.output_stream().num_channels());
 +
 +    // Write
-+    outFile->WriteSamples(outInterleaved.data(), proc.output_stream().num_samples());
-+    // Not bothering to write the reverse output, it's the same as loopback right now.
++    outFile->WriteSamples(outInterleaved.data(),
++                          procConfig.output_stream().num_samples());
++    // Not bothering to write the reverse output, it's the same as loopback
++    // right now.
 +
 +    inSamplesProcessed += numInputSamplesActual;
 +    revSamplesProcessed += numRevInputSamplesActual;
 +  }
 +
-+  cout << "Input frames processed: " << inSamplesProcessed / proc.input_stream().num_channels() << endline
-+       << "Reverse frames processed: " << revSamplesProcessed / proc.reverse_input_stream().num_channels() << endline;
++  cout << "Input frames processed: "
++       << inSamplesProcessed / procConfig.input_stream().num_channels()
++       << endline << "Reverse frames processed: "
++       << revSamplesProcessed / procConfig.reverse_input_stream().num_channels()
++       << endline;
 +  return 0;
 +}
 diff --git a/modules/audio_processing/around_runner/ketopt.h b/modules/audio_processing/around_runner/ketopt.h
