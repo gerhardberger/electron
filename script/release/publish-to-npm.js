@@ -16,10 +16,10 @@ const octokit = new Octokit({
   auth: process.env.ELECTRON_GITHUB_TOKEN
 });
 
-if (!process.env.ELECTRON_NPM_OTP) {
-  console.error('Please set ELECTRON_NPM_OTP');
-  process.exit(1);
-}
+// if (!process.env.ELECTRON_NPM_OTP) {
+//   console.error('Please set ELECTRON_NPM_OTP');
+//   process.exit(1);
+// }
 
 let tempDir;
 temp.track(); // track and cleanup files at exit
@@ -78,8 +78,8 @@ new Promise((resolve, reject) => {
     );
 
     return octokit.repos.listReleases({
-      owner: 'electron',
-      repo: isNightlyElectronVersion ? 'nightlies' : 'electron'
+      owner: 'gerhardberger',
+      repo: 'electron-releases'
     });
   })
   .then((releases) => {
@@ -99,7 +99,7 @@ new Promise((resolve, reject) => {
     }
 
     const typingsContent = await getAssetContents(
-      isNightlyElectronVersion ? 'nightlies' : 'electron',
+      'electron-releases',
       tsdAsset.id
     );
 
@@ -114,7 +114,7 @@ new Promise((resolve, reject) => {
     }
 
     const checksumsContent = await getAssetContents(
-      isNightlyElectronVersion ? 'nightlies' : 'electron',
+      'electron-releases',
       checksumsAsset.id
     );
 
@@ -189,11 +189,7 @@ new Promise((resolve, reject) => {
     });
   })
   .then((tarballPath) => {
-    const existingVersionJSON = childProcess.execSync(`npx npm@7 view ${rootPackageJson.name}@${currentElectronVersion} --json`).toString('utf-8');
-    // It's possible this is a re-run and we already have published the package, if not we just publish like normal
-    if (!existingVersionJSON) {
-      childProcess.execSync(`npm publish ${tarballPath} --tag ${npmTag} --otp=${process.env.ELECTRON_NPM_OTP}`);
-    }
+    childProcess.execSync(`npm publish ${tarballPath} --tag ${npmTag} --skip-verification`);
   })
   .then(() => {
     const currentTags = JSON.parse(childProcess.execSync('npm show electron dist-tags --json').toString());
