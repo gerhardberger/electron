@@ -4,8 +4,6 @@
 
 #include "shell/renderer/preload_utils.h"
 
-#include <array>
-#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -18,18 +16,13 @@
 #include "base/strings/string_util.h"
 #include "chrome/common/chrome_version.h"
 #include "content/public/renderer/render_frame.h"
-#include "crypto/hash.h"
 #include "electron/buildflags/buildflags.h"
 #include "electron/electron_version.h"
 #include "electron/shell/common/api/api.mojom.h"
-#include "mojo/public/cpp/base/big_buffer.h"
-#include "mojo/public/cpp/bindings/associated_remote.h"
 #include "shell/common/gin_helper/dictionary.h"
 #include "shell/common/node_bindings.h"
-#include "shell/common/web_contents_utility.mojom.h"
 #include "shell/renderer/electron_api_service_impl.h"
 #include "shell/renderer/service_worker_data.h"
-#include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
 #include "third_party/electron_node/src/node_binding.h"
 #include "third_party/electron_node/src/node_metadata.h"
 #include "third_party/icu/source/common/unicode/uvernum.h"
@@ -152,22 +145,9 @@ v8::Local<v8::Value> CreatePreloadScript(
       gin::StringToV8(isolate, "\n//# electronPreloadParameters=" +
                                    base::JoinString(param_name_strings, ",")));
 
-  std::unique_ptr<v8::ScriptCompiler::CachedData> cached_data;
-  if (ps->code_cache) {
-    base::span<const uint8_t> cache = *ps->code_cache;
-    cached_data = std::make_unique<v8::ScriptCompiler::CachedData>(
-        cache.data(), base::checked_cast<int>(cache.size()),
-        v8::ScriptCompiler::CachedData::BufferNotOwned);
-  }
-  bool had_cache = !!cached_data;
-  // ScriptOrigin gives stack traces the real file path instead of <anonymous>.
-  // It's metadata, not part of V8's CachedData hash. Source takes ownership of
-  // cached_data.
   v8::ScriptOrigin origin(gin::StringToV8(isolate, ps->file_path));
-  v8::ScriptCompiler::Source compiler_source(body, origin,
-                                             cached_data.release());
-  auto options = had_cache ? v8::ScriptCompiler::kConsumeCodeCache
-                           : v8::ScriptCompiler::kNoCompileOptions;
+  v8::ScriptCompiler::Source compiler_source(body, origin);
+  const auto options = v8::ScriptCompiler::kNoCompileOptions;
 
   // CompileFunction() takes the bare body + parameter names — no wrapper
   // string, and stack traces get correct line numbers.
@@ -179,29 +159,6 @@ v8::Local<v8::Value> CreatePreloadScript(
     return {};
   }
 
-  // No usable cache (cold, or V8 rejected a stale blob): produce one and ship
-  // it to the browser for persistence. SW realms have no ship-back channel.
-  bool consumed = had_cache && compiler_source.GetCachedData() &&
-                  !compiler_source.GetCachedData()->rejected;
-  if (!consumed && render_frame) {
-    std::unique_ptr<v8::ScriptCompiler::CachedData> produced(
-        v8::ScriptCompiler::CreateCodeCacheForFunction(fn));
-    if (produced && produced->length > 0) {
-      mojo::AssociatedRemote<mojom::ElectronWebContentsUtility> remote;
-      render_frame->GetRemoteAssociatedInterfaces()->GetInterface(&remote);
-      // Hash of the exact source compiled — the browser only serves the
-      // blob back for matching contents.
-      std::array<uint8_t, crypto::hash::kSha256Size> source_hash =
-          crypto::hash::Sha256(contents);
-      // SAFETY: produced->data points to produced->length contiguous bytes
-      // owned by the CachedData.
-      remote->SetPreloadCodeCache(
-          script_id,
-          std::vector<uint8_t>(source_hash.begin(), source_hash.end()),
-          mojo_base::BigBuffer(UNSAFE_BUFFERS(base::span(
-              produced->data, base::checked_cast<size_t>(produced->length)))));
-    }
-  }
   return fn;
 }
 

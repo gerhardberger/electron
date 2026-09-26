@@ -20,6 +20,8 @@ filenames = {
   ]
 
   lib_sources_linux = [
+    "shell/app/node_main.cc",
+    "shell/app/node_main.h",
     "shell/browser/browser_linux.cc",
     "shell/browser/lib/power_observer_linux.cc",
     "shell/browser/lib/power_observer_linux.h",
@@ -121,6 +123,8 @@ filenames = {
   ]
 
   lib_sources_mac = [
+    "shell/app/node_main.cc",
+    "shell/app/node_main.h",
     "shell/app/electron_main_delegate_mac.h",
     "shell/app/electron_main_delegate_mac.mm",
     "shell/app/electron_prefetch_mac.h",
@@ -270,8 +274,6 @@ filenames = {
     "shell/app/electron_crash_reporter_client.h",
     "shell/app/electron_main_delegate.cc",
     "shell/app/electron_main_delegate.h",
-    "shell/app/node_main.cc",
-    "shell/app/node_main.h",
     "shell/app/uv_task_runner.cc",
     "shell/app/uv_task_runner.h",
     "shell/browser/api/electron_api_app.cc",

@@ -14,9 +14,9 @@
 #include <string>
 #include <utility>
 
-#include "base/at_exit.h"
 #include "base/debug/alias.h"
-#include "base/i18n/icu_util.h"
+#include "base/memory/raw_ptr_exclusion.h"
+#include "base/process/launch.h"
 #include "base/process/process.h"
 #include "base/strings/cstring_view.h"
 #include "base/win/atl.h"  // ensures that ATL statics like `_AtlWinModule` are initialized (it's an issue in static debug build)
@@ -26,11 +26,10 @@
 #include "components/crash/core/app/run_as_crashpad_handler_win.h"
 #include "content/public/app/content_main.h"
 #include "content/public/app/sandbox_helper_win.h"
-#include "electron/fuses.h"
+#include "electron/buildflags/buildflags.h"
 #include "sandbox/win/src/sandbox_types.h"
 #include "shell/app/command_line_args.h"
 #include "shell/app/electron_main_delegate.h"
-#include "shell/app/node_main.h"
 #include "shell/common/electron_command_line.h"
 #include "shell/common/electron_constants.h"
 #include "third_party/crashpad/crashpad/util/win/initial_client_data.h"
@@ -150,18 +149,9 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, wchar_t* cmd, int) {
   }
 #endif
 
-  bool run_as_node =
-      electron::fuses::IsRunAsNodeEnabled() && IsEnvSet(electron::kRunAsNode);
-
   // Make sure the output is printed to console.
-  if (run_as_node || !IsEnvSet("ELECTRON_NO_ATTACH_CONSOLE"))
+  if (!IsEnvSet("ELECTRON_NO_ATTACH_CONSOLE"))
     base::RouteStdioToConsole(false);
-
-  if (run_as_node) {
-    base::AtExitManager atexit_manager;
-    base::i18n::InitializeICU();
-    return electron::NodeMain();
-  }
 
   const base::CommandLine* command_line =
       base::CommandLine::ForCurrentProcess();

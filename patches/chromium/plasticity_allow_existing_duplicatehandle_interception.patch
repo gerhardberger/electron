@@ -1,0 +1,24 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Plastic Software LLC <security@plasticity.xyz>
+Subject: plasticity: preserve working DuplicateHandle compatibility
+
+diff --git a/sandbox/policy/win/sandbox_win.cc b/sandbox/policy/win/sandbox_win.cc
+index b705450708560..30d5a9ea94534 100644
+--- a/sandbox/policy/win/sandbox_win.cc
++++ b/sandbox/policy/win/sandbox_win.cc
+@@ -887,10 +887,11 @@ bool SandboxWin::InitBrokerServices(BrokerServices* broker_services) {
+       result = GetIATPatchFunctionHandle().Patch(
+           module_name, "kernel32.dll", "DuplicateHandle",
+           reinterpret_cast<void*>(DuplicateHandlePatch));
+-      CHECK_EQ(0u, result);
+-      g_iat_orig_duplicate_handle =
+-          reinterpret_cast<DuplicateHandleFunctionPtr>(
+-              GetIATPatchFunctionHandle().original_function());
++      if (result == 0) {
++        g_iat_orig_duplicate_handle =
++            reinterpret_cast<DuplicateHandleFunctionPtr>(
++                GetIATPatchFunctionHandle().original_function());
++      }
+     }
+   }
+ #endif

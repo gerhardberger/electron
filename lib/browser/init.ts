@@ -1,10 +1,6 @@
 import { EventEmitter } from 'events';
-import * as path from 'path';
 
-import type * as url from 'url';
 import type * as v8 from 'v8';
-
-const Module = require('module') as NodeJS.ModuleInternal;
 
 // Import common settings.
 require('@electron/internal/common/init');
@@ -100,22 +96,7 @@ if (appPackage.v8Flags) {
   (require('v8') as typeof v8).setFlagsFromString(appPackage.v8Flags);
 }
 
-// Finally load app's main script and transfer control to C++.
-if (appPackage.esm) {
-  const { runEntryPointWithESMLoader } =
-    require('internal/modules/run_main') as typeof import('@node/lib/internal/modules/run_main');
-  const main = (require('url') as typeof url).pathToFileURL(path.join(appPackage.path, appPackage.main));
-  runEntryPointWithESMLoader(async (cascadedLoader: any) => {
-    try {
-      await cascadedLoader.import(main.toString(), undefined, Object.create(null));
-      appCodeLoaded!();
-    } catch (err) {
-      appCodeLoaded!();
-      process.emit('uncaughtException', err as Error);
-    }
-  });
-} else {
-  // Call appCodeLoaded before just for safety, it doesn't matter here as _load is synchronous
-  appCodeLoaded!();
-  Module._load(path.join(appPackage.path, appPackage.main), Module, true);
-}
+// The app's entry script is loaded natively by
+// plasticity::secure::RunApplication once the environment is up; here we only
+// signal that framework initialization has finished.
+appCodeLoaded!();

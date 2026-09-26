@@ -1,0 +1,58 @@
+assert(is_win && current_cpu == "x64",
+       "plasticity_secure currently supports Windows x64 only")
+import("//third_party/nasm/nasm_assemble.gni")
+
+static_library("plasticity_secure") {
+  include_dirs = [ ".." ]
+
+  sources = [
+    "include/plasticity_secure/plasticity_secure.h",
+    "src/asset_pack.h",
+    "src/crypto.h",
+    "src/failure.h",
+    "src/key_config.h",
+    "src/runtime.cc",
+    "src/virtualizer.h",
+    "src/wrap_key.h",
+  ]
+
+  public_configs = [ ":public_config" ]
+
+  configs += [ "//third_party/electron_node:node_external_config" ]
+
+  deps = [
+    ":ed25519",
+    "//base",
+    "//third_party/electron_node:libnode",
+    "//v8",
+  ]
+}
+
+source_set("ed25519") {
+  sources = [
+    "third_party/ed25519/fe.c",
+    "third_party/ed25519/ge.c",
+    "third_party/ed25519/sc.c",
+    "third_party/ed25519/sha512.c",
+    "third_party/sha2/cpu.cc",
+    "third_party/sha2/sha256.h",
+  ]
+  deps = [ ":sha2_asm" ]
+  configs -= [
+    "//build/config/compiler:chromium_code",
+    "//build/config/clang:unsafe_buffers",
+  ]
+  configs += [ "//build/config/compiler:no_chromium_code" ]
+}
+
+nasm_assemble("sha2_asm") {
+  sources = [
+    "third_party/sha2/sha256-blocks.asm",
+    "third_party/sha2/sha512-blocks.asm",
+  ]
+}
+
+config("public_config") {
+  include_dirs = [ "include" ]
+  libs = [ "bcrypt.lib" ]
+}

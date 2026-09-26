@@ -1,0 +1,4 @@
+import("//electron/build/args/release.gn")
+
+v8_enable_sandbox = false
+node_use_node_snapshot = false

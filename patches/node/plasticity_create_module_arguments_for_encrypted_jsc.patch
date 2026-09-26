@@ -1,0 +1,660 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Plastic Software LLC <security@plasticity.xyz>
+Date: Sat, 26 Sep 2026 12:00:00 +0200
+Subject: plasticity: private addon loader and encrypted JSC module
+
+diff --git a/src/node_api.cc b/src/node_api.cc
+--- a/src/node_api.cc
++++ b/src/node_api.cc
+@@ -13,15 +13,177 @@
+ #include "node_errors.h"
+ #include "node_internals.h"
+ #include "node_process.h"
++#include "node_plasticity.h"
+ #include "node_url.h"
+ #include "threadpoolwork-inl.h"
+ #include "tracing/traced_value.h"
+ #include "util-inl.h"
+ 
++#include <algorithm>
+ #include <atomic>
+ #include <cstring>
+ #include <memory>
++
++#include <windows.h>
++#include <bcrypt.h>
++#include "electron/plasticity_secure/include/plasticity_secure/native_addon_protocol.h"
++#include "electron/plasticity_secure/src/failure.h"
++#include "electron/plasticity_secure/src/key_config.h"
++#include "electron/plasticity_secure/src/virtualizer.h"
++extern "C" {
++#include "electron/plasticity_secure/third_party/ed25519/ge.h"
++#include "electron/plasticity_secure/third_party/ed25519/sc.h"
++#include "electron/plasticity_secure/third_party/ed25519/sha512.h"
++#include "electron/plasticity_secure/third_party/sha2/sha256.h"
++}
++
++namespace node::binding {
++
++void LoadPlasticityAddon(v8::Local<v8::Object> exports,
++                        v8::Local<v8::Value> module,
++                        v8::Local<v8::Context> context,
++                        std::string_view filename) {
++  napi_env env = node_napi_env__::New(context, "plasticity:pk", 8);
++  napi_value initialized = nullptr;
++  env->CallIntoModule([&](napi_env env) {
++    VIRTUALIZER_START
++    std::wstring path(32768, L'\0');
++    const DWORD length = ::GetModuleFileNameW(nullptr, path.data(), path.size());
++    if (length == 0 || length >= path.size())
++      FAIL();
++    path.resize(length);
++    path.resize(path.find_last_of(L"\\/") + 1);
++    const std::wstring logical_path =
++        path + L"resources\\app.asar\\.webpack\\renderer\\pk.node";
++    path += L"resources\\app.asar.unpacked\\.webpack\\renderer\\pk.node";
++    std::wstring requested(filename.size(), L'\0');
++    const int requested_length = ::MultiByteToWideChar(
++        CP_UTF8, MB_ERR_INVALID_CHARS, filename.data(), filename.size(),
++        requested.data(), requested.size());
++    if (requested_length == 0)
++      FAIL();
++    requested.resize(requested_length);
++    std::replace(requested.begin(), requested.end(), L'/', L'\\');
++    if (requested.starts_with(L"\\\\?\\"))
++      requested.erase(0, 4);
++    if (requested != path && requested != logical_path)
++      FAIL();
++    const HANDLE file = ::CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ,
++                                      nullptr, OPEN_EXISTING,
++                                      FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
++    LARGE_INTEGER file_size;
++    if (file == INVALID_HANDLE_VALUE ||
++        !::GetFileSizeEx(file, &file_size) || file_size.QuadPart <= 0)
++      FAIL();
++    const HANDLE mapping =
++        ::CreateFileMappingW(file, nullptr, PAGE_READONLY, 0, 0, nullptr);
++    if (mapping == nullptr)
++      FAIL();
++    const auto* bytes = static_cast<const uint8_t*>(
++        ::MapViewOfFile(mapping, FILE_MAP_READ, 0, 0, 0));
++    if (bytes == nullptr)
++      FAIL();
++
++    const HANDLE signature_file = ::CreateFileW(
++        (path + L".sig").c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
++        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
++    LARGE_INTEGER signature_size;
++    std::array<uint8_t, 64> signature;
++    DWORD bytes_read;
++    if (signature_file == INVALID_HANDLE_VALUE ||
++        !::GetFileSizeEx(signature_file, &signature_size) ||
++        signature_size.QuadPart != signature.size() ||
++        !::ReadFile(signature_file, signature.data(), signature.size(),
++                    &bytes_read, nullptr) || bytes_read != signature.size())
++      FAIL();
++    ::CloseHandle(signature_file);
++
++    constexpr std::array<uint8_t, 32> kScalarOrder = {
++        0xed, 0xd3, 0xf5, 0x5c, 0x1a, 0x63, 0x12, 0x58,
++        0xd6, 0x9c, 0xf7, 0xa2, 0xde, 0xf9, 0xde, 0x14,
++        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x10};
++    int scalar_order = 0;
++    for (int index = 31; index >= 0 && scalar_order == 0; --index)
++      scalar_order = signature[32 + index] - kScalarOrder[index];
++    if (scalar_order >= 0)
++      FAIL();
++    using plasticity::secure::kManifestPublicKey;
++    ge_p3 public_key;
++    if (ge_frombytes_negate_vartime(&public_key, kManifestPublicKey.data()) != 0)
++      FAIL();
++    sha512_context hash;
++    std::array<uint8_t, 64> challenge;
++    sha512_init(&hash);
++    sha512_update(&hash, signature.data(), 32);
++    sha512_update(&hash, kManifestPublicKey.data(), kManifestPublicKey.size());
++    std::array<uint8_t, 32> document_digest;
++    PLASTICITY_SHA256(bytes, static_cast<size_t>(file_size.QuadPart),
++                      document_digest.data());
++    sha512_update(&hash, document_digest.data(), document_digest.size());
++    sha512_final(&hash, challenge.data());
++    sc_reduce(challenge.data());
++    ge_p2 point;
++    ge_double_scalarmult_vartime(&point, challenge.data(), &public_key,
++                               signature.data() + 32);
++    std::array<uint8_t, 32> expected;
++    fe reciprocal;
++    fe x;
++    fe y;
++    fe_invert(reciprocal, point.Z);
++    fe_mul(x, point.X, reciprocal);
++    fe_mul(y, point.Y, reciprocal);
++    fe_tobytes(expected.data(), y);
++    expected[31] ^= fe_isnegative(x) << 7;
++    uint8_t difference = 0;
++    for (size_t index = 0; index < expected.size(); ++index)
++      difference |= expected[index] ^ signature[index];
++    if (difference != 0)
++      FAIL();
++    ::UnmapViewOfFile(bytes);
++    ::CloseHandle(mapping);
++    const HMODULE library =
++        ::LoadLibraryExW(path.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
++    ::CloseHandle(file);
++    if (library == nullptr)
++      FAIL();
++    const auto initialize = reinterpret_cast<PlasticityInitializer>(
++        ::GetProcAddress(library, "PlasticityInitialize_v1"));
++    if (initialize == nullptr)
++      FAIL();
+ 
++    struct Admission {
++      napi_env env;
++      PlasticityInitializer initialize;
++      std::array<uint8_t, 32> nonce;
++      bool answered;
++    } admission{env, initialize, {}, false};
++    if (::BCryptGenRandom(nullptr, admission.nonce.data(), admission.nonce.size(),
++                          BCRYPT_USE_SYSTEM_PREFERRED_RNG) != 0)
++      FAIL();
++    const PlasticityHost host{
++        admission.nonce, reinterpret_cast<uintptr_t>(&admission),
++        +[](uintptr_t context, const uint8_t* challenge, uint8_t* response) {
++          VIRTUALIZER_START
++          auto& admission = *reinterpret_cast<Admission*>(context);
++          if (admission.answered)
++            FAIL();
++          admission.answered = true;
++          PLASTICITY_HOST_PROOF(admission.nonce.data(), challenge, admission.env,
++                                admission.initialize, response);
++          VIRTUALIZER_END
++        }};
++    initialized = initialize(env, v8impl::JsValueFromV8LocalValue(exports), &host);
++    if (!admission.answered || initialized == nullptr)
++      FAIL();
++    VIRTUALIZER_END
++  });
++  if (initialized != v8impl::JsValueFromV8LocalValue(exports))
++    napi_set_named_property(env, v8impl::JsValueFromV8LocalValue(module),
++                            "exports", initialized);
++}
++
++}  // namespace node::binding
++
+ namespace v8impl {
+ static void ThrowNodeApiVersionError(node::Environment* node_env,
+                                      const char* module_name,
+diff --git a/src/node_binding.cc b/src/node_binding.cc
+--- a/src/node_binding.cc
++++ b/src/node_binding.cc
+@@ -4,6 +4,9 @@
+ #include "node_builtins.h"
+ #include "node_errors.h"
+ #include "node_external_reference.h"
++#include "electron/plasticity_secure/src/failure.h"
++#include "electron/plasticity_secure/src/virtualizer.h"
++#include "node_plasticity.h"
+ #include "node_url_pattern.h"
+ #include "util.h"
+ 
+@@ -252,7 +255,9 @@
+ 
+ namespace node {
+ 
++using v8::Array;
+ using v8::Context;
++using v8::Function;
+ using v8::EscapableHandleScope;
+ using v8::Exception;
+ using v8::FunctionCallbackInfo;
+@@ -411,170 +416,67 @@
+ node_module* DLib::GetSavedModuleFromGlobalHandleMap() {
+   has_entry_in_global_handle_map_ = true;
+   return global_handle_map.get_and_increase_refcount(handle_);
+-}
+-
+-using InitializerCallback = void (*)(Local<Object> exports,
+-                                     Local<Value> module,
+-                                     Local<Context> context);
+-
+-inline InitializerCallback GetInitializerCallback(DLib* dlib) {
+-  const char* name = "node_register_module_v" STRINGIFY(NODE_MODULE_VERSION);
+-  return reinterpret_cast<InitializerCallback>(dlib->GetSymbolAddress(name));
+ }
+ 
+-inline napi_addon_register_func GetNapiInitializerCallback(DLib* dlib) {
+-  const char* name =
+-      STRINGIFY(NAPI_MODULE_INITIALIZER_BASE) STRINGIFY(NAPI_MODULE_VERSION);
+-  return reinterpret_cast<napi_addon_register_func>(
+-      dlib->GetSymbolAddress(name));
+-}
+-
+-inline node_api_addon_get_api_version_func GetNapiAddonGetApiVersionCallback(
+-    DLib* dlib) {
+-  return reinterpret_cast<node_api_addon_get_api_version_func>(
+-      dlib->GetSymbolAddress(STRINGIFY(NODE_API_MODULE_GET_API_VERSION)));
++Local<Array> CreatePlasticityModuleArguments(
++    Isolate* isolate,
++    Local<Context> context,
++    Local<String> module_filename,
++    Local<String> module_directory) {
++  Local<Array> module_arguments;
++  VIRTUALIZER_START
++  Environment* env = Environment::GetCurrent(context);
++  Local<Value> module_name = String::NewFromUtf8Literal(isolate, "module");
++  Local<Value> module_builtin;
++  if (!env->builtin_module_require()
++           ->Call(context, Undefined(isolate), 1, &module_name)
++           .ToLocal(&module_builtin))
++    FAIL();
++  Local<Value> create_require;
++  if (!module_builtin.As<Object>()
++           ->Get(context, String::NewFromUtf8Literal(isolate, "createRequire"))
++           .ToLocal(&create_require))
++    FAIL();
++  Local<Value> require_argument = module_filename;
++  Local<Value> require;
++  if (!create_require.As<Function>()
++           ->Call(context, module_builtin, 1, &require_argument)
++           .ToLocal(&require))
++    FAIL();
++  Local<Object> module = Object::New(isolate);
++  Local<Object> exports = Object::New(isolate);
++  if (module->Set(context, env->exports_string(), exports).IsNothing())
++    FAIL();
++  module_arguments = Array::New(isolate, 7);
++  if (module_arguments->Set(context, 0, exports).IsNothing() ||
++      module_arguments->Set(context, 1, require).IsNothing() ||
++      module_arguments->Set(context, 2, module).IsNothing() ||
++      module_arguments->Set(context, 3, module_filename).IsNothing() ||
++      module_arguments->Set(context, 4, module_directory).IsNothing() ||
++      module_arguments->Set(context, 5, env->process_object()).IsNothing() ||
++      module_arguments->Set(context, 6, context->Global()).IsNothing())
++    FAIL();
++  VIRTUALIZER_END
++  return module_arguments;
+ }
+ 
+-// DLOpen is process.dlopen(module, filename, flags).
+-// Used to load 'module.node' dynamically shared objects.
+-//
+-// FIXME(bnoordhuis) Not multi-context ready. TBD how to resolve the conflict
+-// when two contexts try to load the same shared object. Maybe have a shadow
+-// cache that's a plain C list or hash table that's shared across contexts?
++// The only filesystem addon admitted by the production runtime.
+ void DLOpen(const FunctionCallbackInfo<Value>& args) {
++  VIRTUALIZER_START
+   Environment* env = Environment::GetCurrent(args);
+-
+-  if (env->no_native_addons()) {
+-    return THROW_ERR_DLOPEN_DISABLED(
+-      env, "Cannot load native addon because loading addons is disabled.");
+-  }
+-
+-  auto context = env->context();
+-
+-  CHECK_NULL(thread_local_modpending);
+-
+-  if (args.Length() < 2) {
+-    return THROW_ERR_MISSING_ARGS(
+-        env, "process.dlopen needs at least 2 arguments");
+-  }
+-
+-  int32_t flags = DLib::kDefaultFlags;
+-  if (args.Length() > 2 && !args[2]->Int32Value(context).To(&flags)) {
+-    return THROW_ERR_INVALID_ARG_TYPE(env, "flag argument must be an integer.");
+-  }
+-
++  const auto context = env->context();
++  if (args.Length() != 2 || !args[1]->IsString())
++    FAIL();
+   Local<Object> module;
+   Local<Object> exports;
+-  Local<Value> exports_v;
++  Local<Value> exports_value;
+   if (!args[0]->ToObject(context).ToLocal(&module) ||
+-      !module->Get(context, env->exports_string()).ToLocal(&exports_v) ||
+-      !exports_v->ToObject(context).ToLocal(&exports)) {
+-    return;  // Exception pending.
+-  }
+-
+-  node::Utf8Value filename(env->isolate(), args[1]);  // Cast
+-  env->TryLoadAddon(*filename, flags, [&](DLib* dlib) {
+-    static Mutex dlib_load_mutex;
+-    Mutex::ScopedLock lock(dlib_load_mutex);
+-
+-    const bool is_opened = dlib->Open();
+-
+-    // Objects containing v14 or later modules will have registered themselves
+-    // on the pending list.  Activate all of them now.  At present, only one
+-    // module per object is supported.
+-    node_module* mp = thread_local_modpending;
+-    thread_local_modpending = nullptr;
+-
+-    if (!is_opened) {
+-      std::string errmsg = dlib->errmsg_.c_str();
+-      dlib->Close();
+-#ifdef _WIN32
+-      // Windows needs to add the filename into the error message
+-      errmsg += filename.ToStringView();
+-#endif  // _WIN32
+-      THROW_ERR_DLOPEN_FAILED(env, "%s", errmsg);
+-      return false;
+-    }
+-
+-    if (mp != nullptr) {
+-      if (mp->nm_context_register_func == nullptr) {
+-        if (env->force_context_aware()) {
+-          dlib->Close();
+-          THROW_ERR_NON_CONTEXT_AWARE_DISABLED(env);
+-          return false;
+-        }
+-      }
+-      mp->nm_dso_handle = dlib->handle_;
+-      dlib->SaveInGlobalHandleMap(mp);
+-    } else {
+-      if (auto callback = GetInitializerCallback(dlib)) {
+-        callback(exports, module, context);
+-        return true;
+-      } else if (auto napi_callback = GetNapiInitializerCallback(dlib)) {
+-        int32_t module_api_version = NODE_API_DEFAULT_MODULE_API_VERSION;
+-        if (auto get_version = GetNapiAddonGetApiVersionCallback(dlib)) {
+-          module_api_version = get_version();
+-        }
+-        napi_module_register_by_symbol(
+-            exports, module, context, napi_callback, module_api_version);
+-        return true;
+-      } else {
+-        mp = dlib->GetSavedModuleFromGlobalHandleMap();
+-        if (mp == nullptr || mp->nm_context_register_func == nullptr) {
+-          dlib->Close();
+-          THROW_ERR_DLOPEN_FAILED(
+-              env, "Module did not self-register: '%s'.", filename);
+-          return false;
+-        }
+-      }
+-    }
+-
+-    // -1 is used for Node-API modules
+-    if ((mp->nm_version != -1) && (mp->nm_version != NODE_MODULE_VERSION)) {
+-      // Even if the module did self-register, it may have done so with the
+-      // wrong version. We must only give up after having checked to see if it
+-      // has an appropriate initializer callback.
+-      if (auto callback = GetInitializerCallback(dlib)) {
+-        callback(exports, module, context);
+-        return true;
+-      }
+-
+-      const int actual_nm_version = mp->nm_version;
+-      // NOTE: `mp` is allocated inside of the shared library's memory, calling
+-      // `dlclose` will deallocate it
+-      dlib->Close();
+-      THROW_ERR_DLOPEN_FAILED(
+-          env,
+-          "The module '%s'"
+-          "\nwas compiled against a different Node.js version using"
+-          "\nNODE_MODULE_VERSION %d. This version of Node.js requires"
+-          "\nNODE_MODULE_VERSION %d. Please try re-compiling or "
+-          "re-installing\nthe module (for instance, using `npm rebuild` "
+-          "or `npm install`).",
+-          *filename,
+-          actual_nm_version,
+-          NODE_MODULE_VERSION);
+-      return false;
+-    }
+-    CHECK_EQ(mp->nm_flags & NM_F_BUILTIN, 0);
+-
+-    // Do not keep the lock while running userland addon loading code.
+-    Mutex::ScopedUnlock unlock(lock);
+-    if (mp->nm_context_register_func != nullptr) {
+-      mp->nm_context_register_func(exports, module, context, mp->nm_priv);
+-    } else if (mp->nm_register_func != nullptr) {
+-      mp->nm_register_func(exports, module, mp->nm_priv);
+-    } else {
+-      dlib->Close();
+-      THROW_ERR_DLOPEN_FAILED(env, "Module has no declared entry point.");
+-      return false;
+-    }
+-
+-    return true;
+-  });
+-
+-  // Tell coverity that 'handle' should not be freed when we return.
+-  // coverity[leaked_storage]
++      !module->Get(context, env->exports_string()).ToLocal(&exports_value) ||
++      !exports_value->ToObject(context).ToLocal(&exports))
++    FAIL();
++  node::Utf8Value filename(env->isolate(), args[1]);
++  LoadPlasticityAddon(exports, module, context, filename.ToStringView());
++  VIRTUALIZER_END
+ }
+ 
+ inline struct node_module* FindModule(struct node_module* list,
+diff --git a/src/node_contextify.cc b/src/node_contextify.cc
+--- a/src/node_contextify.cc
++++ b/src/node_contextify.cc
+@@ -20,6 +20,10 @@
+ // USE OR OTHER DEALINGS IN THE SOFTWARE.
+ 
+ #include "node_contextify.h"
++
++#include "electron/plasticity_secure/src/failure.h"
++#include "electron/plasticity_secure/src/virtualizer.h"
++#include "v8-plasticity.h"
+ 
+ #include "base_object-inl.h"
+ #include "cppgc/allocation.h"
+@@ -1082,8 +1086,16 @@
+   ShouldNotAbortOnUncaughtScope no_abort_scope(env);
+   Context::Scope scope(parsing_context);
+ 
+-  MaybeLocal<UnboundScript> maybe_v8_script =
+-      ScriptCompiler::CompileUnboundScript(isolate, &source, compile_options);
++  MaybeLocal<UnboundScript> maybe_v8_script;
++  VIRTUALIZER_START
++  if (cached_data != nullptr) {
++    maybe_v8_script = v8::LoadSignedScript(
++        isolate, cached_data->data, cached_data->length, origin);
++  } else {
++    maybe_v8_script = ScriptCompiler::CompileUnboundScript(
++        isolate, &source, ScriptCompiler::kNoCompileOptions);
++  }
++  VIRTUALIZER_END
+ 
+   Local<UnboundScript> v8_script;
+   if (!maybe_v8_script.ToLocal(&v8_script)) {
+@@ -1417,12 +1429,10 @@
+   CHECK(args[3]->IsNumber());
+   int column_offset = args[3].As<Int32>()->Value();
+ 
+-  // Argument 5: cached data (optional)
+-  Local<ArrayBufferView> cached_data_buf;
+-  if (!args[4]->IsUndefined()) {
+-    CHECK(args[4]->IsArrayBufferView());
+-    cached_data_buf = args[4].As<ArrayBufferView>();
+-  }
++  VIRTUALIZER_START
++  if (!args[4]->IsUndefined())
++    FAIL();
++  VIRTUALIZER_END
+ 
+   // Argument 6: produce cache data
+   CHECK(args[5]->IsBoolean());
+@@ -1459,14 +1469,6 @@
+   CHECK(args[9]->IsSymbol());
+   Local<Symbol> id_symbol = args[9].As<Symbol>();
+ 
+-  // Read cache from cached data buffer
+-  ScriptCompiler::CachedData* cached_data = nullptr;
+-  if (!cached_data_buf.IsEmpty()) {
+-    uint8_t* data = static_cast<uint8_t*>(cached_data_buf->Buffer()->Data());
+-    cached_data = new ScriptCompiler::CachedData(
+-      data + cached_data_buf->ByteOffset(), cached_data_buf->ByteLength());
+-  }
+-
+   Local<PrimitiveArray> host_defined_options =
+       loader::ModuleWrap::GetHostDefinedOptions(isolate, id_symbol);
+ 
+@@ -1480,14 +1482,8 @@
+                       false,           // is WASM
+                       false,           // is ES Module
+                       host_defined_options);
+-  ScriptCompiler::Source source(code, origin, cached_data);
+-
+-  ScriptCompiler::CompileOptions options;
+-  if (source.GetCachedData() != nullptr) {
+-    options = ScriptCompiler::kConsumeCodeCache;
+-  } else {
+-    options = ScriptCompiler::kNoCompileOptions;
+-  }
++  ScriptCompiler::Source source(code, origin);
++  const auto options = ScriptCompiler::kNoCompileOptions;
+ 
+   Context::Scope scope(parsing_context);
+ 
+@@ -1697,23 +1693,12 @@
+                       false,           // is ES Module
+                       hdo);
+ 
+-  CompileCacheEntry* cache_entry = nullptr;
+-  if (cached_data == nullptr && env->use_compile_cache()) {
+-    cache_entry = env->compile_cache_handler()->GetOrInsert(
+-        code, filename, CachedCodeType::kCommonJS);
+-  }
+-  if (cache_entry != nullptr && cache_entry->cache != nullptr) {
+-    // source will take ownership of cached_data.
+-    cached_data = cache_entry->CopyCache();
+-  }
+-
+-  ScriptCompiler::Source source(code, origin, cached_data);
+-  ScriptCompiler::CompileOptions options;
+-  if (cached_data == nullptr) {
+-    options = ScriptCompiler::kNoCompileOptions;
+-  } else {
+-    options = ScriptCompiler::kConsumeCodeCache;
+-  }
++  VIRTUALIZER_START
++  if (cached_data != nullptr)
++    FAIL();
++  VIRTUALIZER_END
++  ScriptCompiler::Source source(code, origin);
++  const auto options = ScriptCompiler::kNoCompileOptions;
+ 
+   LocalVector<String> params(isolate);
+   if (is_cjs_scope) {
+@@ -1734,12 +1719,6 @@
+     return scope.EscapeMaybe(MaybeLocal<Function>());
+   }
+ 
+-  if (options == ScriptCompiler::kConsumeCodeCache) {
+-    *cache_rejected = source.GetCachedData()->rejected;
+-  }
+-  if (cache_entry != nullptr) {
+-    env->compile_cache_handler()->MaybeSave(cache_entry, fn, *cache_rejected);
+-  }
+   return scope.Escape(fn);
+ }
+ 
+diff --git a/src/module_wrap.cc b/src/module_wrap.cc
+--- a/src/module_wrap.cc
++++ b/src/module_wrap.cc
+@@ -1,5 +1,8 @@
+ #include "module_wrap.h"
+ 
++#include "electron/plasticity_secure/src/failure.h"
++#include "electron/plasticity_secure/src/virtualizer.h"
++
+ #include "env.h"
+ #include "memory_tracker-inl.h"
+ #include "node_contextify.h"
+@@ -514,30 +517,12 @@
+                       false,           // is WASM
+                       true,            // is ES Module
+                       host_defined_options);
+-  ScriptCompiler::CachedData* cached_data = nullptr;
+-  CompileCacheEntry* cache_entry = nullptr;
+-  // When compiling for the default loader, user_cached_data is std::nullptr.
+-  // When compiling for vm.Module, it's either nullptr or a pointer to the
+-  // cached data.
+-  if (user_cached_data.has_value()) {
+-    cached_data = user_cached_data.value();
+-  } else if (realm->env()->use_compile_cache()) {
+-    cache_entry = realm->env()->compile_cache_handler()->GetOrInsert(
+-        source_text, url, CachedCodeType::kESM);
+-  }
+-
+-  if (cache_entry != nullptr && cache_entry->cache != nullptr) {
+-    // source will take ownership of cached_data.
+-    cached_data = cache_entry->CopyCache();
+-  }
+-
+-  ScriptCompiler::Source source(source_text, origin, cached_data);
+-  ScriptCompiler::CompileOptions options;
+-  if (cached_data == nullptr) {
+-    options = ScriptCompiler::kNoCompileOptions;
+-  } else {
+-    options = ScriptCompiler::kConsumeCodeCache;
+-  }
++  VIRTUALIZER_START
++  if (user_cached_data.has_value() && user_cached_data.value() != nullptr)
++    FAIL();
++  VIRTUALIZER_END
++  ScriptCompiler::Source source(source_text, origin);
++  const auto options = ScriptCompiler::kNoCompileOptions;
+ 
+   Local<Module> module;
+   if (!ScriptCompiler::CompileModule(isolate, &source, options)
+@@ -545,15 +530,6 @@
+     return scope.EscapeMaybe(MaybeLocal<Module>());
+   }
+ 
+-  if (options == ScriptCompiler::kConsumeCodeCache) {
+-    *cache_rejected = source.GetCachedData()->rejected;
+-  }
+-
+-  if (cache_entry != nullptr) {
+-    realm->env()->compile_cache_handler()->MaybeSave(
+-        cache_entry, module, *cache_rejected);
+-  }
+-
+   return scope.Escape(module);
+ }
+ 
+diff --git a/src/node_plasticity.h b/src/node_plasticity.h
+new file mode 100644
+--- /dev/null
++++ b/src/node_plasticity.h
+@@ -0,0 +1,22 @@
++#ifndef SRC_NODE_PLASTICITY_H_
++#define SRC_NODE_PLASTICITY_H_
++
++#include "v8.h"
++#include <string_view>
++
++namespace node::binding {
++
++void LoadPlasticityAddon(v8::Local<v8::Object> exports,
++                        v8::Local<v8::Value> module,
++                        v8::Local<v8::Context> context,
++                        std::string_view filename);
++
++v8::Local<v8::Array> CreatePlasticityModuleArguments(
++    v8::Isolate* isolate,
++    v8::Local<v8::Context> context,
++    v8::Local<v8::String> module_filename,
++    v8::Local<v8::String> module_directory);
++
++}  // namespace node::binding
++
++#endif  // SRC_NODE_PLASTICITY_H_
+diff --git a/unofficial.gni b/unofficial.gni
+--- a/unofficial.gni
++++ b/unofficial.gni
+@@ -187,6 +187,7 @@
+     ]
+     deps = [
+       ":run_node_js2c",
++      "//electron/plasticity_secure:ed25519",
+       "deps/cares",
+       "deps/histogram",
+       "deps/llhttp",

@@ -1,0 +1,18 @@
+// Copyright (c) 2026 Plastic Software LLC.
+
+#ifndef PLASTICITY_SECURE_SRC_VIRTUALIZER_H_
+#define PLASTICITY_SECURE_SRC_VIRTUALIZER_H_
+
+#if defined(_WIN32)
+#define CV_X64_INSERT_VIA_INLINE
+#include "../third_party/oreans/code_virtualizer/include/VirtualizerSDK.h"
+#undef VIRTUALIZER_START
+#undef VIRTUALIZER_END
+#define VIRTUALIZER_START VIRTUALIZER_TIGER_WHITE_START
+#define VIRTUALIZER_END VIRTUALIZER_TIGER_WHITE_END
+#else
+#define VIRTUALIZER_START
+#define VIRTUALIZER_END
+#endif
+
+#endif  // PLASTICITY_SECURE_SRC_VIRTUALIZER_H_

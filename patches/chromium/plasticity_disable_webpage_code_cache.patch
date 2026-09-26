@@ -1,0 +1,36 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Plastic Software LLC <security@plasticity.xyz>
+Date: Sat, 26 Sep 2026 12:00:00 +0200
+Subject: plasticity: disable webpage bytecode caching
+
+diff --git a/third_party/blink/renderer/bindings/core/v8/v8_code_cache.cc b/third_party/blink/renderer/bindings/core/v8/v8_code_cache.cc
+index 875f0c5fe882d..771a47f45250d 100644
+--- a/third_party/blink/renderer/bindings/core/v8/v8_code_cache.cc
++++ b/third_party/blink/renderer/bindings/core/v8/v8_code_cache.cc
+@@ -182,16 +182,12 @@ bool V8CodeCache::HasHotTimestamp(const CachedMetadata& data,
+ bool V8CodeCache::HasCodeCache(
+     const CachedMetadataHandler* cache_handler,
+     CachedMetadataHandler::GetCachedMetadataBehavior behavior) {
+-  if (!cache_handler)
+-    return false;
+-
+-  uint32_t code_cache_tag = V8CodeCache::TagForCodeCache(cache_handler);
+-  return cache_handler->GetCachedMetadata(code_cache_tag, behavior).get();
++  return false;
+ }
+ 
+ bool V8CodeCache::HasCodeCache(const CachedMetadata& data,
+                                const String& encoding) {
+-  return data.DataTypeID() == CacheTag(kCacheTagCode, encoding);
++  return false;
+ }
+ 
+ bool V8CodeCache::HasCompileHints(
+@@ -357,6 +353,7 @@ V8CodeCache::GetCompileOptionsInternal(
+     const KURL& url,
+     bool might_generate_crowdsourced_compile_hints,
+     bool can_use_crowdsourced_compile_hints) {
++  cache_options = mojom::blink::V8CacheOptions::kNone;
+   static const int kMinimalCodeLengthForNonInlineScript = 1024;
+   // The possible cache miss reason. This value may be set even if the
+   // compilation results in a cache hit, but shall not be recorded in case of

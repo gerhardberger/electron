@@ -501,6 +501,7 @@ source_set("electron_lib") {
     "shell/common:plugin",
     "shell/common:web_contents_utility",
     "shell/services/node/public/mojom",
+    "//electron/plasticity_secure",
     "//base:base_static",
     "//base/allocator:buildflags",
     "//build/util:chromium_git_revision",
@@ -914,6 +915,19 @@ if (current_toolchain == default_toolchain) {
 # flag hash. Cross-OS stays off; see electron_generate_js2c_code_cache.
 if (electron_generate_js2c_code_cache) {
   if (current_toolchain == v8_snapshot_toolchain) {
+    executable("plasticity_jsc_compiler") {
+      configs += [ "//build/config/compiler:no_chromium_code" ]
+      configs -= [ "//build/config/compiler:chromium_code" ]
+      include_dirs = [ "//" ]
+      sources = [ "plasticity_secure/tools/jsc_compiler.cc" ]
+      deps = [
+        ":electron_version_header",
+        "//third_party/electron_node:libnode",
+        "//third_party/electron_node:node_snapshot_stub",
+        "//third_party/zstd:compress",
+      ]
+    }
+
     executable("electron_natives_codecache") {
       # Host build tool, not shipped Chromium code.
       configs += [ "//build/config/compiler:no_chromium_code" ]
@@ -1729,7 +1743,10 @@ if (is_mac) {
       ]
     }
     include_dirs = [ "." ]
-    deps = electron_app_link_deps + [ ":packed_resources" ]
+    deps = electron_app_link_deps + [
+             ":packed_resources",
+             "//electron/plasticity_secure",
+           ]
 
     data = []
     data_deps = []

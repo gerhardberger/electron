@@ -32,6 +32,7 @@
 #include "electron/fuses.h"
 #include "electron/mas.h"
 #include "gin/per_context_data.h"
+#include "plasticity_secure/plasticity_secure.h"
 #include "shell/browser/api/electron_api_app.h"
 #include "shell/common/api/electron_bindings.h"
 #include "shell/common/electron_command_line.h"
@@ -1046,6 +1047,8 @@ void NodeBindings::LoadEnvironment(node::Environment* env) {
       },
       &OnNodePreload);
   debug_options->break_first_line = break_first_line;
+  if (browser_env_ == BrowserEnvironment::kBrowser)
+    plasticity::secure::RunApplication(env->isolate(), env->context());
   gin_helper::EmitEvent(env->isolate(), env->process_object(), "loaded");
 }
 
