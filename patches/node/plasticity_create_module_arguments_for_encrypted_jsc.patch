@@ -4,9 +4,10 @@ Date: Sat, 26 Sep 2026 12:00:00 +0200
 Subject: plasticity: private addon loader and encrypted JSC module
 
 diff --git a/src/node_api.cc b/src/node_api.cc
+index f95f93d..69972b3 100644
 --- a/src/node_api.cc
 +++ b/src/node_api.cc
-@@ -13,15 +13,177 @@
+@@ -13,15 +13,306 @@
  #include "node_errors.h"
  #include "node_internals.h"
  #include "node_process.h"
@@ -20,10 +21,26 @@ diff --git a/src/node_api.cc b/src/node_api.cc
  #include <atomic>
  #include <cstring>
  #include <memory>
-+
+ 
++#if defined(_WIN32)
 +#include <windows.h>
 +#include <bcrypt.h>
++#include <psapi.h>
++#else
++#include <dlfcn.h>
++#include <fcntl.h>
++#include <sys/mman.h>
++#include <sys/stat.h>
++#include <unistd.h>
++#if defined(__APPLE__)
++#include <libproc.h>
++#else
++#include <link.h>
++#include <sys/sysmacros.h>
++#endif
++#endif
 +#include "electron/plasticity_secure/include/plasticity_secure/native_addon_protocol.h"
++#include "electron/plasticity_secure/src/asset_pack.h"
 +#include "electron/plasticity_secure/src/failure.h"
 +#include "electron/plasticity_secure/src/key_config.h"
 +#include "electron/plasticity_secure/src/virtualizer.h"
@@ -44,6 +61,7 @@ diff --git a/src/node_api.cc b/src/node_api.cc
 +  napi_value initialized = nullptr;
 +  env->CallIntoModule([&](napi_env env) {
 +    VIRTUALIZER_START
++#if defined(_WIN32)
 +    std::wstring path(32768, L'\0');
 +    const DWORD length = ::GetModuleFileNameW(nullptr, path.data(), path.size());
 +    if (length == 0 || length >= path.size())
@@ -80,20 +98,40 @@ diff --git a/src/node_api.cc b/src/node_api.cc
 +        ::MapViewOfFile(mapping, FILE_MAP_READ, 0, 0, 0));
 +    if (bytes == nullptr)
 +      FAIL();
-+
-+    const HANDLE signature_file = ::CreateFileW(
-+        (path + L".sig").c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
-+        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-+    LARGE_INTEGER signature_size;
-+    std::array<uint8_t, 64> signature;
-+    DWORD bytes_read;
-+    if (signature_file == INVALID_HANDLE_VALUE ||
-+        !::GetFileSizeEx(signature_file, &signature_size) ||
-+        signature_size.QuadPart != signature.size() ||
-+        !::ReadFile(signature_file, signature.data(), signature.size(),
-+                    &bytes_read, nullptr) || bytes_read != signature.size())
++#else
++    std::array<char, 4096> executable_path;
++    size_t executable_length = executable_path.size();
++    if (uv_exepath(executable_path.data(), &executable_length) != 0)
 +      FAIL();
-+    ::CloseHandle(signature_file);
++    std::string resources(executable_path.data(), executable_length);
++#if defined(__APPLE__)
++    const size_t framework = resources.rfind("/Contents/Frameworks/");
++    if (framework != std::string::npos)
++      resources.resize(framework + sizeof("/Contents") - 1);
++    else
++      resources.resize(resources.rfind("/MacOS/"));
++    resources += "/Resources";
++#else
++    resources.resize(resources.rfind('/'));
++    resources += "/resources";
++#endif
++    const std::string logical_path =
++        resources + "/app.asar/.webpack/renderer/pk.node";
++    const std::string path =
++        resources + "/app.asar.unpacked/.webpack/renderer/pk.node";
++    if (filename != path && filename != logical_path)
++      FAIL();
++    const int file = open(path.c_str(), O_RDONLY | O_CLOEXEC);
++    struct stat verified_file;
++    if (file < 0 || fstat(file, &verified_file) != 0 || verified_file.st_size <= 0)
++      FAIL();
++    const auto* bytes = static_cast<const uint8_t*>(
++        mmap(nullptr, verified_file.st_size, PROT_READ, MAP_PRIVATE, file, 0));
++    if (bytes == MAP_FAILED)
++      FAIL();
++#endif
++
++    const uint8_t* signature = plasticity::secure::addon_signature.get();
 +
 +    constexpr std::array<uint8_t, 32> kScalarOrder = {
 +        0xed, 0xd3, 0xf5, 0x5c, 0x1a, 0x63, 0x12, 0x58,
@@ -111,17 +149,22 @@ diff --git a/src/node_api.cc b/src/node_api.cc
 +    sha512_context hash;
 +    std::array<uint8_t, 64> challenge;
 +    sha512_init(&hash);
-+    sha512_update(&hash, signature.data(), 32);
++    sha512_update(&hash, signature, 32);
 +    sha512_update(&hash, kManifestPublicKey.data(), kManifestPublicKey.size());
 +    std::array<uint8_t, 32> document_digest;
-+    PLASTICITY_SHA256(bytes, static_cast<size_t>(file_size.QuadPart),
++#if defined(_WIN32)
++    const size_t byte_length = static_cast<size_t>(file_size.QuadPart);
++#else
++    const size_t byte_length = static_cast<size_t>(verified_file.st_size);
++#endif
++    PLASTICITY_SHA256(bytes, byte_length,
 +                      document_digest.data());
 +    sha512_update(&hash, document_digest.data(), document_digest.size());
 +    sha512_final(&hash, challenge.data());
 +    sc_reduce(challenge.data());
 +    ge_p2 point;
 +    ge_double_scalarmult_vartime(&point, challenge.data(), &public_key,
-+                               signature.data() + 32);
++                               signature + 32);
 +    std::array<uint8_t, 32> expected;
 +    fe reciprocal;
 +    fe x;
@@ -130,32 +173,119 @@ diff --git a/src/node_api.cc b/src/node_api.cc
 +    fe_mul(x, point.X, reciprocal);
 +    fe_mul(y, point.Y, reciprocal);
 +    fe_tobytes(expected.data(), y);
-+    expected[31] ^= fe_isnegative(x) << 7;
++    std::array<uint8_t, 32> encoded_x;
++    fe_tobytes(encoded_x.data(), x);
++    expected[31] ^= (encoded_x[0] & 1) << 7;
 +    uint8_t difference = 0;
 +    for (size_t index = 0; index < expected.size(); ++index)
 +      difference |= expected[index] ^ signature[index];
 +    if (difference != 0)
 +      FAIL();
++#if defined(_WIN32)
 +    ::UnmapViewOfFile(bytes);
 +    ::CloseHandle(mapping);
 +    const HMODULE library =
 +        ::LoadLibraryExW(path.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
++    if (library == nullptr)
++      FAIL();
++    std::wstring mapped_path(32768, L'\0');
++    const DWORD mapped_length = ::K32GetMappedFileNameW(
++        ::GetCurrentProcess(), library, mapped_path.data(), mapped_path.size());
++    if (mapped_length == 0 || mapped_length >= mapped_path.size())
++      FAIL();
++    mapped_path.resize(mapped_length);
++    mapped_path.insert(0, L"\\\\?\\GLOBALROOT");
++    const HANDLE mapped_file = ::CreateFileW(
++        mapped_path.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ,
++        nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
++    FILE_ID_INFO verified_id;
++    FILE_ID_INFO mapped_id;
++    if (mapped_file == INVALID_HANDLE_VALUE ||
++        !::GetFileInformationByHandleEx(file, FileIdInfo, &verified_id,
++                                       sizeof(verified_id)) ||
++        !::GetFileInformationByHandleEx(mapped_file, FileIdInfo, &mapped_id,
++                                       sizeof(mapped_id)) ||
++        verified_id.VolumeSerialNumber != mapped_id.VolumeSerialNumber)
++      FAIL();
++    for (size_t index = 0; index < sizeof(verified_id.FileId.Identifier); ++index)
++      if (verified_id.FileId.Identifier[index] != mapped_id.FileId.Identifier[index])
++        FAIL();
++    ::CloseHandle(mapped_file);
 +    ::CloseHandle(file);
++    const auto initialize = reinterpret_cast<PlasticityInitializer>(
++        ::GetProcAddress(library, "p_7c4a9f20"));
++    MEMORY_BASIC_INFORMATION initializer_memory;
++    if (initialize == nullptr ||
++        ::VirtualQuery(reinterpret_cast<const void*>(initialize),
++                       &initializer_memory, sizeof(initializer_memory)) == 0 ||
++        initializer_memory.AllocationBase != library ||
++        initializer_memory.Type != MEM_IMAGE)
++      FAIL();
++#else
++    munmap(const_cast<uint8_t*>(bytes), byte_length);
++    void* library = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
 +    if (library == nullptr)
 +      FAIL();
 +    const auto initialize = reinterpret_cast<PlasticityInitializer>(
-+        ::GetProcAddress(library, "PlasticityInitialize_v1"));
-+    if (initialize == nullptr)
++        dlsym(library, "p_7c4a9f20"));
++    Dl_info initializer_image;
++    if (initialize == nullptr ||
++        dladdr(reinterpret_cast<const void*>(initialize), &initializer_image) == 0)
 +      FAIL();
- 
++    const uintptr_t initializer_address = reinterpret_cast<uintptr_t>(initialize);
++#if defined(__APPLE__)
++    struct proc_regionwithpathinfo region;
++    if (proc_pidinfo(getpid(), PROC_PIDREGIONPATHINFO, initializer_address,
++                     &region, sizeof(region)) != sizeof(region) ||
++        initializer_address < region.prp_prinfo.pri_address ||
++        initializer_address - region.prp_prinfo.pri_address >= region.prp_prinfo.pri_size ||
++        region.prp_vip.vip_vi.vi_stat.vst_dev != static_cast<uint32_t>(verified_file.st_dev) ||
++        region.prp_vip.vip_vi.vi_stat.vst_ino != verified_file.st_ino)
++      FAIL();
++#else
++    struct link_map* loaded_image = nullptr;
++    if (dlinfo(library, RTLD_DI_LINKMAP, &loaded_image) != 0 ||
++        reinterpret_cast<uintptr_t>(initializer_image.dli_fbase) != loaded_image->l_addr)
++      FAIL();
++    FILE* maps = fopen("/proc/self/maps", "r");
++    if (maps == nullptr)
++      FAIL();
++    char* line = nullptr;
++    size_t capacity = 0;
++    bool matched = false;
++    while (getline(&line, &capacity, maps) >= 0) {
++      unsigned long start, end, inode;
++      unsigned int device_major, device_minor;
++      if (sscanf(line, "%lx-%lx %*s %*s %x:%x %lu", &start, &end,
++                 &device_major, &device_minor, &inode) != 5)
++        continue;
++      if (initializer_address >= start && initializer_address < end) {
++        matched = inode == verified_file.st_ino &&
++                  makedev(device_major, device_minor) == verified_file.st_dev;
++        break;
++      }
++    }
++    free(line);
++    fclose(maps);
++    if (!matched)
++      FAIL();
++#endif
++    close(file);
++#endif
++
 +    struct Admission {
 +      napi_env env;
 +      PlasticityInitializer initialize;
 +      std::array<uint8_t, 32> nonce;
 +      bool answered;
 +    } admission{env, initialize, {}, false};
++#if defined(_WIN32)
 +    if (::BCryptGenRandom(nullptr, admission.nonce.data(), admission.nonce.size(),
 +                          BCRYPT_USE_SYSTEM_PREFERRED_RNG) != 0)
++#else
++    if (uv_random(nullptr, nullptr, admission.nonce.data(), admission.nonce.size(),
++                  0, nullptr) != 0)
++#endif
 +      FAIL();
 +    const PlasticityHost host{
 +        admission.nonce, reinterpret_cast<uintptr_t>(&admission),
@@ -431,58 +561,402 @@ diff --git a/src/node_binding.cc b/src/node_binding.cc
  
  inline struct node_module* FindModule(struct node_module* list,
 diff --git a/src/node_contextify.cc b/src/node_contextify.cc
+index 17d820b56..a6c0fb321 100644
 --- a/src/node_contextify.cc
 +++ b/src/node_contextify.cc
-@@ -20,6 +20,10 @@
- // USE OR OTHER DEALINGS IN THE SOFTWARE.
+@@ -21,6 +21,10 @@
  
  #include "node_contextify.h"
-+
+ 
 +#include "electron/plasticity_secure/src/failure.h"
 +#include "electron/plasticity_secure/src/virtualizer.h"
 +#include "v8-plasticity.h"
- 
++
  #include "base_object-inl.h"
  #include "cppgc/allocation.h"
-@@ -1082,8 +1086,16 @@
-   ShouldNotAbortOnUncaughtScope no_abort_scope(env);
-   Context::Scope scope(parsing_context);
+ #include "debug_utils-inl.h"
+@@ -989,150 +993,161 @@ ContextifyScript* ContextifyScript::New(Environment* env,
+       env->cppgc_allocation_handle(), env, object);
+ }
+ 
+-void ContextifyScript::New(const FunctionCallbackInfo<Value>& args) {
+-  Environment* env = Environment::GetCurrent(args);
+-  Isolate* isolate = env->isolate();
+-  Local<Context> context = env->context();
+-
+-  CHECK(args.IsConstructCall());
+-
+-  const int argc = args.Length();
+-  CHECK_GE(argc, 2);
+-
+-  CHECK(args[0]->IsString());
+-  Local<String> code = args[0].As<String>();
++__attribute__((noinline)) void ContextifyScript::New(const FunctionCallbackInfo<Value>& args) {
++  VIRTUALIZER_START;
++  {
++    Environment* env = Environment::GetCurrent(args);
++    Isolate* isolate = env->isolate();
++    Local<Context> context = env->context();
++
++    CHECK(args.IsConstructCall());
++
++    const int argc = args.Length();
++    CHECK_GE(argc, 2);
++
++    CHECK(args[0]->IsString());
++    Local<String> code = args[0].As<String>();
++
++    CHECK(args[1]->IsString());
++    Local<String> filename = args[1].As<String>();
++
++    int line_offset = 0;
++    int column_offset = 0;
++    Local<ArrayBufferView> cached_data_buf;
++    bool produce_cached_data = false;
++    Local<Context> parsing_context = context;
++
++    Local<Symbol> id_symbol;
++    if (argc > 2) {
++      // new ContextifyScript(code, filename, lineOffset, columnOffset,
++      //                      cachedData, produceCachedData, parsingContext,
++      //                      hostDefinedOptionId)
++      CHECK_EQ(argc, 8);
++      CHECK(args[2]->IsNumber());
++      line_offset = args[2].As<Int32>()->Value();
++      CHECK(args[3]->IsNumber());
++      column_offset = args[3].As<Int32>()->Value();
++      if (!args[4]->IsUndefined()) {
++        CHECK(args[4]->IsArrayBufferView());
++        cached_data_buf = args[4].As<ArrayBufferView>();
++      }
++      CHECK(args[5]->IsBoolean());
++      produce_cached_data = args[5]->IsTrue();
++      if (!args[6]->IsUndefined()) {
++        CHECK(args[6]->IsObject());
++        ContextifyContext* sandbox =
++            ContextifyContext::ContextFromContextifiedSandbox(
++                env, args[6].As<Object>());
++        CHECK_NOT_NULL(sandbox);
++        parsing_context = sandbox->context();
++      }
++      CHECK(args[7]->IsSymbol());
++      id_symbol = args[7].As<Symbol>();
++    }
+ 
+-  CHECK(args[1]->IsString());
+-  Local<String> filename = args[1].As<String>();
++    ContextifyScript* contextify_script = New(env, args.This());
+ 
+-  int line_offset = 0;
+-  int column_offset = 0;
+-  Local<ArrayBufferView> cached_data_buf;
+-  bool produce_cached_data = false;
+-  Local<Context> parsing_context = context;
+-
+-  Local<Symbol> id_symbol;
+-  if (argc > 2) {
+-    // new ContextifyScript(code, filename, lineOffset, columnOffset,
+-    //                      cachedData, produceCachedData, parsingContext,
+-    //                      hostDefinedOptionId)
+-    CHECK_EQ(argc, 8);
+-    CHECK(args[2]->IsNumber());
+-    line_offset = args[2].As<Int32>()->Value();
+-    CHECK(args[3]->IsNumber());
+-    column_offset = args[3].As<Int32>()->Value();
+-    if (!args[4]->IsUndefined()) {
+-      CHECK(args[4]->IsArrayBufferView());
+-      cached_data_buf = args[4].As<ArrayBufferView>();
++    if (NODE_TRACE_CATEGORY_ENABLED(TRACING_CATEGORY_NODE2(vm, script))) {
++      Utf8Value fn(isolate, filename);
++      TRACE_EVENT_BEGIN1(TRACING_CATEGORY_NODE2(vm, script),
++                         "ContextifyScript::New",
++                         "filename",
++                         TRACE_STR_COPY(*fn));
+     }
+-    CHECK(args[5]->IsBoolean());
+-    produce_cached_data = args[5]->IsTrue();
+-    if (!args[6]->IsUndefined()) {
+-      CHECK(args[6]->IsObject());
+-      ContextifyContext* sandbox =
+-          ContextifyContext::ContextFromContextifiedSandbox(
+-              env, args[6].As<Object>());
+-      CHECK_NOT_NULL(sandbox);
+-      parsing_context = sandbox->context();
+-    }
+-    CHECK(args[7]->IsSymbol());
+-    id_symbol = args[7].As<Symbol>();
+-  }
+ 
+-  ContextifyScript* contextify_script = New(env, args.This());
++    ScriptCompiler::CachedData* cached_data = nullptr;
++    if (!cached_data_buf.IsEmpty()) {
++      uint8_t* data = static_cast<uint8_t*>(cached_data_buf->Buffer()->Data());
++      cached_data = new ScriptCompiler::CachedData(
++          data + cached_data_buf->ByteOffset(), cached_data_buf->ByteLength());
++    }
+ 
+-  if (NODE_TRACE_CATEGORY_ENABLED(TRACING_CATEGORY_NODE2(vm, script))) {
+-    Utf8Value fn(isolate, filename);
+-    TRACE_EVENT_BEGIN1(TRACING_CATEGORY_NODE2(vm, script),
+-                       "ContextifyScript::New",
+-                       "filename",
+-                       TRACE_STR_COPY(*fn));
+-  }
++    Local<PrimitiveArray> host_defined_options =
++        PrimitiveArray::New(isolate, loader::HostDefinedOptions::kLength);
++    host_defined_options->Set(
++        isolate, loader::HostDefinedOptions::kID, id_symbol);
++
++    ScriptOrigin origin(filename,
++                        line_offset,     // line offset
++                        column_offset,   // column offset
++                        true,            // is cross origin
++                        -1,              // script id
++                        Local<Value>(),  // source map URL
++                        false,           // is opaque (?)
++                        false,           // is WASM
++                        false,           // is ES Module
++                        host_defined_options);
++    ScriptCompiler::Source source(code, origin, cached_data);
++    ScriptCompiler::CompileOptions compile_options =
++        ScriptCompiler::kNoCompileOptions;
++
++    if (source.GetCachedData() != nullptr)
++      compile_options = ScriptCompiler::kConsumeCodeCache;
+ 
+-  ScriptCompiler::CachedData* cached_data = nullptr;
+-  if (!cached_data_buf.IsEmpty()) {
+-    uint8_t* data = static_cast<uint8_t*>(cached_data_buf->Buffer()->Data());
+-    cached_data = new ScriptCompiler::CachedData(
+-        data + cached_data_buf->ByteOffset(), cached_data_buf->ByteLength());
+-  }
+-
+-  Local<PrimitiveArray> host_defined_options =
+-      PrimitiveArray::New(isolate, loader::HostDefinedOptions::kLength);
+-  host_defined_options->Set(
+-      isolate, loader::HostDefinedOptions::kID, id_symbol);
+-
+-  ScriptOrigin origin(filename,
+-                      line_offset,     // line offset
+-                      column_offset,   // column offset
+-                      true,            // is cross origin
+-                      -1,              // script id
+-                      Local<Value>(),  // source map URL
+-                      false,           // is opaque (?)
+-                      false,           // is WASM
+-                      false,           // is ES Module
+-                      host_defined_options);
+-  ScriptCompiler::Source source(code, origin, cached_data);
+-  ScriptCompiler::CompileOptions compile_options =
+-      ScriptCompiler::kNoCompileOptions;
+-
+-  if (source.GetCachedData() != nullptr)
+-    compile_options = ScriptCompiler::kConsumeCodeCache;
++    TryCatchScope try_catch(env);
++    ShouldNotAbortOnUncaughtScope no_abort_scope(env);
++    Context::Scope scope(parsing_context);
+ 
+-  TryCatchScope try_catch(env);
+-  ShouldNotAbortOnUncaughtScope no_abort_scope(env);
+-  Context::Scope scope(parsing_context);
++    MaybeLocal<UnboundScript> maybe_v8_script;
++    if (cached_data != nullptr) {
++      maybe_v8_script = v8::LoadSignedScript(
++          isolate, cached_data->data, cached_data->length, origin);
++    } else {
++      maybe_v8_script = ScriptCompiler::CompileUnboundScript(
++          isolate, &source, ScriptCompiler::kNoCompileOptions);
++    }
  
 -  MaybeLocal<UnboundScript> maybe_v8_script =
 -      ScriptCompiler::CompileUnboundScript(isolate, &source, compile_options);
-+  MaybeLocal<UnboundScript> maybe_v8_script;
-+  VIRTUALIZER_START
-+  if (cached_data != nullptr) {
-+    maybe_v8_script = v8::LoadSignedScript(
-+        isolate, cached_data->data, cached_data->length, origin);
-+  } else {
-+    maybe_v8_script = ScriptCompiler::CompileUnboundScript(
-+        isolate, &source, ScriptCompiler::kNoCompileOptions);
-+  }
++    Local<UnboundScript> v8_script;
++    if (!maybe_v8_script.ToLocal(&v8_script)) {
++      errors::DecorateErrorStack(env, try_catch);
++      no_abort_scope.Close();
++      if (!try_catch.HasTerminated())
++        try_catch.ReThrow();
++      TRACE_EVENT_END0(TRACING_CATEGORY_NODE2(vm, script),
++                       "ContextifyScript::New");
++      goto finished;
++    }
+ 
+-  Local<UnboundScript> v8_script;
+-  if (!maybe_v8_script.ToLocal(&v8_script)) {
+-    errors::DecorateErrorStack(env, try_catch);
+-    no_abort_scope.Close();
+-    if (!try_catch.HasTerminated())
+-      try_catch.ReThrow();
+-    TRACE_EVENT_END0(TRACING_CATEGORY_NODE2(vm, script),
+-                     "ContextifyScript::New");
+-    return;
+-  }
++    contextify_script->set_unbound_script(v8_script);
+ 
+-  contextify_script->set_unbound_script(v8_script);
++    std::unique_ptr<ScriptCompiler::CachedData> new_cached_data;
++    if (produce_cached_data) {
++      new_cached_data.reset(ScriptCompiler::CreateCodeCache(v8_script));
++    }
+ 
+-  std::unique_ptr<ScriptCompiler::CachedData> new_cached_data;
+-  if (produce_cached_data) {
+-    new_cached_data.reset(ScriptCompiler::CreateCodeCache(v8_script));
+-  }
++    auto self = args.This();
+ 
+-  auto self = args.This();
++    if (contextify_script->object()
++            ->SetPrivate(context, env->host_defined_option_symbol(), id_symbol)
++            .IsNothing()) {
++      goto finished;
++    }
++    if (StoreCodeCacheResult(env,
++                             self,
++                             compile_options,
++                             source,
++                             produce_cached_data,
++                             std::move(new_cached_data))
++            .IsNothing()) {
++      goto finished;
++    }
++    if (self->Set(env->context(),
++                  env->source_url_string(),
++                  v8_script->GetSourceURL())
++            .IsNothing()) {
++      goto finished;
++    }
++    if (self->Set(env->context(),
++                  env->source_map_url_string(),
++                  v8_script->GetSourceMappingURL())
++            .IsNothing()) {
++      goto finished;
++    }
+ 
+-  if (contextify_script->object()
+-          ->SetPrivate(context, env->host_defined_option_symbol(), id_symbol)
+-          .IsNothing()) {
+-    return;
+-  }
+-  if (StoreCodeCacheResult(env,
+-                           self,
+-                           compile_options,
+-                           source,
+-                           produce_cached_data,
+-                           std::move(new_cached_data))
+-          .IsNothing()) {
+-    return;
+-  }
+-  if (self->Set(env->context(),
+-                env->source_url_string(),
+-                v8_script->GetSourceURL())
+-          .IsNothing()) {
+-    return;
++    TRACE_EVENT_END0(TRACING_CATEGORY_NODE2(vm, script), "ContextifyScript::New");
+   }
+-  if (self->Set(env->context(),
+-                env->source_map_url_string(),
+-                v8_script->GetSourceMappingURL())
+-          .IsNothing()) {
+-    return;
+-  }
+-
+-  TRACE_EVENT_END0(TRACING_CATEGORY_NODE2(vm, script), "ContextifyScript::New");
++finished:
 +  VIRTUALIZER_END
+ }
  
-   Local<UnboundScript> v8_script;
-   if (!maybe_v8_script.ToLocal(&v8_script)) {
-@@ -1417,12 +1429,10 @@
-   CHECK(args[3]->IsNumber());
-   int column_offset = args[3].As<Int32>()->Value();
+ Maybe<void> StoreCodeCacheResult(
+@@ -1395,142 +1410,129 @@ void ContextifyFunction::CreatePerIsolateProperties(
+   SetMethod(isolate, target, "compileFunction", CompileFunction);
+ }
  
+-void ContextifyFunction::CompileFunction(
++__attribute__((noinline)) void ContextifyFunction::CompileFunction(
+     const FunctionCallbackInfo<Value>& args) {
+-  Environment* env = Environment::GetCurrent(args);
+-  Isolate* isolate = env->isolate();
+-  Local<Context> context = env->context();
++  VIRTUALIZER_START;
++  {
++    Environment* env = Environment::GetCurrent(args);
++    Isolate* isolate = env->isolate();
++    Local<Context> context = env->context();
+ 
+-  // Argument 1: source code
+-  CHECK(args[0]->IsString());
+-  Local<String> code = args[0].As<String>();
++    // Argument 1: source code
++    CHECK(args[0]->IsString());
++    Local<String> code = args[0].As<String>();
+ 
+-  // Argument 2: filename
+-  CHECK(args[1]->IsString());
+-  Local<String> filename = args[1].As<String>();
++    // Argument 2: filename
++    CHECK(args[1]->IsString());
++    Local<String> filename = args[1].As<String>();
+ 
+-  // Argument 3: line offset
+-  CHECK(args[2]->IsNumber());
+-  int line_offset = args[2].As<Int32>()->Value();
+-
+-  // Argument 4: column offset
+-  CHECK(args[3]->IsNumber());
+-  int column_offset = args[3].As<Int32>()->Value();
+-
 -  // Argument 5: cached data (optional)
 -  Local<ArrayBufferView> cached_data_buf;
 -  if (!args[4]->IsUndefined()) {
 -    CHECK(args[4]->IsArrayBufferView());
 -    cached_data_buf = args[4].As<ArrayBufferView>();
 -  }
-+  VIRTUALIZER_START
-+  if (!args[4]->IsUndefined())
-+    FAIL();
-+  VIRTUALIZER_END
+-
+-  // Argument 6: produce cache data
+-  CHECK(args[5]->IsBoolean());
+-  bool produce_cached_data = args[5]->IsTrue();
+-
+-  // Argument 7: parsing context (optional)
+-  Local<Context> parsing_context;
+-  if (!args[6]->IsUndefined()) {
+-    CHECK(args[6]->IsObject());
+-    ContextifyContext* sandbox =
+-        ContextifyContext::ContextFromContextifiedSandbox(
+-            env, args[6].As<Object>());
+-    CHECK_NOT_NULL(sandbox);
+-    parsing_context = sandbox->context();
+-  } else {
+-    parsing_context = context;
+-  }
++    // Argument 3: line offset
++    CHECK(args[2]->IsNumber());
++    int line_offset = args[2].As<Int32>()->Value();
  
-   // Argument 6: produce cache data
-   CHECK(args[5]->IsBoolean());
-@@ -1459,14 +1469,6 @@
-   CHECK(args[9]->IsSymbol());
-   Local<Symbol> id_symbol = args[9].As<Symbol>();
+-  // Argument 8: context extensions (optional)
+-  Local<Array> context_extensions_buf;
+-  if (!args[7]->IsUndefined()) {
+-    CHECK(args[7]->IsArray());
+-    context_extensions_buf = args[7].As<Array>();
+-  }
++    // Argument 4: column offset
++    CHECK(args[3]->IsNumber());
++    int column_offset = args[3].As<Int32>()->Value();
+ 
+-  // Argument 9: params for the function (optional)
+-  Local<Array> params_buf;
+-  if (!args[8]->IsUndefined()) {
+-    CHECK(args[8]->IsArray());
+-    params_buf = args[8].As<Array>();
+-  }
++    if (!args[4]->IsUndefined())
++      FAIL();
+ 
+-  // Argument 10: host-defined option symbol
+-  CHECK(args[9]->IsSymbol());
+-  Local<Symbol> id_symbol = args[9].As<Symbol>();
++    // Argument 6: produce cache data
++    CHECK(args[5]->IsBoolean());
++    bool produce_cached_data = args[5]->IsTrue();
  
 -  // Read cache from cached data buffer
 -  ScriptCompiler::CachedData* cached_data = nullptr;
@@ -492,13 +966,19 @@ diff --git a/src/node_contextify.cc b/src/node_contextify.cc
 -      data + cached_data_buf->ByteOffset(), cached_data_buf->ByteLength());
 -  }
 -
-   Local<PrimitiveArray> host_defined_options =
-       loader::ModuleWrap::GetHostDefinedOptions(isolate, id_symbol);
- 
-@@ -1480,14 +1482,8 @@
-                       false,           // is WASM
-                       false,           // is ES Module
-                       host_defined_options);
+-  Local<PrimitiveArray> host_defined_options =
+-      loader::ModuleWrap::GetHostDefinedOptions(isolate, id_symbol);
+-
+-  ScriptOrigin origin(filename,
+-                      line_offset,     // line offset
+-                      column_offset,   // column offset
+-                      true,            // is cross origin
+-                      -1,              // script id
+-                      Local<Value>(),  // source map URL
+-                      false,           // is opaque (?)
+-                      false,           // is WASM
+-                      false,           // is ES Module
+-                      host_defined_options);
 -  ScriptCompiler::Source source(code, origin, cached_data);
 -
 -  ScriptCompiler::CompileOptions options;
@@ -507,15 +987,167 @@ diff --git a/src/node_contextify.cc b/src/node_contextify.cc
 -  } else {
 -    options = ScriptCompiler::kNoCompileOptions;
 -  }
-+  ScriptCompiler::Source source(code, origin);
-+  const auto options = ScriptCompiler::kNoCompileOptions;
++    // Argument 7: parsing context (optional)
++    Local<Context> parsing_context;
++    if (!args[6]->IsUndefined()) {
++      CHECK(args[6]->IsObject());
++      ContextifyContext* sandbox =
++          ContextifyContext::ContextFromContextifiedSandbox(
++              env, args[6].As<Object>());
++      CHECK_NOT_NULL(sandbox);
++      parsing_context = sandbox->context();
++    } else {
++      parsing_context = context;
++    }
  
-   Context::Scope scope(parsing_context);
+-  Context::Scope scope(parsing_context);
++    // Argument 8: context extensions (optional)
++    Local<Array> context_extensions_buf;
++    if (!args[7]->IsUndefined()) {
++      CHECK(args[7]->IsArray());
++      context_extensions_buf = args[7].As<Array>();
++    }
  
-@@ -1697,23 +1693,12 @@
-                       false,           // is ES Module
-                       hdo);
+-  // Read context extensions from buffer
+-  LocalVector<Object> context_extensions(isolate);
+-  if (!context_extensions_buf.IsEmpty()) {
+-    for (uint32_t n = 0; n < context_extensions_buf->Length(); n++) {
+-      Local<Value> val;
+-      if (!context_extensions_buf->Get(context, n).ToLocal(&val)) return;
+-      CHECK(val->IsObject());
+-      context_extensions.push_back(val.As<Object>());
++    // Argument 9: params for the function (optional)
++    Local<Array> params_buf;
++    if (!args[8]->IsUndefined()) {
++      CHECK(args[8]->IsArray());
++      params_buf = args[8].As<Array>();
+     }
+-  }
  
+-  // Read params from params buffer
+-  LocalVector<String> params(isolate);
+-  if (!params_buf.IsEmpty()) {
+-    for (uint32_t n = 0; n < params_buf->Length(); n++) {
+-      Local<Value> val;
+-      if (!params_buf->Get(context, n).ToLocal(&val)) return;
+-      CHECK(val->IsString());
+-      params.push_back(val.As<String>());
++    // Argument 10: host-defined option symbol
++    CHECK(args[9]->IsSymbol());
++    Local<Symbol> id_symbol = args[9].As<Symbol>();
++
++    Local<PrimitiveArray> host_defined_options =
++        loader::ModuleWrap::GetHostDefinedOptions(isolate, id_symbol);
++
++    ScriptOrigin origin(filename,
++                        line_offset,     // line offset
++                        column_offset,   // column offset
++                        true,            // is cross origin
++                        -1,              // script id
++                        Local<Value>(),  // source map URL
++                        false,           // is opaque (?)
++                        false,           // is WASM
++                        false,           // is ES Module
++                        host_defined_options);
++    ScriptCompiler::Source source(code, origin);
++    const auto options = ScriptCompiler::kNoCompileOptions;
++
++    Context::Scope scope(parsing_context);
++
++    // Read context extensions from buffer
++    LocalVector<Object> context_extensions(isolate);
++    if (!context_extensions_buf.IsEmpty()) {
++      for (uint32_t n = 0; n < context_extensions_buf->Length(); n++) {
++        Local<Value> val;
++        if (!context_extensions_buf->Get(context, n).ToLocal(&val)) goto finished;
++        CHECK(val->IsObject());
++        context_extensions.push_back(val.As<Object>());
++      }
+     }
+-  }
+ 
+-  TryCatchScope try_catch(env);
+-  MaybeLocal<Object> maybe_result =
+-      CompileFunctionAndCacheResult(env,
+-                                    parsing_context,
+-                                    &source,
+-                                    params,
+-                                    context_extensions,
+-                                    options,
+-                                    produce_cached_data,
+-                                    id_symbol,
+-                                    try_catch);
+-  Local<Object> result;
+-  if (!maybe_result.ToLocal(&result)) {
+-    CHECK(try_catch.HasCaught());
+-    try_catch.ReThrow();
+-    return;
++    // Read params from params buffer
++    LocalVector<String> params(isolate);
++    if (!params_buf.IsEmpty()) {
++      for (uint32_t n = 0; n < params_buf->Length(); n++) {
++        Local<Value> val;
++        if (!params_buf->Get(context, n).ToLocal(&val)) goto finished;
++        CHECK(val->IsString());
++        params.push_back(val.As<String>());
++      }
++    }
++
++    TryCatchScope try_catch(env);
++    MaybeLocal<Object> maybe_result =
++        CompileFunctionAndCacheResult(env,
++                                      parsing_context,
++                                      &source,
++                                      params,
++                                      context_extensions,
++                                      options,
++                                      produce_cached_data,
++                                      id_symbol,
++                                      try_catch);
++    Local<Object> result;
++    if (!maybe_result.ToLocal(&result)) {
++      CHECK(try_catch.HasCaught());
++      try_catch.ReThrow();
++      goto finished;
++    }
++    args.GetReturnValue().Set(result);
+   }
+-  args.GetReturnValue().Set(result);
++finished:
++  VIRTUALIZER_END
+ }
+ 
+ static LocalVector<String> GetCJSParameters(IsolateData* data) {
+@@ -1672,7 +1674,7 @@ static const auto maybe_top_level_await_errors =
+ // If cached_data is provided, it would be used for the compilation and
+ // the on-disk compilation cache from NODE_COMPILE_CACHE (if configured)
+ // would be ignored.
+-static MaybeLocal<Function> CompileFunctionForCJSLoader(
++static __attribute__((noinline)) MaybeLocal<Function> CompileFunctionForCJSLoader(
+     Environment* env,
+     Local<Context> context,
+     Local<String> code,
+@@ -1680,67 +1682,54 @@ static MaybeLocal<Function> CompileFunctionForCJSLoader(
+     bool* cache_rejected,
+     bool is_cjs_scope,
+     ScriptCompiler::CachedData* cached_data) {
+-  Isolate* isolate = Isolate::GetCurrent();
+-  EscapableHandleScope scope(isolate);
+-
+-  Local<Symbol> symbol = env->vm_dynamic_import_default_internal();
+-  Local<PrimitiveArray> hdo =
+-      loader::ModuleWrap::GetHostDefinedOptions(isolate, symbol);
+-  ScriptOrigin origin(filename,
+-                      0,               // line offset
+-                      0,               // column offset
+-                      true,            // is cross origin
+-                      -1,              // script id
+-                      Local<Value>(),  // source map URL
+-                      false,           // is opaque
+-                      false,           // is WASM
+-                      false,           // is ES Module
+-                      hdo);
+-
 -  CompileCacheEntry* cache_entry = nullptr;
 -  if (cached_data == nullptr && env->use_compile_cache()) {
 -    cache_entry = env->compile_cache_handler()->GetOrInsert(
@@ -533,29 +1165,84 @@ diff --git a/src/node_contextify.cc b/src/node_contextify.cc
 -  } else {
 -    options = ScriptCompiler::kConsumeCodeCache;
 -  }
-+  VIRTUALIZER_START
-+  if (cached_data != nullptr)
-+    FAIL();
-+  VIRTUALIZER_END
-+  ScriptCompiler::Source source(code, origin);
-+  const auto options = ScriptCompiler::kNoCompileOptions;
- 
-   LocalVector<String> params(isolate);
-   if (is_cjs_scope) {
-@@ -1734,12 +1719,6 @@
-     return scope.EscapeMaybe(MaybeLocal<Function>());
-   }
+-
+-  LocalVector<String> params(isolate);
+-  if (is_cjs_scope) {
+-    params = GetCJSParameters(env->isolate_data());
+-  }
+-  MaybeLocal<Function> maybe_fn = ScriptCompiler::CompileFunction(
+-      context,
+-      &source,
+-      params.size(),
+-      params.data(),
+-      0,       /* context extensions size */
+-      nullptr, /* context extensions data */
+-      // TODO(joyeecheung): allow optional eager compilation.
+-      options);
+-
+-  Local<Function> fn;
+-  if (!maybe_fn.ToLocal(&fn)) {
+-    return scope.EscapeMaybe(MaybeLocal<Function>());
+-  }
++  MaybeLocal<Function> output;
++  VIRTUALIZER_START;
++  {
++    Isolate* isolate = Isolate::GetCurrent();
++    EscapableHandleScope scope(isolate);
++
++    Local<Symbol> symbol = env->vm_dynamic_import_default_internal();
++    Local<PrimitiveArray> hdo =
++        loader::ModuleWrap::GetHostDefinedOptions(isolate, symbol);
++    ScriptOrigin origin(filename,
++                        0,               // line offset
++                        0,               // column offset
++                        true,            // is cross origin
++                        -1,              // script id
++                        Local<Value>(),  // source map URL
++                        false,           // is opaque
++                        false,           // is WASM
++                        false,           // is ES Module
++                        hdo);
++
++    if (cached_data != nullptr)
++      FAIL();
++    ScriptCompiler::Source source(code, origin);
++    const auto options = ScriptCompiler::kNoCompileOptions;
++
++    LocalVector<String> params(isolate);
++    if (is_cjs_scope) {
++      auto* data = env->isolate_data();
++      params = LocalVector<String>(isolate, {
++          data->exports_string(), data->require_string(), data->module_string(),
++          data->__filename_string(), data->__dirname_string()});
++    }
++    MaybeLocal<Function> maybe_fn = ScriptCompiler::CompileFunction(
++        context,
++        &source,
++        params.size(),
++        params.data(),
++        0,       /* context extensions size */
++        nullptr, /* context extensions data */
++        // TODO(joyeecheung): allow optional eager compilation.
++        options);
  
 -  if (options == ScriptCompiler::kConsumeCodeCache) {
 -    *cache_rejected = source.GetCachedData()->rejected;
 -  }
 -  if (cache_entry != nullptr) {
 -    env->compile_cache_handler()->MaybeSave(cache_entry, fn, *cache_rejected);
--  }
-   return scope.Escape(fn);
++    Local<Function> fn;
++    if (maybe_fn.ToLocal(&fn))
++      output = scope.Escape(fn);
+   }
+-  return scope.Escape(fn);
++  VIRTUALIZER_END
++  return output;
  }
  
+ static std::string GetRequireEsmWarning(Local<String> filename) {
 diff --git a/src/module_wrap.cc b/src/module_wrap.cc
+index 5ab30502f..375def068 100644
 --- a/src/module_wrap.cc
 +++ b/src/module_wrap.cc
 @@ -1,5 +1,8 @@
@@ -567,10 +1254,31 @@ diff --git a/src/module_wrap.cc b/src/module_wrap.cc
  #include "env.h"
  #include "memory_tracker-inl.h"
  #include "node_contextify.h"
-@@ -514,30 +517,12 @@
-                       false,           // is WASM
-                       true,            // is ES Module
-                       host_defined_options);
+@@ -493,7 +496,7 @@ void ModuleWrap::New(const FunctionCallbackInfo<Value>& args) {
+   args.GetReturnValue().Set(that);
+ }
+ 
+-MaybeLocal<Module> ModuleWrap::CompileSourceTextModule(
++__attribute__((noinline)) MaybeLocal<Module> ModuleWrap::CompileSourceTextModule(
+     Realm* realm,
+     Local<String> source_text,
+     Local<String> url,
+@@ -502,59 +505,33 @@ MaybeLocal<Module> ModuleWrap::CompileSourceTextModule(
+     Local<PrimitiveArray> host_defined_options,
+     std::optional<ScriptCompiler::CachedData*> user_cached_data,
+     bool* cache_rejected) {
+-  Isolate* isolate = realm->isolate();
+-  EscapableHandleScope scope(isolate);
+-  ScriptOrigin origin(url,
+-                      line_offset,
+-                      column_offset,
+-                      true,            // is cross origin
+-                      -1,              // script id
+-                      Local<Value>(),  // source map URL
+-                      false,           // is opaque (?)
+-                      false,           // is WASM
+-                      true,            // is ES Module
+-                      host_defined_options);
 -  ScriptCompiler::CachedData* cached_data = nullptr;
 -  CompileCacheEntry* cache_entry = nullptr;
 -  // When compiling for the default loader, user_cached_data is std::nullptr.
@@ -595,19 +1303,13 @@ diff --git a/src/module_wrap.cc b/src/module_wrap.cc
 -  } else {
 -    options = ScriptCompiler::kConsumeCodeCache;
 -  }
-+  VIRTUALIZER_START
-+  if (user_cached_data.has_value() && user_cached_data.value() != nullptr)
-+    FAIL();
-+  VIRTUALIZER_END
-+  ScriptCompiler::Source source(source_text, origin);
-+  const auto options = ScriptCompiler::kNoCompileOptions;
- 
-   Local<Module> module;
-   if (!ScriptCompiler::CompileModule(isolate, &source, options)
-@@ -545,15 +530,6 @@
-     return scope.EscapeMaybe(MaybeLocal<Module>());
-   }
- 
+-
+-  Local<Module> module;
+-  if (!ScriptCompiler::CompileModule(isolate, &source, options)
+-           .ToLocal(&module)) {
+-    return scope.EscapeMaybe(MaybeLocal<Module>());
+-  }
+-
 -  if (options == ScriptCompiler::kConsumeCodeCache) {
 -    *cache_rejected = source.GetCachedData()->rejected;
 -  }
@@ -617,9 +1319,37 @@ diff --git a/src/module_wrap.cc b/src/module_wrap.cc
 -        cache_entry, module, *cache_rejected);
 -  }
 -
-   return scope.Escape(module);
+-  return scope.Escape(module);
++  MaybeLocal<Module> output;
++  VIRTUALIZER_START;
++  {
++    Isolate* isolate = realm->isolate();
++    EscapableHandleScope scope(isolate);
++    ScriptOrigin origin(url,
++                        line_offset,
++                        column_offset,
++                        true,            // is cross origin
++                        -1,              // script id
++                        Local<Value>(),  // source map URL
++                        false,           // is opaque (?)
++                        false,           // is WASM
++                        true,            // is ES Module
++                        host_defined_options);
++    if (user_cached_data.has_value() && user_cached_data.value() != nullptr)
++      FAIL();
++    ScriptCompiler::Source source(source_text, origin);
++    const auto options = ScriptCompiler::kNoCompileOptions;
++
++    Local<Module> module;
++    if (ScriptCompiler::CompileModule(isolate, &source, options)
++             .ToLocal(&module))
++      output = scope.Escape(module);
++  }
++  VIRTUALIZER_END
++  return output;
  }
  
+ ModulePhase to_phase_constant(ModuleImportPhase phase) {
 diff --git a/src/node_plasticity.h b/src/node_plasticity.h
 new file mode 100644
 --- /dev/null

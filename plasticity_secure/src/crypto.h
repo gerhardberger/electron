@@ -13,15 +13,22 @@
 #include <cstdint>
 #include <span>
 
+#if defined(_MSC_VER)
 #define PLASTICITY_CRYPTO_INLINE __forceinline
+#else
+#define PLASTICITY_CRYPTO_INLINE inline __attribute__((always_inline))
+#endif
+
+#define PLASTICITY_WIPE(bytes)                                      \
+  do {                                                             \
+    const auto wipe_bytes = std::span<uint8_t>(bytes);               \
+    volatile uint8_t* wipe_output = wipe_bytes.data();               \
+    for (size_t wipe_index = 0; wipe_index < wipe_bytes.size();       \
+         ++wipe_index)                                             \
+      wipe_output[wipe_index] = 0;                                  \
+  } while (false)
 
 namespace plasticity::secure::crypto {
-
-PLASTICITY_CRYPTO_INLINE void SecureZero(std::span<uint8_t> bytes) {
-  volatile uint8_t* output = bytes.data();
-  for (size_t index = 0; index < bytes.size(); ++index)
-    output[index] = 0;
-}
 
 namespace internal {
 
@@ -102,7 +109,7 @@ PLASTICITY_CRYPTO_INLINE std::array<uint8_t, 240> ExpandAes256Key(
       ++generated;
     }
   }
-  SecureZero(temporary);
+  PLASTICITY_WIPE(temporary);
   return expanded;
 }
 
@@ -184,7 +191,7 @@ PLASTICITY_CRYPTO_INLINE void MultiplyGhash(std::array<uint8_t, 16>* value,
     factor[0] ^= 0xe1 & reduction;
   }
   *value = product;
-  SecureZero(factor);
+  PLASTICITY_WIPE(factor);
 }
 
 PLASTICITY_CRYPTO_INLINE void UpdateGhash(std::array<uint8_t, 16>* state,
@@ -206,16 +213,6 @@ PLASTICITY_CRYPTO_INLINE void IncrementGcmCounter(std::array<uint8_t, 16>* count
 }
 
 }  // namespace internal
-
-PLASTICITY_CRYPTO_INLINE bool ConstantTimeEqual(std::span<const uint8_t> left,
-                                     std::span<const uint8_t> right) {
-  if (left.size() != right.size())
-    return false;
-  uint8_t difference = 0;
-  for (size_t index = 0; index < left.size(); ++index)
-    difference |= left[index] ^ right[index];
-  return difference == 0;
-}
 
 PLASTICITY_CRYPTO_INLINE std::array<uint8_t, 16> Aes256GcmDecrypt(
     std::span<const uint8_t, 32> key,
@@ -253,17 +250,17 @@ PLASTICITY_CRYPTO_INLINE std::array<uint8_t, 16> Aes256GcmDecrypt(
     const size_t length = std::min<size_t>(16, ciphertext.size() - offset);
     for (size_t index = 0; index < length; ++index)
       plaintext[offset + index] = ciphertext[offset + index] ^ stream[index];
-    SecureZero(stream);
+    PLASTICITY_WIPE(stream);
     offset += length;
   }
 
-  SecureZero(expanded);
-  SecureZero(hash_key);
-  SecureZero(ghash);
-  SecureZero(lengths);
-  SecureZero(initial_counter);
-  SecureZero(tag_mask);
-  SecureZero(counter);
+  PLASTICITY_WIPE(expanded);
+  PLASTICITY_WIPE(hash_key);
+  PLASTICITY_WIPE(ghash);
+  PLASTICITY_WIPE(lengths);
+  PLASTICITY_WIPE(initial_counter);
+  PLASTICITY_WIPE(tag_mask);
+  PLASTICITY_WIPE(counter);
   return authentication;
 }
 

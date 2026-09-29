@@ -1,57 +1,57 @@
-# Plasticity Electron security
+# Plasticity Secure
 
-Windows x64, based on Electron 42.11.6. `plasticity_secure` is a static-library
-target in this repository; the Node, V8 and Chromium changes use Electron's
-existing dependency patch lists.
+`plasticity_secure` is a static-library target in the Plasticity Electron fork.
+The checks are shared across Windows, macOS and Linux on x64/ARM64 (Windows x64).
+Windows has full application validation. The macOS port has native component
+tests; full macOS/Linux Electron builds and application tests remain pending.
 
-## Code to review
+The release asset pack contains the source string, V8 cached data and addon signature encrypted
+together with AEGIS-128L, plus the Electron, V8, platform, architecture, and
+runtime identities. Ed25519 signs the SHA-256 digest of the complete header and
+ciphertext. Content-key unwrapping, authenticated-decryption finalization, and JSC admission execute
+inside Code Virtualizer regions. Buffer allocation and the AEGIS bulk loop stay
+native.
 
-| Location | Responsibility |
-| --- | --- |
-| `src/runtime.cc` and `shell/common/node_bindings.cc` | Start the main process from `resources/plasticity.jsc.pack`. |
-| `patches/v8/plasticity_decrypt_jsc_inside_v8.patch` | Verify and decrypt JSC inside `CodeSerializer::DeserializeEncrypted`, deserialize it, and wipe the temporary plaintext. |
-| `patches/node/plasticity_create_module_arguments_for_encrypted_jsc.patch` | Route `vm.Script` cached data through the protected loader; reject cached data from other application APIs; verify and initialize the private addon. |
-| `shell/renderer/preload_utils.cc` and `patches/chromium/plasticity_disable_webpage_code_cache.patch` | Disable preload and webpage bytecode-cache consumption. |
-| `shell/app/electron_main_win.cc` and `filenames.gni` | Remove run-as-Node execution and its implementation from the Windows build. |
+`tools/generate-key-header.mjs` generates `src/key_config.h` from an Ed25519
+public verification key and the wrapping key. Plasticity's
+`tools/security/create-asset-pack.mjs` creates the signed encrypted JSC pack;
+`yarn seal-jsc` seals the staging application's JSC files before ASAR packaging.
+Install it as `resources/plasticity.jsc.pack` beside `resources/app.asar`, or in
+`Contents/Resources` on macOS.
+The runtime reads and verifies the pack in memory before decrypting the JSC.
 
-Node/Electron's compiled-in caches remain available. The DuplicateHandle
-compatibility patch is retained from the tested runtime for Themida compatibility.
+Node verifies Ed25519(SHA-256(addon bytes)) before loading the production addon
+through its private initializer at the fixed application path.
+Each authenticated JSC supplies the native thread's addon signature. Seal the JSC
+after the addon's final protection/signing step; no detached `.sig` is shipped.
+Before calling the initializer, the loader compares the mapped file identity with
+the verified file and checks the initializer belongs to that mapped image. This
+is a post-load check, not prevention of a substituted library's startup code.
+Windows compares mapped file IDs; macOS queries the initializer's VM-region
+vnode identity; Linux compares its `/proc/self/maps` device/inode. POSIX does not
+provide Windows' mandatory file-sharing restriction against concurrent writes.
 
-## Build and virtualize
+Private SHA-2 uses CPU-selected OpenSSL assembly for bulk blocks, with protected
+finalization and signature decisions. Both the packager and runtime use this
+digest-signing scheme; all packaged JSC packs and addon signatures are regenerated.
 
-1. Initialize with `e init electron42 --import release --remote-build none` and
-   use this fork with its listed dependency patches.
-2. Set the selected output directory's `args.gn` to
-   `import("//electron/build/args/plasticity.gn")`. This retains Release settings,
-   pointer compression, `v8_enable_sandbox=false`, and `node_use_node_snapshot=false`.
-3. Generate `src/key_config.h` using `tools/generate-key-header.mjs` with
-   `--verification-key PUBLIC.pem --wrap-key WRAP.bin --runtime-id HEX_ID`
-   and `--output electron/plasticity_secure/src/key_config.h`. Keep the generated
-   header, wrapping key, and private signing key outside Git. Reuse these inputs
-   when packaging assets for the resulting runtime.
-4. Build using `e build`. Build the `plasticity_jsc_compiler` target with the same
-   configuration for bytecode generation; it shares the runtime's V8/Node objects
-   and cache identity. This compiler is a build tool, separate from the application.
-5. Apply Code Virtualizer to the linked `electron.exe`. Regions select TIGER
-   WHITE in `src/virtualizer.h`. Keep automatic ANSI/Unicode string encryption
-   disabled because it misidentifies binary crypto constants.
+Initialize the build with `e init electron42 --import release --remote-build none`.
+Build Electron with `e build`, retaining `v8_enable_sandbox=false`. Compile JSC
+with the `plasticity_jsc_compiler` target built from the same checkout and flags;
+an official Electron binary can have a different V8 cache identity. Apply Code
+Virtualizer to the linked executable (the Electron Framework binary on macOS).
+The same protected regions emit GNU SDK markers on macOS/Linux; marker emission
+does not replace running and validating the protector on the final binary.
+Package the signed JSC sidecar and ASAR
+after generating the renderer bundle against the final protected addon.
+Keep automatic ANSI/Unicode string encryption disabled: it misidentifies binary
+crypto constants and breaks the protected V8 signature verification. TIGER
+virtualization remains enabled.
 
-## Package each Plasticity build
-
-1. Finalize protection and platform signing of `pk.node`, then run
-   `node tools/sign-addon.mjs ADDON PRIVATE.pem`. Package the addon and its `.sig`
-   in `resources/app.asar.unpacked/.webpack/renderer/`. Its production initializer
-   is `PlasticityInitialize_v1`, with the matching host challenge protocol.
-2. Compile JSC with the matching compiler. `tools/seal-jsc-directory.mjs` seals
-   renderer JSC and writes its `vm.Script` loader. `tools/create-asset-pack.mjs`
-   creates the main pack at `resources/plasticity.jsc.pack`.
-3. Both tools use the runtime's Electron/V8 versions, platform `windows`,
-   architecture `x64`, runtime ID, wrapping key and signing key. See their command
-   arguments in the source. Package the resulting assets and ASAR alongside the
-   protected executable; application asset changes do not require relinking it.
-
-Packs use AEGIS-128L for the payload and AES-256-GCM for the per-pack key.
-Ed25519 signs SHA-256(header and ciphertext); addon signatures cover SHA-256 of
-the final file. Signature decisions, key unwrapping and authentication remain
-inside Virtualizer regions. Bulk hashing, decryption and buffer operations stay
-native. SHA-2 assembly and its regeneration instructions are under `third_party/sha2`.
+`patches/node/plasticity_create_module_arguments_for_encrypted_jsc.patch` owns
+the private addon loader and JavaScript-facing cached-data restrictions.
+`patches/v8/plasticity_decrypt_jsc_inside_v8.patch` owns authenticated in-memory
+deserialization. `patches/chromium/plasticity_disable_webpage_code_cache.patch`
+disables webpage bytecode caching. Ordinary Node/Electron built-in caches remain.
+All three platform entrypoints remove run-as-Node startup; its implementation is
+excluded from the application build on every platform.

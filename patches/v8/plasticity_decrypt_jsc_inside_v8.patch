@@ -25,6 +25,7 @@ diff --git a/BUILD.gn b/BUILD.gn
      ":v8_headers",
 diff --git a/include/v8-plasticity.h b/include/v8-plasticity.h
 new file mode 100644
+index 000000000..7895495eb
 --- /dev/null
 +++ b/include/v8-plasticity.h
 @@ -0,0 +1,14 @@
@@ -35,7 +36,7 @@ new file mode 100644
 +
 +namespace v8 {
 +
-+V8_EXPORT MaybeLocal<UnboundScript> LoadSignedScript(
++MaybeLocal<UnboundScript> LoadSignedScript(
 +    Isolate* isolate, const uint8_t* bytes, int length,
 +    const ScriptOrigin& origin);
 +
@@ -43,46 +44,53 @@ new file mode 100644
 +
 +#endif  // INCLUDE_V8_PLASTICITY_H_
 diff --git a/src/api/api.cc b/src/api/api.cc
+index c6e361b08..61c9b5d86 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -3,6 +3,8 @@
- // found in the LICENSE file.
+@@ -4,6 +4,9 @@
  
  #include "src/api/api.h"
-+
-+#include "include/v8-plasticity.h"
  
++#include "include/v8-plasticity.h"
++#include "electron/plasticity_secure/src/virtualizer.h"
++
  #include <algorithm>  // For min
  #include <cmath>      // For isnan.
-@@ -2577,6 +2579,27 @@
+ #include <limits>
+@@ -2577,6 +2580,32 @@ i::ScriptDetails GetScriptDetails(
  
  }  // namespace
  
-+MaybeLocal<UnboundScript> LoadSignedScript(
++V8_NOINLINE MaybeLocal<UnboundScript> LoadSignedScript(
 +    Isolate* v8_isolate, const uint8_t* bytes, int length,
 +    const ScriptOrigin& origin) {
-+  auto i_isolate = reinterpret_cast<i::Isolate*>(v8_isolate);
-+  EnterV8NoScriptScope<InternalEscapableScope> api_scope{
-+      i_isolate, v8_isolate->GetCurrentContext(),
-+      RCCId::kAPI_ScriptCompiler_CompileUnbound};
-+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("v8.compile"), "V8.CompileScript");
-+  i::ScriptDetails details = GetScriptDetails(
-+      i_isolate, origin.ResourceName(), origin.LineOffset(),
-+      origin.ColumnOffset(), origin.SourceMapUrl(),
-+      origin.GetHostDefinedOptions(), origin.Options());
-+  i::AlignedCachedData data(bytes, length);
-+  i::DirectHandle<i::SharedFunctionInfo> result;
-+  if (!i::CodeSerializer::DeserializeEncrypted(
-+           i_isolate, &data, i_isolate->factory()->empty_string(), details)
-+           .ToHandle(&result))
-+    return {};
-+  return api_scope.Escape(ToApiHandle<UnboundScript>(result));
++  MaybeLocal<UnboundScript> output;
++  VIRTUALIZER_START;
++  {
++    auto i_isolate = reinterpret_cast<i::Isolate*>(v8_isolate);
++    EnterV8NoScriptScope<InternalEscapableScope> api_scope{
++        i_isolate, v8_isolate->GetCurrentContext(),
++        RCCId::kAPI_ScriptCompiler_CompileUnbound};
++    TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("v8.compile"), "V8.CompileScript");
++    i::ScriptDetails details = GetScriptDetails(
++        i_isolate, origin.ResourceName(), origin.LineOffset(),
++        origin.ColumnOffset(), origin.SourceMapUrl(),
++        origin.GetHostDefinedOptions(), origin.Options());
++    i::AlignedCachedData data(bytes, length);
++    i::DirectHandle<i::SharedFunctionInfo> result;
++    if (i::CodeSerializer::DeserializeEncrypted(
++             i_isolate, &data, i_isolate->factory()->empty_string(), details)
++             .ToHandle(&result))
++      output = api_scope.Escape(ToApiHandle<UnboundScript>(result));
++  }
++  VIRTUALIZER_END
++  return output;
 +}
 +
  MaybeLocal<UnboundScript> ScriptCompiler::CompileUnboundInternal(
      Isolate* v8_isolate, Source* source, CompileOptions options,
      NoCacheReason no_cache_reason) {
-@@ -2810,23 +2833,13 @@
+@@ -2810,23 +2839,13 @@ void ScriptCompiler::ConsumeCodeCacheTask::MergeWithExistingScript() {
  
  ScriptCompiler::ConsumeCodeCacheTask* ScriptCompiler::StartConsumingCodeCache(
      Isolate* v8_isolate, std::unique_ptr<CachedData> cached_data) {
@@ -109,6 +117,7 @@ diff --git a/src/api/api.cc b/src/api/api.cc
  
  namespace {
 diff --git a/src/snapshot/code-serializer.cc b/src/snapshot/code-serializer.cc
+index 6149ee8..f63aa9f 100644
 --- a/src/snapshot/code-serializer.cc
 +++ b/src/snapshot/code-serializer.cc
 @@ -4,7 +4,30 @@
@@ -120,11 +129,11 @@ diff --git a/src/snapshot/code-serializer.cc b/src/snapshot/code-serializer.cc
 +#include <limits>
  #include <memory>
 +#include <span>
-+#include <immintrin.h>
 +
 +#include "build/build_config.h"
 +#include "electron/electron_version.h"
 +#include "electron/plasticity_secure/src/asset_pack.h"
++#include "electron/plasticity_secure/src/aes_block.h"
 +#include "electron/plasticity_secure/src/crypto.h"
 +#include "electron/plasticity_secure/src/failure.h"
 +#include "electron/plasticity_secure/src/key_config.h"
@@ -142,11 +151,10 @@ diff --git a/src/snapshot/code-serializer.cc b/src/snapshot/code-serializer.cc
  
  #include "src/base/fpu.h"
  #include "src/base/logging.h"
-@@ -561,7 +584,323 @@
- 
+@@ -562,6 +585,339 @@ MaybeDirectHandle<SharedFunctionInfo> CodeSerializer::Deserialize(
    return scope.CloseAndEscape(result);
  }
-+
+ 
 +__attribute__((target("aes"))) V8_NOINLINE
 +MaybeDirectHandle<SharedFunctionInfo> CodeSerializer::DeserializeEncrypted(
 +    Isolate* isolate, AlignedCachedData* cached_data,
@@ -171,7 +179,7 @@ diff --git a/src/snapshot/code-serializer.cc b/src/snapshot/code-serializer.cc
 +   static_cast<uint32_t>((bytes)[(offset) + 1]) << 8 |                        \
 +   static_cast<uint32_t>((bytes)[(offset) + 2]) << 16 |                       \
 +   static_cast<uint32_t>((bytes)[(offset) + 3]) << 24)
- 
++
 +  const std::span<const uint8_t> bytes(asset_pack, asset_pack_size);
 +  const std::span<const uint8_t, kAssetHeaderSize> asset_header(
 +      asset_pack, kAssetHeaderSize);
@@ -186,7 +194,15 @@ diff --git a/src/snapshot/code-serializer.cc b/src/snapshot/code-serializer.cc
 +      PLASTICITY_READ_U16(asset_header, 24) != V8_MINOR_VERSION ||
 +      PLASTICITY_READ_U16(asset_header, 26) != V8_BUILD_NUMBER ||
 +      PLASTICITY_READ_U16(asset_header, 28) != V8_PATCH_LEVEL ||
++#if BUILDFLAG(IS_WIN)
 +      asset_header[30] != 1 ||
++#elif BUILDFLAG(IS_MAC)
++      asset_header[30] != 2 ||
++#elif BUILDFLAG(IS_LINUX)
++      asset_header[30] != 3 ||
++#else
++#error Unsupported Plasticity security platform
++#endif
 +#if defined(ARCH_CPU_X86_64)
 +      asset_header[31] != 1 ||
 +#elif defined(ARCH_CPU_ARM64)
@@ -235,7 +251,9 @@ diff --git a/src/snapshot/code-serializer.cc b/src/snapshot/code-serializer.cc
 +  fe_mul(x, point.X, reciprocal);
 +  fe_mul(y, point.Y, reciprocal);
 +  fe_tobytes(expected.data(), y);
-+  expected[31] ^= fe_isnegative(x) << 7;
++  std::array<uint8_t, 32> encoded_x;
++  fe_tobytes(encoded_x.data(), x);
++  expected[31] ^= (encoded_x[0] & 1) << 7;
 +  uint8_t difference = 0;
 +  for (size_t index = 0; index < expected.size(); ++index)
 +    difference |= expected[index] ^ signature[index];
@@ -247,10 +265,13 @@ diff --git a/src/snapshot/code-serializer.cc b/src/snapshot/code-serializer.cc
 +                    signature_offset - kAssetHeaderSize);
 +  const size_t source_length =
 +      PLASTICITY_READ_U32(asset_header, kSourceLengthOffset);
-+  if (source_length == 0 || source_length >= jsc_ciphertext.size() ||
++  if (jsc_ciphertext.size() <= kAddonSignatureSize ||
++      source_length == 0 ||
++      source_length >= jsc_ciphertext.size() - kAddonSignatureSize ||
 +      source_length > static_cast<size_t>(std::numeric_limits<int>::max()))
 +    FAIL();
-+  const size_t cached_data_length = jsc_ciphertext.size() - source_length;
++  const size_t cached_data_length =
++      jsc_ciphertext.size() - source_length - kAddonSignatureSize;
 +  if (cached_data_length < SerializedCodeData::kHeaderSize ||
 +      cached_data_length >
 +      static_cast<size_t>(std::numeric_limits<int>::max()))
@@ -266,15 +287,17 @@ diff --git a/src/snapshot/code-serializer.cc b/src/snapshot/code-serializer.cc
 +      wrap_key, asset_header.subspan<kWrapNonceOffset, 12>(),
 +      asset_header.subspan<kWrappedKeyOffset, 16>(),
 +      asset_header.first(kAssetAuthenticatedHeaderSize), content_key);
-+  if (!crypto::ConstantTimeEqual(
-+          authentication,
-+          asset_header.subspan<kWrappedKeyTagOffset, 16>())) {
-+    crypto::SecureZero(wrap_key);
-+    crypto::SecureZero(authentication);
++  uint8_t key_difference = 0;
++  for (size_t index = 0; index < authentication.size(); ++index)
++    key_difference |= authentication[index] ^
++                      asset_header[kWrappedKeyTagOffset + index];
++  if (key_difference != 0) {
++    PLASTICITY_WIPE(wrap_key);
++    PLASTICITY_WIPE(authentication);
 +    FAIL();
 +  }
-+  crypto::SecureZero(wrap_key);
-+  crypto::SecureZero(authentication);
++  PLASTICITY_WIPE(wrap_key);
++  PLASTICITY_WIPE(authentication);
 +
 +  VIRTUALIZER_END
 +  // Reuse the owned ciphertext buffer. Moving output at most seven bytes
@@ -287,17 +310,17 @@ diff --git a/src/snapshot/code-serializer.cc b/src/snapshot/code-serializer.cc
 +
 +#define PLASTICITY_AEGIS_UPDATE(first, second)                         \
 +  do {                                                                \
-+    const __m128i previous = aegis_state[7];                          \
-+    aegis_state[7] = _mm_aesenc_si128(aegis_state[6], aegis_state[7]); \
-+    aegis_state[6] = _mm_aesenc_si128(aegis_state[5], aegis_state[6]); \
-+    aegis_state[5] = _mm_aesenc_si128(aegis_state[4], aegis_state[5]); \
-+    aegis_state[4] = _mm_aesenc_si128(aegis_state[3], aegis_state[4]); \
-+    aegis_state[3] = _mm_aesenc_si128(aegis_state[2], aegis_state[3]); \
-+    aegis_state[2] = _mm_aesenc_si128(aegis_state[1], aegis_state[2]); \
-+    aegis_state[1] = _mm_aesenc_si128(aegis_state[0], aegis_state[1]); \
-+    aegis_state[0] = _mm_aesenc_si128(previous, aegis_state[0]);       \
-+    aegis_state[0] = _mm_xor_si128(aegis_state[0], (first));          \
-+    aegis_state[4] = _mm_xor_si128(aegis_state[4], (second));         \
++    const PLASTICITY_BLOCK previous = aegis_state[7];                          \
++    aegis_state[7] = PLASTICITY_AES_ROUND(aegis_state[6], aegis_state[7]); \
++    aegis_state[6] = PLASTICITY_AES_ROUND(aegis_state[5], aegis_state[6]); \
++    aegis_state[5] = PLASTICITY_AES_ROUND(aegis_state[4], aegis_state[5]); \
++    aegis_state[4] = PLASTICITY_AES_ROUND(aegis_state[3], aegis_state[4]); \
++    aegis_state[3] = PLASTICITY_AES_ROUND(aegis_state[2], aegis_state[3]); \
++    aegis_state[2] = PLASTICITY_AES_ROUND(aegis_state[1], aegis_state[2]); \
++    aegis_state[1] = PLASTICITY_AES_ROUND(aegis_state[0], aegis_state[1]); \
++    aegis_state[0] = PLASTICITY_AES_ROUND(previous, aegis_state[0]);       \
++    aegis_state[0] = PLASTICITY_XOR(aegis_state[0], (first));          \
++    aegis_state[4] = PLASTICITY_XOR(aegis_state[4], (second));         \
 +  } while (false)
 +
 +  alignas(16) static constexpr uint8_t constant0[16] = {
@@ -306,33 +329,33 @@ diff --git a/src/snapshot/code-serializer.cc b/src/snapshot/code-serializer.cc
 +  alignas(16) static constexpr uint8_t constant1[16] = {
 +      0xdb, 0x3d, 0x18, 0x55, 0x6d, 0xc2, 0x2f, 0xf1,
 +      0x20, 0x11, 0x31, 0x42, 0x73, 0xb5, 0x28, 0xdd};
-+  const __m128i aegis_key =
-+      _mm_loadu_si128(reinterpret_cast<const __m128i*>(content_key.data()));
-+  const __m128i aegis_nonce = _mm_loadu_si128(
-+      reinterpret_cast<const __m128i*>(asset_header.data() + kJscNonceOffset));
-+  const __m128i aegis_constant0 =
-+      _mm_load_si128(reinterpret_cast<const __m128i*>(constant0));
-+  const __m128i aegis_constant1 =
-+      _mm_load_si128(reinterpret_cast<const __m128i*>(constant1));
-+  const __m128i key_nonce = _mm_xor_si128(aegis_key, aegis_nonce);
-+  std::array<__m128i, 8> aegis_state = {
++  const PLASTICITY_BLOCK aegis_key =
++      PLASTICITY_LOAD(content_key.data());
++  const PLASTICITY_BLOCK aegis_nonce = PLASTICITY_LOAD(
++      asset_header.data() + kJscNonceOffset);
++  const PLASTICITY_BLOCK aegis_constant0 =
++      PLASTICITY_LOAD(constant0);
++  const PLASTICITY_BLOCK aegis_constant1 =
++      PLASTICITY_LOAD(constant1);
++  const PLASTICITY_BLOCK key_nonce = PLASTICITY_XOR(aegis_key, aegis_nonce);
++  std::array<PLASTICITY_BLOCK, 8> aegis_state = {
 +      key_nonce,
 +      aegis_constant1,
 +      aegis_constant0,
 +      aegis_constant1,
 +      key_nonce,
-+      _mm_xor_si128(aegis_key, aegis_constant0),
-+      _mm_xor_si128(aegis_key, aegis_constant1),
-+      _mm_xor_si128(aegis_key, aegis_constant0),
++      PLASTICITY_XOR(aegis_key, aegis_constant0),
++      PLASTICITY_XOR(aegis_key, aegis_constant1),
++      PLASTICITY_XOR(aegis_key, aegis_constant0),
 +  };
 +  for (int round = 0; round < 10; ++round)
 +    PLASTICITY_AEGIS_UPDATE(aegis_nonce, aegis_key);
 +  for (size_t offset = 0; offset < kAssetAuthenticatedHeaderSize;
 +       offset += 32) {
-+    const __m128i first = _mm_loadu_si128(
-+        reinterpret_cast<const __m128i*>(asset_header.data() + offset));
-+    const __m128i second = _mm_loadu_si128(
-+        reinterpret_cast<const __m128i*>(asset_header.data() + offset + 16));
++    const PLASTICITY_BLOCK first = PLASTICITY_LOAD(
++        asset_header.data() + offset);
++    const PLASTICITY_BLOCK second = PLASTICITY_LOAD(
++        asset_header.data() + offset + 16);
 +    PLASTICITY_AEGIS_UPDATE(first, second);
 +  }
 +
@@ -340,29 +363,29 @@ diff --git a/src/snapshot/code-serializer.cc b/src/snapshot/code-serializer.cc
 +  size_t payload_offset = 0;
 +  for (; payload_offset + 32 <= jsc_ciphertext.size();
 +       payload_offset += 32) {
-+    const __m128i first_ciphertext = _mm_loadu_si128(
-+        reinterpret_cast<const __m128i*>(jsc_ciphertext.data() +
-+                                         payload_offset));
-+    const __m128i second_ciphertext = _mm_loadu_si128(
-+        reinterpret_cast<const __m128i*>(jsc_ciphertext.data() +
-+                                         payload_offset + 16));
-+    __m128i first_plaintext = _mm_xor_si128(
-+        first_ciphertext, _mm_xor_si128(
++    const PLASTICITY_BLOCK first_ciphertext = PLASTICITY_LOAD(
++        jsc_ciphertext.data() +
++                                         payload_offset);
++    const PLASTICITY_BLOCK second_ciphertext = PLASTICITY_LOAD(
++        jsc_ciphertext.data() +
++                                         payload_offset + 16);
++    PLASTICITY_BLOCK first_plaintext = PLASTICITY_XOR(
++        first_ciphertext, PLASTICITY_XOR(
 +                              aegis_state[6],
-+                              _mm_xor_si128(aegis_state[1],
-+                                            _mm_and_si128(aegis_state[2],
++                              PLASTICITY_XOR(aegis_state[1],
++                                            PLASTICITY_AND(aegis_state[2],
 +                                                          aegis_state[3]))));
-+    __m128i second_plaintext = _mm_xor_si128(
-+        second_ciphertext, _mm_xor_si128(
++    PLASTICITY_BLOCK second_plaintext = PLASTICITY_XOR(
++        second_ciphertext, PLASTICITY_XOR(
 +                               aegis_state[5],
-+                               _mm_xor_si128(aegis_state[2],
-+                                             _mm_and_si128(aegis_state[6],
++                               PLASTICITY_XOR(aegis_state[2],
++                                             PLASTICITY_AND(aegis_state[6],
 +                                                           aegis_state[7]))));
-+    _mm_storeu_si128(
-+        reinterpret_cast<__m128i*>(plaintext.data() + payload_offset),
++    PLASTICITY_STORE(
++        plaintext.data() + payload_offset,
 +        first_plaintext);
-+    _mm_storeu_si128(
-+        reinterpret_cast<__m128i*>(plaintext.data() + payload_offset + 16),
++    PLASTICITY_STORE(
++        plaintext.data() + payload_offset + 16,
 +        second_plaintext);
 +    PLASTICITY_AEGIS_UPDATE(first_plaintext, second_plaintext);
 +  }
@@ -370,57 +393,59 @@ diff --git a/src/snapshot/code-serializer.cc b/src/snapshot/code-serializer.cc
 +    alignas(16) std::array<uint8_t, 32> tail = {};
 +    std::memcpy(tail.data(), jsc_ciphertext.data() + payload_offset,
 +                jsc_ciphertext.size() - payload_offset);
-+    const __m128i first_ciphertext =
-+        _mm_load_si128(reinterpret_cast<const __m128i*>(tail.data()));
-+    const __m128i second_ciphertext =
-+        _mm_load_si128(reinterpret_cast<const __m128i*>(tail.data() + 16));
-+    const __m128i first_plaintext = _mm_xor_si128(
-+        first_ciphertext, _mm_xor_si128(
++    const PLASTICITY_BLOCK first_ciphertext =
++        PLASTICITY_LOAD(tail.data());
++    const PLASTICITY_BLOCK second_ciphertext =
++        PLASTICITY_LOAD(tail.data() + 16);
++    const PLASTICITY_BLOCK first_plaintext = PLASTICITY_XOR(
++        first_ciphertext, PLASTICITY_XOR(
 +                              aegis_state[6],
-+                              _mm_xor_si128(aegis_state[1],
-+                                            _mm_and_si128(aegis_state[2],
++                              PLASTICITY_XOR(aegis_state[1],
++                                            PLASTICITY_AND(aegis_state[2],
 +                                                          aegis_state[3]))));
-+    const __m128i second_plaintext = _mm_xor_si128(
-+        second_ciphertext, _mm_xor_si128(
++    const PLASTICITY_BLOCK second_plaintext = PLASTICITY_XOR(
++        second_ciphertext, PLASTICITY_XOR(
 +                               aegis_state[5],
-+                               _mm_xor_si128(aegis_state[2],
-+                                             _mm_and_si128(aegis_state[6],
++                               PLASTICITY_XOR(aegis_state[2],
++                                             PLASTICITY_AND(aegis_state[6],
 +                                                           aegis_state[7]))));
-+    _mm_store_si128(reinterpret_cast<__m128i*>(tail.data()),
++    PLASTICITY_STORE(tail.data(),
 +                    first_plaintext);
-+    _mm_store_si128(reinterpret_cast<__m128i*>(tail.data() + 16),
++    PLASTICITY_STORE(tail.data() + 16,
 +                    second_plaintext);
 +    const size_t remaining = jsc_ciphertext.size() - payload_offset;
 +    std::memcpy(plaintext.data() + payload_offset, tail.data(), remaining);
 +    std::memset(tail.data() + remaining, 0, tail.size() - remaining);
 +    PLASTICITY_AEGIS_UPDATE(
-+        _mm_load_si128(reinterpret_cast<const __m128i*>(tail.data())),
-+        _mm_load_si128(reinterpret_cast<const __m128i*>(tail.data() + 16)));
-+    crypto::SecureZero(tail);
++        PLASTICITY_LOAD(tail.data()),
++        PLASTICITY_LOAD(tail.data() + 16));
++    PLASTICITY_WIPE(tail);
 +  }
 +  VIRTUALIZER_START
 +
-+  __m128i lengths = _mm_set_epi64x(
++  PLASTICITY_BLOCK lengths = PLASTICITY_LENGTHS(
 +      static_cast<long long>(jsc_ciphertext.size()) << 3,
 +      static_cast<long long>(kAssetAuthenticatedHeaderSize) << 3);
-+  lengths = _mm_xor_si128(lengths, aegis_state[2]);
++  lengths = PLASTICITY_XOR(lengths, aegis_state[2]);
 +  for (int round = 0; round < 7; ++round)
 +    PLASTICITY_AEGIS_UPDATE(lengths, lengths);
-+  __m128i computed_tag = _mm_xor_si128(aegis_state[6], aegis_state[5]);
-+  computed_tag = _mm_xor_si128(computed_tag, aegis_state[4]);
-+  computed_tag = _mm_xor_si128(computed_tag, aegis_state[3]);
-+  computed_tag = _mm_xor_si128(computed_tag, aegis_state[2]);
-+  computed_tag = _mm_xor_si128(computed_tag, aegis_state[1]);
-+  computed_tag = _mm_xor_si128(computed_tag, aegis_state[0]);
-+  const __m128i expected_tag = _mm_loadu_si128(
-+      reinterpret_cast<const __m128i*>(asset_header.data() + kJscTagOffset));
-+  const int payload_opened =
-+      _mm_movemask_epi8(_mm_cmpeq_epi8(computed_tag, expected_tag));
++  PLASTICITY_BLOCK computed_tag = PLASTICITY_XOR(aegis_state[6], aegis_state[5]);
++  computed_tag = PLASTICITY_XOR(computed_tag, aegis_state[4]);
++  computed_tag = PLASTICITY_XOR(computed_tag, aegis_state[3]);
++  computed_tag = PLASTICITY_XOR(computed_tag, aegis_state[2]);
++  computed_tag = PLASTICITY_XOR(computed_tag, aegis_state[1]);
++  computed_tag = PLASTICITY_XOR(computed_tag, aegis_state[0]);
++  const PLASTICITY_BLOCK expected_tag = PLASTICITY_LOAD(
++      asset_header.data() + kJscTagOffset);
++  const bool payload_opened = PLASTICITY_EQUAL(computed_tag, expected_tag);
 +#undef PLASTICITY_AEGIS_UPDATE
 +
-+  crypto::SecureZero(content_key);
-+  if (payload_opened != 0xffff)
++  PLASTICITY_WIPE(content_key);
++  if (!payload_opened)
 +    FAIL();
++  addon_signature = std::make_unique_for_overwrite<uint8_t[]>(kAddonSignatureSize);
++  for (size_t index = 0; index < kAddonSignatureSize; ++index)
++    addon_signature[index] = plaintext[source_length + cached_data_length + index];
 +  // Apply Bytenode's header adjustment only to authenticated plaintext.
 +  const uint32_t flags_hash = FlagList::Hash();
 +  const uint32_t snapshot_checksum =
@@ -459,7 +484,7 @@ diff --git a/src/snapshot/code-serializer.cc b/src/snapshot/code-serializer.cc
 +  timer.Start();
 +  FinalizeDeserialization(isolate, result, timer, script_details);
 +  VIRTUALIZER_END
-+  crypto::SecureZero(plaintext);
++  PLASTICITY_WIPE(plaintext);
 +  return scope.CloseAndEscape(result);
 +}
 +
@@ -469,6 +494,18 @@ diff --git a/src/snapshot/code-serializer.cc b/src/snapshot/code-serializer.cc
 diff --git a/src/snapshot/code-serializer.h b/src/snapshot/code-serializer.h
 --- a/src/snapshot/code-serializer.h
 +++ b/src/snapshot/code-serializer.h
+@@ -66,10 +66,10 @@
+ 
+    private:
+     friend class CodeSerializer;
++    SerializedCodeSanityCheckResult sanity_check_result;
+     MaybeIndirectHandle<SharedFunctionInfo> maybe_result;
+     std::vector<IndirectHandle<Script>> scripts;
+     std::unique_ptr<PersistentHandles> persistent_handles;
+-    SerializedCodeSanityCheckResult sanity_check_result;
+   };
+ 
+   CodeSerializer(const CodeSerializer&) = delete;
 @@ -85,6 +85,11 @@
                DirectHandle<String> source, const ScriptDetails& script_details,
                MaybeDirectHandle<Script> maybe_cached_script = {});

@@ -9,7 +9,7 @@
 namespace plasticity::secure {
 
 v8::Local<v8::Value> RunApplication(v8::Isolate* isolate,
-                                   v8::Local<v8::Context> context);
+                                    v8::Local<v8::Context> context);
 
 }  // namespace plasticity::secure
 

@@ -11,9 +11,6 @@
 #if BUILDFLAG(IS_MAC)
 extern "C" {
 __attribute__((visibility("default"))) int ElectronMain(int argc, char* argv[]);
-__attribute__((visibility("default"))) int ElectronInitializeICUandStartNode(
-    int argc,
-    char* argv[]);
 #if !IS_MAS_BUILD()
 // The entry point of an app shim: a small app, in a bundle of its own, that
 // loads this framework from a host Electron app and shows windows on the

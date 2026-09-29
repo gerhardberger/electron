@@ -5,6 +5,7 @@
 
 #include <bit>
 #include <cstdint>
+#if defined(_WIN32)
 #include <intrin.h>
 
 #define FAIL()                                                                 \
@@ -26,5 +27,20 @@
     for (;;) {                                                                 \
     }                                                                          \
   } while (false)
+#else
+#define FAIL()                                                               \
+  do {                                                                       \
+    const uintptr_t plasticity_failure_entropy =                              \
+        __builtin_readcyclecounter() ^                                       \
+        reinterpret_cast<uintptr_t>(__builtin_frame_address(0));              \
+    const uintptr_t plasticity_failure_target =                               \
+        std::rotl(plasticity_failure_entropy * 0x9e3779b97f4a7c15ULL, 23) | 1; \
+    using PlasticityFailureTarget = void (*)(uintptr_t);                      \
+    reinterpret_cast<PlasticityFailureTarget>(plasticity_failure_target)(     \
+        plasticity_failure_target);                                          \
+    for (;;) {                                                               \
+    }                                                                        \
+  } while (false)
+#endif
 
 #endif  // PLASTICITY_SECURE_SRC_FAILURE_H_

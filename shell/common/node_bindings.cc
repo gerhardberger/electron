@@ -31,6 +31,7 @@
 #include "electron/electron_version.h"
 #include "electron/fuses.h"
 #include "electron/mas.h"
+#include "electron/plasticity_secure/src/virtualizer.h"
 #include "gin/per_context_data.h"
 #include "plasticity_secure/plasticity_secure.h"
 #include "shell/browser/api/electron_api_app.h"
@@ -1001,7 +1002,8 @@ void RefreshCachedNodeOptions(v8::Local<v8::Context> context,
 
 }  // namespace
 
-void NodeBindings::LoadEnvironment(node::Environment* env) {
+NOINLINE void NodeBindings::LoadEnvironment(node::Environment* env) {
+  VIRTUALIZER_START
   // Re-assert Electron's build-time cache for the internal/electron/js2c/*
   // framework bundles (browser_init etc.). Every BuiltinLoader already starts
   // from it (InstallProcessCodeCache), but when booting from the Node startup
@@ -1050,6 +1052,7 @@ void NodeBindings::LoadEnvironment(node::Environment* env) {
   if (browser_env_ == BrowserEnvironment::kBrowser)
     plasticity::secure::RunApplication(env->isolate(), env->context());
   gin_helper::EmitEvent(env->isolate(), env->process_object(), "loaded");
+  VIRTUALIZER_END
 }
 
 std::string_view NodeBindings::ProcessType() const {

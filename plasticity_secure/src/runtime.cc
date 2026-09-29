@@ -32,10 +32,17 @@ NOINLINE v8::Local<v8::Value> RunApplication(
     v8::Local<v8::Context> context) {
   v8::Local<v8::Value> result;
   VIRTUALIZER_START
+  const base::FilePath executable_directory =
+      base::PathService::CheckedGet(base::DIR_EXE);
+#if BUILDFLAG(IS_MAC)
+  const base::FilePath resources =
+      executable_directory.DirName().Append(FILE_PATH_LITERAL("Resources"));
+#else
+  const base::FilePath resources =
+      executable_directory.Append(FILE_PATH_LITERAL("resources"));
+#endif
   const base::FilePath pack_path =
-      base::PathService::CheckedGet(base::DIR_EXE)
-          .Append(L"resources")
-          .Append(L"plasticity.jsc.pack");
+      resources.Append(FILE_PATH_LITERAL("plasticity.jsc.pack"));
   base::File file(pack_path, base::File::FLAG_OPEN | base::File::FLAG_READ);
   const int64_t size = file.GetLength();
   if (size <= 0 || size > INT_MAX)
@@ -46,13 +53,11 @@ NOINLINE v8::Local<v8::Value> RunApplication(
     FAIL();
 
   const base::FilePath module_path =
-      base::PathService::CheckedGet(base::DIR_EXE)
-          .Append(L"resources")
-          .Append(L"app.asar")
-          .Append(L".webpack")
-          .Append(L"main")
-          .Append(L"index.compiled.jsc");
-  const std::string module_path_utf8 = base::WideToUTF8(module_path.value());
+      resources.Append(FILE_PATH_LITERAL("app.asar"))
+          .Append(FILE_PATH_LITERAL(".webpack"))
+          .Append(FILE_PATH_LITERAL("main"))
+          .Append(FILE_PATH_LITERAL("index.compiled.jsc"));
+  const std::string module_path_utf8 = module_path.AsUTF8Unsafe();
   v8::Local<v8::String> module_filename;
   if (!v8::String::NewFromUtf8(
            isolate, module_path_utf8.data(), v8::NewStringType::kNormal,
@@ -61,7 +66,7 @@ NOINLINE v8::Local<v8::Value> RunApplication(
     FAIL();
   }
   const std::string module_directory_utf8 =
-      base::WideToUTF8(module_path.DirName().value());
+      module_path.DirName().AsUTF8Unsafe();
   v8::Local<v8::String> module_directory;
   if (!v8::String::NewFromUtf8(
            isolate, module_directory_utf8.data(), v8::NewStringType::kNormal,
@@ -75,7 +80,7 @@ NOINLINE v8::Local<v8::Value> RunApplication(
 
   v8::Local<v8::UnboundScript> unbound_script;
   if (!v8::LoadSignedScript(isolate, pack.data(), static_cast<int>(pack.size()),
-                           v8::ScriptOrigin(module_filename))
+                            v8::ScriptOrigin(module_filename))
            .ToLocal(&unbound_script))
     FAIL();
   const auto script = unbound_script->BindToCurrentContext();

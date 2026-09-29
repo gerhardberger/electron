@@ -20,8 +20,6 @@ filenames = {
   ]
 
   lib_sources_linux = [
-    "shell/app/node_main.cc",
-    "shell/app/node_main.h",
     "shell/browser/browser_linux.cc",
     "shell/browser/lib/power_observer_linux.cc",
     "shell/browser/lib/power_observer_linux.h",
@@ -123,8 +121,6 @@ filenames = {
   ]
 
   lib_sources_mac = [
-    "shell/app/node_main.cc",
-    "shell/app/node_main.h",
     "shell/app/electron_main_delegate_mac.h",
     "shell/app/electron_main_delegate_mac.mm",
     "shell/app/electron_prefetch_mac.h",

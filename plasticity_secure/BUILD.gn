@@ -1,5 +1,5 @@
-assert(is_win && current_cpu == "x64",
-       "plasticity_secure currently supports Windows x64 only")
+assert(is_win || is_mac || is_linux)
+assert(current_cpu == "x64" || current_cpu == "arm64")
 import("//third_party/nasm/nasm_assemble.gni")
 
 static_library("plasticity_secure") {
@@ -8,6 +8,7 @@ static_library("plasticity_secure") {
   sources = [
     "include/plasticity_secure/plasticity_secure.h",
     "src/asset_pack.h",
+    "src/aes_block.h",
     "src/crypto.h",
     "src/failure.h",
     "src/key_config.h",
@@ -16,19 +17,20 @@ static_library("plasticity_secure") {
     "src/wrap_key.h",
   ]
 
-  public_configs = [ ":public_config" ]
+  public_configs = [ ":public_config", ":virtualizer_config" ]
 
   configs += [ "//third_party/electron_node:node_external_config" ]
 
   deps = [
-    ":ed25519",
     "//base",
+    ":ed25519",
     "//third_party/electron_node:libnode",
     "//v8",
   ]
 }
 
 source_set("ed25519") {
+  public_configs = [ ":virtualizer_config" ]
   sources = [
     "third_party/ed25519/fe.c",
     "third_party/ed25519/ge.c",
@@ -37,7 +39,20 @@ source_set("ed25519") {
     "third_party/sha2/cpu.cc",
     "third_party/sha2/sha256.h",
   ]
-  deps = [ ":sha2_asm" ]
+  if (is_win) {
+    deps = [ ":sha2_asm" ]
+  } else {
+    if (is_mac) {
+      sha_platform = "mac"
+    } else {
+      sha_platform = "linux"
+    }
+    sources += [
+      "third_party/sha2/sha256-${sha_platform}-${current_cpu}.S",
+      "third_party/sha2/sha512-${sha_platform}-${current_cpu}.S",
+    ]
+    include_dirs = [ "third_party/sha2" ]
+  }
   configs -= [
     "//build/config/compiler:chromium_code",
     "//build/config/clang:unsafe_buffers",
@@ -45,14 +60,28 @@ source_set("ed25519") {
   configs += [ "//build/config/compiler:no_chromium_code" ]
 }
 
-nasm_assemble("sha2_asm") {
+if (is_win) {
+  nasm_assemble("sha2_asm") {
+    assert(current_cpu == "x64")
   sources = [
     "third_party/sha2/sha256-blocks.asm",
     "third_party/sha2/sha512-blocks.asm",
   ]
+  }
 }
 
 config("public_config") {
   include_dirs = [ "include" ]
-  libs = [ "bcrypt.lib" ]
+  if (is_win) {
+    libs = [ "bcrypt.lib" ]
+  }
+}
+
+config("virtualizer_config") {
+  if (!is_win && current_cpu == "x64") {
+    cflags = [ "-mno-red-zone" ]
+  }
+  if (current_cpu == "arm64" && is_linux) {
+    cflags = [ "-march=armv8-a+crypto" ]
+  }
 }
