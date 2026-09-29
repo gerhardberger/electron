@@ -1,0 +1,57 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Gellert <93.morph@gmail.com>
+Date: Tue, 29 Sep 2026 14:01:03 +0200
+Subject: feat: track right and middle mouse button drags outside the window on
+ macOS
+
+Chromium only treats the left mouse button as starting a drag on macOS.
+BaseView only sets _dragging for mouseDown:, and RenderWidgetHostViewCocoa
+only sets _hasOpenMouseDown for left button down/up. As a result, once the
+cursor leaves the BrowserWindow during a right or middle button drag, the
+drag events stop being delivered to the renderer.
+
+This applies the same treatment to right and other mouse buttons so that
+dragging with any button keeps delivering events outside the window. It
+ports the runtime swizzling done by the electron-drag-outside native module
+(https://github.com/gerhardberger/electron-drag-outside) into the tree.
+
+This is Electron-specific behaviour and is not intended for upstream.
+
+diff --git a/content/app_shim_remote_cocoa/render_widget_host_view_cocoa.mm b/content/app_shim_remote_cocoa/render_widget_host_view_cocoa.mm
+index c256a5a98cd93bdcf69190ee3ae083b8a6daedc4..667ac38d3ffc7f100eb75604053b41852e83424a 100644
+--- a/content/app_shim_remote_cocoa/render_widget_host_view_cocoa.mm
++++ b/content/app_shim_remote_cocoa/render_widget_host_view_cocoa.mm
+@@ -1116,10 +1116,14 @@ - (void)mouseEvent:(NSEvent*)theEvent {
+   // popup. A click outside the text field would cause the text field to drop
+   // the focus, and then EditorHostImpl::textFieldDidEndEditing() would cancel
+   // the popup anyway, so we're OK.
+-  if (type == NSEventTypeLeftMouseDown)
++  if (type == NSEventTypeLeftMouseDown || type == NSEventTypeRightMouseDown ||
++      type == NSEventTypeOtherMouseDown) {
+     _hasOpenMouseDown = YES;
+-  else if (type == NSEventTypeLeftMouseUp)
++  } else if (type == NSEventTypeLeftMouseUp ||
++             type == NSEventTypeRightMouseUp ||
++             type == NSEventTypeOtherMouseUp) {
+     _hasOpenMouseDown = NO;
++  }
+ 
+   // TODO(suzhe): We should send mouse events to the input method first if it
+   // wants to handle them. But it won't work without implementing method
+diff --git a/ui/base/cocoa/base_view.mm b/ui/base/cocoa/base_view.mm
+index e081e2b9a9de38cb41c9628ba6a558162f3f668d..b89bbc2f3b6302f88462a67d675db051d1389c77 100644
+--- a/ui/base/cocoa/base_view.mm
++++ b/ui/base/cocoa/base_view.mm
+@@ -103,10 +103,12 @@ - (void)mouseDown:(NSEvent*)theEvent {
+ }
+ 
+ - (void)rightMouseDown:(NSEvent*)theEvent {
++  _dragging = YES;
+   [self mouseEvent:theEvent];
+ }
+ 
+ - (void)otherMouseDown:(NSEvent*)theEvent {
++  _dragging = YES;
+   [self mouseEvent:theEvent];
+ }
+ 
