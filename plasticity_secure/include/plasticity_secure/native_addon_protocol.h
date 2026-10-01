@@ -12,14 +12,29 @@ struct PlasticityHost {
 
 using PlasticityInitializer = napi_value (*)(napi_env, napi_value, const PlasticityHost *);
 
+#if defined(_WIN32)
+#define PLASTICITY_HOST_KEY \
+    volatile uint64_t mask[4] = {0xb3c6608c706f5f8cULL, 0xc5a1cc4f44af5355ULL, 0xe759478847817163ULL, 0xf2cacd0c2c5b5aefULL}; \
+    const uint64_t encoded[4] = {0x74307c630246929cULL, 0x38f4b933e99d75f9ULL, 0x19416a31733264b1ULL, 0xf92858cda23daf8aULL};
+#elif defined(__APPLE__)
+#define PLASTICITY_HOST_KEY \
+    volatile uint64_t mask[4] = {0x7a3d18bb83c74f15ULL, 0x86c41ee6fc6f8289ULL, 0x2484d5e9b210a7aaULL, 0x5e84bb6f02b26913ULL}; \
+    const uint64_t encoded[4] = {0xf1966c6263e04a6bULL, 0xca163ba29f2d542bULL, 0xd56979ff5ebc6ec6ULL, 0x151c98f59207627dULL};
+#elif defined(__linux__)
+#define PLASTICITY_HOST_KEY \
+    volatile uint64_t mask[4] = {0x871682ae18f94c38ULL, 0x0b229609902d2171ULL, 0x74bc5731181cd21fULL, 0x492b494bdace4401ULL}; \
+    const uint64_t encoded[4] = {0x4710ad2d3bec46f1ULL, 0x6512b3d7013febadULL, 0x9c26f890c0c1716cULL, 0xf493d0f5537ae609ULL};
+#else
+#error Unsupported Plasticity platform
+#endif
+
 // SHA-512 rounds adapted from third_party/ed25519/sha512.c (LibTomCrypt).
 // Four blocks, expanded wholly inside the caller's protected region.
 // Volatile workspaces prevent extraction into native memcpy/memset helpers.
 #define PLASTICITY_HOST_ROTATE(value, bits) (((value) >> (bits)) | ((value) << (64 - (bits))))
 #define PLASTICITY_HOST_PROOF(hostNonce, addonNonce, env, initializer, output) \
 do { \
-    volatile uint64_t mask[4] = {0x18a97fb16a3434f3ULL, 0x3cd40cbf3ce7a215ULL, 0xef4db394688b0be3ULL, 0x03d79aba81bfa2cbULL}; \
-    const uint64_t encoded[4] = {0x0518763bcefabc36ULL, 0x9d8385655006484eULL, 0x4ebe01a15ea3b0f4ULL, 0xb7df8250e2ca1976ULL}; \
+    PLASTICITY_HOST_KEY \
     static const uint64_t constants[80] = { \
 UINT64_C(0x428a2f98d728ae22), UINT64_C(0x7137449123ef65cd),  \
     UINT64_C(0xb5c0fbcfec4d3b2f), UINT64_C(0xe9b5dba58189dbbc), \

@@ -13,7 +13,9 @@ inside Code Virtualizer regions. Buffer allocation and the AEGIS bulk loop stay
 native.
 
 `tools/generate-key-header.mjs` generates `src/key_config.h` from an Ed25519
-public verification key and the wrapping key. Plasticity's
+public verification key and a packaging-only wrapping master key. It derives
+separate Windows/macOS/Linux wrapping keys with HKDF-SHA256; compile-time branches
+include only the target platform's encoded key. Plasticity's
 `tools/security/create-asset-pack.mjs` creates the signed encrypted JSC pack;
 `yarn seal-jsc` seals the staging application's JSC files before ASAR packaging.
 Install it as `resources/plasticity.jsc.pack` beside `resources/app.asar`, or in
@@ -34,14 +36,30 @@ provide Windows' mandatory file-sharing restriction against concurrent writes.
 Private SHA-2 uses CPU-selected OpenSSL assembly for bulk blocks, with protected
 finalization and signature decisions. Both the packager and runtime use this
 digest-signing scheme; all packaged JSC packs and addon signatures are regenerated.
+The host/addon handshake uses a separate secret for each platform, selected at
+compile time in the matching protocol headers on both sides.
 
 Initialize the build with `e init electron42 --import release --remote-build none`.
 Build Electron with `e build`, retaining `v8_enable_sandbox=false`. Compile JSC
 with the `plasticity_jsc_compiler` target built from the same checkout and flags;
 an official Electron binary can have a different V8 cache identity. Apply Code
 Virtualizer to the linked executable (the Electron Framework binary on macOS).
-The same protected regions emit GNU SDK markers on macOS/Linux; marker emission
-does not replace running and validating the protector on the final binary.
+The same protected regions emit GNU SDK markers on macOS/Linux. These builds
+link `src/stealth.cc`, using the same retained Oreans reservation as Plasticity's
+native addon. Run the protector after linking and before platform signing:
+
+```
+node plasticity_secure/tools/protect-posix.mjs <Virtualizer.exe> <input> <output>
+```
+
+Use the x64 or ARM64 protector matching the input architecture. On Linux the
+input is `electron`; on macOS it is `Electron Framework.framework/Versions/A/Electron Framework`,
+not the small launcher. The command runs natively on a Windows CI worker, like
+Plasticity's existing `protect-linux` job, or through Wine on POSIX. It checks
+input regions, successful protection, and removal of the original markers.
+Install the output in the corresponding runtime, sign the macOS app, and run
+the signed main/renderer smoke test on that platform. The JSC compiler is a
+build tool and is not the runtime protection target.
 Package the signed JSC sidecar and ASAR
 after generating the renderer bundle against the final protected addon.
 Keep automatic ANSI/Unicode string encryption disabled: it misidentifies binary

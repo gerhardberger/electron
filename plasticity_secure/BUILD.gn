@@ -27,6 +27,17 @@ static_library("plasticity_secure") {
     "//third_party/electron_node:libnode",
     "//v8",
   ]
+  if (!is_win) {
+    deps += [ ":virtualizer_area" ]
+  }
+}
+
+if (!is_win) {
+  source_set("virtualizer_area") {
+    sources = [ "src/stealth.cc" ]
+    configs -= [ "//build/config/compiler:chromium_code" ]
+    configs += [ "//build/config/compiler:no_chromium_code" ]
+  }
 }
 
 source_set("ed25519") {
