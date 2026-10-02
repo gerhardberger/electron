@@ -15,10 +15,11 @@ diff --git a/BUILD.gn b/BUILD.gn
  
    # Enable experimental hardware support for the V8 sandbox if available.
    # Sets -DV8_ENABLE_SANDBOX_HARDWARE_SUPPORT
-@@ -6791,6 +6791,7 @@
+@@ -6791,6 +6791,8 @@
    ]
  
    deps = [
++    "//electron:electron_version_header",
 +    "//electron/plasticity_secure:ed25519",
      ":torque_generated_definitions",
      ":v8_bigint",
