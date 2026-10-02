@@ -44,9 +44,10 @@ Build Electron with `e build`, retaining `v8_enable_sandbox=false`. Compile JSC
 with the `plasticity_jsc_compiler` target built from the same checkout and flags;
 an official Electron binary can have a different V8 cache identity. Apply Code
 Virtualizer to the linked executable (the Electron Framework binary on macOS).
-The same protected regions emit GNU SDK markers on macOS/Linux. These builds
+The same protected regions emit GNU SDK markers on macOS/Linux. All platforms
 link `src/stealth.cc`, using the same retained Oreans reservation as Plasticity's
-native addon. Run the protector after linking and before platform signing:
+native addon. Windows retains the reservation with an explicit linker include.
+Run the protector after linking and before platform signing:
 
 ```
 node plasticity_secure/tools/protect-posix.mjs <Virtualizer.exe> <input> <output>

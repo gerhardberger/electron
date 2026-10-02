@@ -28,7 +28,19 @@
   STEALTH_AREA_64        \
   STEALTH_AREA_64
 
+#if defined(_WIN32)
+#include <windows.h>
+
+#pragma optimize("", off)
+#pragma comment(linker, "/include:MyFunctionStealthCodeArea")
+
+__declspec(noinline) void CVSX(unsigned int i) {
+  Sleep(i);
+  Sleep(i);
+}
+#else
 STEALTH_AUX_FUNCTION
+#endif
 
 #ifdef __APPLE__
 struct PlasticityStealthRegisters {
@@ -43,7 +55,11 @@ volatile PlasticityStealthRegisters plasticity_stealth_registers = {
     {0xB8B7B6B5, 0xA6B6C6D6, 0xA7A6A4A4, 0xA4A5B1B2}};
 #endif
 
+#if defined(_WIN32)
+extern "C" __declspec(noinline) void MyFunctionStealthCodeArea() {
+#else
 __attribute__((used, retain, noinline)) void MyFunctionStealthCodeArea() {
+#endif
 #ifdef __APPLE__
   plasticity_stealth_registers.stealth[0] = 1;
 #endif
