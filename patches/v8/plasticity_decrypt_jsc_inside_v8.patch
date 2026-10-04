@@ -152,7 +152,7 @@ index 6149ee8..f63aa9f 100644
  
  #include "src/base/fpu.h"
  #include "src/base/logging.h"
-@@ -562,6 +585,339 @@ MaybeDirectHandle<SharedFunctionInfo> CodeSerializer::Deserialize(
+@@ -562,6 +585,350 @@ MaybeDirectHandle<SharedFunctionInfo> CodeSerializer::Deserialize(
    return scope.CloseAndEscape(result);
  }
  
@@ -227,14 +227,25 @@ index 6149ee8..f63aa9f 100644
 +  if (scalar_order >= 0)
 +    FAIL();
 +
++  std::array<uint8_t, 32> public_key_bytes;
++  VIRTUALIZER_STR_ENCRYPT_START
++  volatile char public_key_hex[] = PLASTICITY_MANIFEST_PUBLIC_KEY_HEX;
++  for (size_t index = 0; index < public_key_bytes.size(); ++index) {
++    const char high = public_key_hex[index * 2];
++    const char low = public_key_hex[index * 2 + 1];
++    public_key_bytes[index] =
++        ((high <= '9' ? high - '0' : high - 'a' + 10) << 4) |
++        (low <= '9' ? low - '0' : low - 'a' + 10);
++  }
++  VIRTUALIZER_STR_ENCRYPT_END
 +  ge_p3 public_key;
-+  if (ge_frombytes_negate_vartime(&public_key, kManifestPublicKey.data()) != 0)
++  if (ge_frombytes_negate_vartime(&public_key, public_key_bytes.data()) != 0)
 +    FAIL();
 +  sha512_context hash;
 +  std::array<uint8_t, 64> challenge;
 +  sha512_init(&hash);
 +  sha512_update(&hash, signature.data(), 32);
-+  sha512_update(&hash, kManifestPublicKey.data(), kManifestPublicKey.size());
++  sha512_update(&hash, public_key_bytes.data(), public_key_bytes.size());
 +  std::array<uint8_t, 32> document_digest;
 +  PLASTICITY_SHA256(bytes.data(), signature_offset, document_digest.data());
 +  sha512_update(&hash, document_digest.data(), document_digest.size());
