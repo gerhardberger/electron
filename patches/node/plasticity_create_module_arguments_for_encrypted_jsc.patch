@@ -4,10 +4,10 @@ Date: Sat, 26 Sep 2026 12:00:00 +0200
 Subject: plasticity: private addon loader and encrypted JSC module
 
 diff --git a/src/node_api.cc b/src/node_api.cc
-index f95f93d..69972b3 100644
+index f95f93d..9ad27d5 100644
 --- a/src/node_api.cc
 +++ b/src/node_api.cc
-@@ -13,15 +13,316 @@
+@@ -13,15 +13,317 @@
  #include "node_errors.h"
  #include "node_internals.h"
  #include "node_process.h"
@@ -57,7 +57,8 @@ index f95f93d..69972b3 100644
 +                        v8::Local<v8::Value> module,
 +                        v8::Local<v8::Context> context,
 +                        std::string_view filename) {
-+  napi_env env = node_napi_env__::New(context, "plasticity:pk", 8);
++  napi_env env = node_napi_env__::New(
++      context, node::url::FromFilePath(filename), NODE_API_DEFAULT_MODULE_API_VERSION);
 +  napi_value initialized = nullptr;
 +  env->CallIntoModule([&](napi_env env) {
 +    VIRTUALIZER_START
@@ -233,7 +234,7 @@ index f95f93d..69972b3 100644
 +      FAIL();
 +#else
 +    munmap(const_cast<uint8_t*>(bytes), byte_length);
-+    void* library = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
++    void* library = dlopen(path.c_str(), DLib::kDefaultFlags);
 +    if (library == nullptr)
 +      FAIL();
 +    const auto initialize = reinterpret_cast<PlasticityInitializer>(
@@ -325,6 +326,7 @@ index f95f93d..69972b3 100644
  static void ThrowNodeApiVersionError(node::Environment* node_env,
                                       const char* module_name,
 diff --git a/src/node_binding.cc b/src/node_binding.cc
+index 59f28b5..4c850a2 100644
 --- a/src/node_binding.cc
 +++ b/src/node_binding.cc
 @@ -4,6 +4,9 @@
@@ -337,7 +339,7 @@ diff --git a/src/node_binding.cc b/src/node_binding.cc
  #include "node_url_pattern.h"
  #include "util.h"
  
-@@ -252,7 +255,9 @@
+@@ -252,7 +255,9 @@ static bool libc_may_be_musl() { return false; }
  
  namespace node {
  
@@ -347,12 +349,10 @@ diff --git a/src/node_binding.cc b/src/node_binding.cc
  using v8::EscapableHandleScope;
  using v8::Exception;
  using v8::FunctionCallbackInfo;
-@@ -411,170 +416,67 @@
- node_module* DLib::GetSavedModuleFromGlobalHandleMap() {
-   has_entry_in_global_handle_map_ = true;
+@@ -413,168 +418,53 @@ node_module* DLib::GetSavedModuleFromGlobalHandleMap() {
    return global_handle_map.get_and_increase_refcount(handle_);
--}
--
+ }
+ 
 -using InitializerCallback = void (*)(Local<Object> exports,
 -                                     Local<Value> module,
 -                                     Local<Context> context);
@@ -360,19 +360,13 @@ diff --git a/src/node_binding.cc b/src/node_binding.cc
 -inline InitializerCallback GetInitializerCallback(DLib* dlib) {
 -  const char* name = "node_register_module_v" STRINGIFY(NODE_MODULE_VERSION);
 -  return reinterpret_cast<InitializerCallback>(dlib->GetSymbolAddress(name));
- }
- 
+-}
+-
 -inline napi_addon_register_func GetNapiInitializerCallback(DLib* dlib) {
 -  const char* name =
 -      STRINGIFY(NAPI_MODULE_INITIALIZER_BASE) STRINGIFY(NAPI_MODULE_VERSION);
 -  return reinterpret_cast<napi_addon_register_func>(
 -      dlib->GetSymbolAddress(name));
--}
--
--inline node_api_addon_get_api_version_func GetNapiAddonGetApiVersionCallback(
--    DLib* dlib) {
--  return reinterpret_cast<node_api_addon_get_api_version_func>(
--      dlib->GetSymbolAddress(STRINGIFY(NODE_API_MODULE_GET_API_VERSION)));
 +Local<Array> CreatePlasticityModuleArguments(
 +    Isolate* isolate,
 +    Local<Context> context,
@@ -387,34 +381,28 @@ diff --git a/src/node_binding.cc b/src/node_binding.cc
 +           ->Call(context, Undefined(isolate), 1, &module_name)
 +           .ToLocal(&module_builtin))
 +    FAIL();
-+  Local<Value> create_require;
++  Local<Value> create_main;
 +  if (!module_builtin.As<Object>()
-+           ->Get(context, String::NewFromUtf8Literal(isolate, "createRequire"))
-+           .ToLocal(&create_require))
++           ->Get(context, String::NewFromUtf8Literal(isolate, "_createPlasticityMain"))
++           .ToLocal(&create_main))
 +    FAIL();
-+  Local<Value> require_argument = module_filename;
-+  Local<Value> require;
-+  if (!create_require.As<Function>()
-+           ->Call(context, module_builtin, 1, &require_argument)
-+           .ToLocal(&require))
++  Local<Value> arguments[] = {module_filename, module_directory};
++  Local<Value> result;
++  if (!create_main.As<Function>()
++           ->Call(context, module_builtin, 2, arguments)
++           .ToLocal(&result))
 +    FAIL();
-+  Local<Object> module = Object::New(isolate);
-+  Local<Object> exports = Object::New(isolate);
-+  if (module->Set(context, env->exports_string(), exports).IsNothing())
-+    FAIL();
-+  module_arguments = Array::New(isolate, 7);
-+  if (module_arguments->Set(context, 0, exports).IsNothing() ||
-+      module_arguments->Set(context, 1, require).IsNothing() ||
-+      module_arguments->Set(context, 2, module).IsNothing() ||
-+      module_arguments->Set(context, 3, module_filename).IsNothing() ||
-+      module_arguments->Set(context, 4, module_directory).IsNothing() ||
-+      module_arguments->Set(context, 5, env->process_object()).IsNothing() ||
-+      module_arguments->Set(context, 6, context->Global()).IsNothing())
-+    FAIL();
++  module_arguments = result.As<Array>();
 +  VIRTUALIZER_END
 +  return module_arguments;
  }
  
+-inline node_api_addon_get_api_version_func GetNapiAddonGetApiVersionCallback(
+-    DLib* dlib) {
+-  return reinterpret_cast<node_api_addon_get_api_version_func>(
+-      dlib->GetSymbolAddress(STRINGIFY(NODE_API_MODULE_GET_API_VERSION)));
+-}
+-
 -// DLOpen is process.dlopen(module, filename, flags).
 -// Used to load 'module.node' dynamically shared objects.
 -//
@@ -571,7 +559,7 @@ diff --git a/src/node_binding.cc b/src/node_binding.cc
  
  inline struct node_module* FindModule(struct node_module* list,
 diff --git a/src/node_contextify.cc b/src/node_contextify.cc
-index 17d820b56..a6c0fb321 100644
+index 17d820b..a6c0fb3 100644
 --- a/src/node_contextify.cc
 +++ b/src/node_contextify.cc
 @@ -21,6 +21,10 @@
@@ -1252,7 +1240,7 @@ index 17d820b56..a6c0fb321 100644
  
  static std::string GetRequireEsmWarning(Local<String> filename) {
 diff --git a/src/module_wrap.cc b/src/module_wrap.cc
-index 5ab30502f..375def068 100644
+index 5ab3050..375def0 100644
 --- a/src/module_wrap.cc
 +++ b/src/module_wrap.cc
 @@ -1,5 +1,8 @@
@@ -1362,6 +1350,7 @@ index 5ab30502f..375def068 100644
  ModulePhase to_phase_constant(ModuleImportPhase phase) {
 diff --git a/src/node_plasticity.h b/src/node_plasticity.h
 new file mode 100644
+index 0000000..0610e75
 --- /dev/null
 +++ b/src/node_plasticity.h
 @@ -0,0 +1,22 @@
@@ -1388,9 +1377,10 @@ new file mode 100644
 +
 +#endif  // SRC_NODE_PLASTICITY_H_
 diff --git a/unofficial.gni b/unofficial.gni
+index 95feec9..c5f7fa0 100644
 --- a/unofficial.gni
 +++ b/unofficial.gni
-@@ -187,6 +187,7 @@
+@@ -187,6 +187,7 @@ template("node_gn_build") {
      ]
      deps = [
        ":run_node_js2c",
@@ -1398,3 +1388,30 @@ diff --git a/unofficial.gni b/unofficial.gni
        "deps/cares",
        "deps/histogram",
        "deps/llhttp",
+diff --git a/lib/internal/modules/cjs/loader.js b/lib/internal/modules/cjs/loader.js
+index bc14466..edc3975 100644
+--- a/lib/internal/modules/cjs/loader.js
++++ b/lib/internal/modules/cjs/loader.js
+@@ -2116,6 +2116,22 @@ function isRelative(path) {
+ 
+ Module.createRequire = createRequire;
+ 
++Module._createPlasticityMain = function(filename, directory) {
++  const module = new Module(filename);
++  module.filename = filename;
++  module.paths = Module._nodeModulePaths(directory);
++  module.id = '.';
++  module[kIsMainSymbol] = true;
++  module[kIsCachedByESMLoader] = false;
++  module[kURL] = pathToFileURL(filename).href;
++  module[kFormat] = 'commonjs';
++  setOwnProperty(process, 'mainModule', module);
++  setOwnProperty(module.require, 'main', module);
++  Module._cache[filename] = module;
++  return [module.exports, makeRequireFunction(module), module,
++          filename, directory, process, globalThis];
++};
++
+ /**
+  * Define the paths to use for resolving a module.
+  */

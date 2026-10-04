@@ -4,9 +4,10 @@ Date: Sat, 26 Sep 2026 12:00:00 +0200
 Subject: plasticity: decrypt and verify application JSC inside V8
 
 diff --git a/BUILD.gn b/BUILD.gn
+index 7b6a683..e23f035 100644
 --- a/BUILD.gn
 +++ b/BUILD.gn
-@@ -362,7 +362,7 @@
+@@ -362,7 +362,7 @@ declare_args() {
  
    # Enable the V8 sandbox.
    # Sets -DV8_ENABLE_SANDBOX.
@@ -15,7 +16,7 @@ diff --git a/BUILD.gn b/BUILD.gn
  
    # Enable experimental hardware support for the V8 sandbox if available.
    # Sets -DV8_ENABLE_SANDBOX_HARDWARE_SUPPORT
-@@ -6791,6 +6791,8 @@
+@@ -6791,6 +6791,8 @@ v8_cluster_source_set("v8_base_without_compiler") {
    ]
  
    deps = [
@@ -26,7 +27,7 @@ diff --git a/BUILD.gn b/BUILD.gn
      ":v8_headers",
 diff --git a/include/v8-plasticity.h b/include/v8-plasticity.h
 new file mode 100644
-index 000000000..7895495eb
+index 0000000..7895495
 --- /dev/null
 +++ b/include/v8-plasticity.h
 @@ -0,0 +1,14 @@
@@ -45,7 +46,7 @@ index 000000000..7895495eb
 +
 +#endif  // INCLUDE_V8_PLASTICITY_H_
 diff --git a/src/api/api.cc b/src/api/api.cc
-index c6e361b08..61c9b5d86 100644
+index c6e361b..61c9b5d 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
 @@ -4,6 +4,9 @@
@@ -118,7 +119,7 @@ index c6e361b08..61c9b5d86 100644
  
  namespace {
 diff --git a/src/snapshot/code-serializer.cc b/src/snapshot/code-serializer.cc
-index 6149ee8..f63aa9f 100644
+index 6149ee8..a109ad1 100644
 --- a/src/snapshot/code-serializer.cc
 +++ b/src/snapshot/code-serializer.cc
 @@ -4,7 +4,30 @@
@@ -152,11 +153,11 @@ index 6149ee8..f63aa9f 100644
  
  #include "src/base/fpu.h"
  #include "src/base/logging.h"
-@@ -562,6 +585,350 @@ MaybeDirectHandle<SharedFunctionInfo> CodeSerializer::Deserialize(
+@@ -562,6 +585,351 @@ MaybeDirectHandle<SharedFunctionInfo> CodeSerializer::Deserialize(
    return scope.CloseAndEscape(result);
  }
  
-+__attribute__((target("aes"))) V8_NOINLINE
++V8_NOINLINE
 +MaybeDirectHandle<SharedFunctionInfo> CodeSerializer::DeserializeEncrypted(
 +    Isolate* isolate, AlignedCachedData* cached_data,
 +    DirectHandle<String> source, const ScriptDetails& script_details) {
@@ -323,18 +324,19 @@ index 6149ee8..f63aa9f 100644
 +#define PLASTICITY_AEGIS_UPDATE(first, second)                         \
 +  do {                                                                \
 +    const PLASTICITY_BLOCK previous = aegis_state[7];                          \
-+    aegis_state[7] = PLASTICITY_AES_ROUND(aegis_state[6], aegis_state[7]); \
-+    aegis_state[6] = PLASTICITY_AES_ROUND(aegis_state[5], aegis_state[6]); \
-+    aegis_state[5] = PLASTICITY_AES_ROUND(aegis_state[4], aegis_state[5]); \
-+    aegis_state[4] = PLASTICITY_AES_ROUND(aegis_state[3], aegis_state[4]); \
-+    aegis_state[3] = PLASTICITY_AES_ROUND(aegis_state[2], aegis_state[3]); \
-+    aegis_state[2] = PLASTICITY_AES_ROUND(aegis_state[1], aegis_state[2]); \
-+    aegis_state[1] = PLASTICITY_AES_ROUND(aegis_state[0], aegis_state[1]); \
-+    aegis_state[0] = PLASTICITY_AES_ROUND(previous, aegis_state[0]);       \
++    PLASTICITY_AES_ROUND(aegis_state[6], aegis_state[7], aegis_state[7]); \
++    PLASTICITY_AES_ROUND(aegis_state[5], aegis_state[6], aegis_state[6]); \
++    PLASTICITY_AES_ROUND(aegis_state[4], aegis_state[5], aegis_state[5]); \
++    PLASTICITY_AES_ROUND(aegis_state[3], aegis_state[4], aegis_state[4]); \
++    PLASTICITY_AES_ROUND(aegis_state[2], aegis_state[3], aegis_state[3]); \
++    PLASTICITY_AES_ROUND(aegis_state[1], aegis_state[2], aegis_state[2]); \
++    PLASTICITY_AES_ROUND(aegis_state[0], aegis_state[1], aegis_state[1]); \
++    PLASTICITY_AES_ROUND(previous, aegis_state[0], aegis_state[0]);       \
 +    aegis_state[0] = PLASTICITY_XOR(aegis_state[0], (first));          \
 +    aegis_state[4] = PLASTICITY_XOR(aegis_state[4], (second));         \
 +  } while (false)
 +
++  const bool hardware_aes = PLASTICITY_HAS_HARDWARE_AES;
 +  alignas(16) static constexpr uint8_t constant0[16] = {
 +      0x00, 0x01, 0x01, 0x02, 0x03, 0x05, 0x08, 0x0d,
 +      0x15, 0x22, 0x37, 0x59, 0x90, 0xe9, 0x79, 0x62};
@@ -504,9 +506,10 @@ index 6149ee8..f63aa9f 100644
      LocalHeap* heap) {
    std::unique_ptr<PersistentHandles> previous_persistent_handles =
 diff --git a/src/snapshot/code-serializer.h b/src/snapshot/code-serializer.h
+index ed22811..da699af 100644
 --- a/src/snapshot/code-serializer.h
 +++ b/src/snapshot/code-serializer.h
-@@ -66,10 +66,10 @@
+@@ -66,10 +66,10 @@ class CodeSerializer : public Serializer {
  
     private:
      friend class CodeSerializer;
@@ -518,7 +521,7 @@ diff --git a/src/snapshot/code-serializer.h b/src/snapshot/code-serializer.h
    };
  
    CodeSerializer(const CodeSerializer&) = delete;
-@@ -85,6 +85,11 @@
+@@ -85,6 +85,11 @@ class CodeSerializer : public Serializer {
                DirectHandle<String> source, const ScriptDetails& script_details,
                MaybeDirectHandle<Script> maybe_cached_script = {});
  

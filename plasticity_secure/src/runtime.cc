@@ -56,7 +56,7 @@ NOINLINE v8::Local<v8::Value> RunApplication(
       resources.Append(FILE_PATH_LITERAL("app.asar"))
           .Append(FILE_PATH_LITERAL(".webpack"))
           .Append(FILE_PATH_LITERAL("main"))
-          .Append(FILE_PATH_LITERAL("index.compiled.jsc"));
+          .Append(FILE_PATH_LITERAL("index.js"));
   const std::string module_path_utf8 = module_path.AsUTF8Unsafe();
   v8::Local<v8::String> module_filename;
   if (!v8::String::NewFromUtf8(
@@ -96,6 +96,11 @@ NOINLINE v8::Local<v8::Value> RunApplication(
            ->Call(context, arguments[0], static_cast<int>(arguments.size()),
                   arguments.data())
            .ToLocal(&result))
+    FAIL();
+  if (arguments[2].As<v8::Object>()
+          ->Set(context, v8::String::NewFromUtf8Literal(isolate, "loaded"),
+                v8::True(isolate))
+          .IsNothing())
     FAIL();
   VIRTUALIZER_END
   return result;

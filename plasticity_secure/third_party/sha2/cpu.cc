@@ -14,13 +14,15 @@
 extern "C" const uint32_t plasticity_sha2_arm_caps = [] {
   uint32_t caps = ARMV7_NEON;
 #if defined(__APPLE__)
-  caps |= ARMV8_SHA256;
+  caps |= ARMV8_SHA256 | ARMV8_AES;
   int sha512 = 0;
   size_t size = sizeof(sha512);
   if (sysctlbyname("hw.optional.armv8_2_sha512", &sha512, &size, nullptr, 0) == 0 && sha512)
     caps |= ARMV8_SHA512;
 #else
   const unsigned long hardware = getauxval(AT_HWCAP);
+  if (hardware & HWCAP_AES)
+    caps |= ARMV8_AES;
   if (hardware & HWCAP_SHA2)
     caps |= ARMV8_SHA256;
   if (hardware & HWCAP_SHA512)
@@ -51,6 +53,7 @@ extern "C" const std::array<uint32_t, 4> plasticity_sha2_cpu_caps = [] {
   __cpuid_count(1, 0, registers[0], registers[1], registers[2], registers[3]);
 #endif
   const bool sse41 = (registers[2] & (1 << 19)) != 0;
+  caps[1] |= registers[2] & (1U << 25);
   const bool ssse3 = (registers[2] & (1 << 9)) != 0;
   bool avx_enabled = (registers[2] & (1 << 27)) != 0 &&
                      (registers[2] & (1 << 28)) != 0;
