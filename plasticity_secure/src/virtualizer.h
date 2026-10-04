@@ -12,4 +12,14 @@
 #define VIRTUALIZER_END VIRTUALIZER_TIGER_WHITE_END
 #endif
 
+#if defined(_WIN32)
+// Keep protected string references close enough for Oreans' string detection.
+#pragma section(".text$ps", read, execute)
+#define VIRTUALIZER_CODE __attribute__((noinline, section(".text$ps")))
+#define VIRTUALIZER_STRING __declspec(allocate(".text$ps"))
+#else
+#define VIRTUALIZER_CODE
+#define VIRTUALIZER_STRING
+#endif
+
 #endif  // PLASTICITY_SECURE_SRC_VIRTUALIZER_H_

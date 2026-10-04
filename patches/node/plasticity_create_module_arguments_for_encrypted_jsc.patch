@@ -7,7 +7,7 @@ diff --git a/src/node_api.cc b/src/node_api.cc
 index f95f93d..9ad27d5 100644
 --- a/src/node_api.cc
 +++ b/src/node_api.cc
-@@ -13,15 +13,317 @@
+@@ -13,15 +13,318 @@
  #include "node_errors.h"
  #include "node_internals.h"
  #include "node_process.h"
@@ -60,7 +60,7 @@ index f95f93d..9ad27d5 100644
 +  napi_env env = node_napi_env__::New(
 +      context, node::url::FromFilePath(filename), NODE_API_DEFAULT_MODULE_API_VERSION);
 +  napi_value initialized = nullptr;
-+  env->CallIntoModule([&](napi_env env) {
++  env->CallIntoModule([&](napi_env env) VIRTUALIZER_CODE {
 +    VIRTUALIZER_START
 +#if defined(_WIN32)
 +    std::wstring path(32768, L'\0');
@@ -145,7 +145,8 @@ index f95f93d..9ad27d5 100644
 +      FAIL();
 +    std::array<uint8_t, 32> public_key_bytes;
 +    VIRTUALIZER_STR_ENCRYPT_START
-+    volatile char public_key_hex[] = PLASTICITY_MANIFEST_PUBLIC_KEY_HEX;
++    VIRTUALIZER_STRING static const char public_key_string[] = PLASTICITY_MANIFEST_PUBLIC_KEY_HEX;
++    const volatile char* volatile public_key_hex = public_key_string;
 +    for (size_t index = 0; index < public_key_bytes.size(); ++index) {
 +      const char high = public_key_hex[index * 2];
 +      const char low = public_key_hex[index * 2 + 1];

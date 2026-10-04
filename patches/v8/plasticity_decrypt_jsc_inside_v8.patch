@@ -153,11 +153,11 @@ index 6149ee8..a109ad1 100644
  
  #include "src/base/fpu.h"
  #include "src/base/logging.h"
-@@ -562,6 +585,351 @@ MaybeDirectHandle<SharedFunctionInfo> CodeSerializer::Deserialize(
+@@ -562,6 +585,352 @@ MaybeDirectHandle<SharedFunctionInfo> CodeSerializer::Deserialize(
    return scope.CloseAndEscape(result);
  }
  
-+V8_NOINLINE
++VIRTUALIZER_CODE V8_NOINLINE
 +MaybeDirectHandle<SharedFunctionInfo> CodeSerializer::DeserializeEncrypted(
 +    Isolate* isolate, AlignedCachedData* cached_data,
 +    DirectHandle<String> source, const ScriptDetails& script_details) {
@@ -230,7 +230,8 @@ index 6149ee8..a109ad1 100644
 +
 +  std::array<uint8_t, 32> public_key_bytes;
 +  VIRTUALIZER_STR_ENCRYPT_START
-+  volatile char public_key_hex[] = PLASTICITY_MANIFEST_PUBLIC_KEY_HEX;
++  VIRTUALIZER_STRING static const char public_key_string[] = PLASTICITY_MANIFEST_PUBLIC_KEY_HEX;
++  const volatile char* volatile public_key_hex = public_key_string;
 +  for (size_t index = 0; index < public_key_bytes.size(); ++index) {
 +    const char high = public_key_hex[index * 2];
 +    const char low = public_key_hex[index * 2 + 1];
