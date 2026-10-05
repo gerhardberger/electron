@@ -178,17 +178,19 @@ PLASTICITY_CRYPTO_INLINE void MultiplyGhash(std::array<uint8_t, 16>* value,
   std::array<uint8_t, 16> product = {};
   std::array<uint8_t, 16> factor;
   std::ranges::copy(hash_key, factor.begin());
-  for (size_t bit = 0; bit < 128; ++bit) {
-    const uint8_t selected =
-        static_cast<uint8_t>(0 - ((*value)[bit / 8] >> (7 - bit % 8) & 1));
-    for (size_t index = 0; index < product.size(); ++index)
-      product[index] ^= factor[index] & selected;
-    const uint8_t reduction = static_cast<uint8_t>(0 - (factor[15] & 1));
-    for (size_t index = factor.size() - 1; index > 0; --index)
-      factor[index] = static_cast<uint8_t>((factor[index] >> 1) |
-                                           (factor[index - 1] << 7));
-    factor[0] >>= 1;
-    factor[0] ^= 0xe1 & reduction;
+  for (size_t byte = 0; byte < value->size(); ++byte) {
+    for (uint8_t mask = 0x80; mask != 0; mask >>= 1) {
+      const uint8_t selected =
+          static_cast<uint8_t>(0 - (((*value)[byte] & mask) != 0));
+      for (size_t index = 0; index < product.size(); ++index)
+        product[index] ^= factor[index] & selected;
+      const uint8_t reduction = static_cast<uint8_t>(0 - (factor[15] & 1));
+      for (size_t index = factor.size() - 1; index > 0; --index)
+        factor[index] = static_cast<uint8_t>((factor[index] >> 1) |
+                                             (factor[index - 1] << 7));
+      factor[0] >>= 1;
+      factor[0] ^= 0xe1 & reduction;
+    }
   }
   *value = product;
   PLASTICITY_WIPE(factor);

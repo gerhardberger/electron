@@ -560,7 +560,7 @@ index 59f28b5..4c850a2 100644
  
  inline struct node_module* FindModule(struct node_module* list,
 diff --git a/src/node_contextify.cc b/src/node_contextify.cc
-index 17d820b..a6c0fb3 100644
+index 17d820b..0bcd38f 100644
 --- a/src/node_contextify.cc
 +++ b/src/node_contextify.cc
 @@ -21,6 +21,10 @@
@@ -574,7 +574,7 @@ index 17d820b..a6c0fb3 100644
  #include "base_object-inl.h"
  #include "cppgc/allocation.h"
  #include "debug_utils-inl.h"
-@@ -989,150 +993,161 @@ ContextifyScript* ContextifyScript::New(Environment* env,
+@@ -989,150 +993,163 @@ ContextifyScript* ContextifyScript::New(Environment* env,
        env->cppgc_allocation_handle(), env, object);
  }
  
@@ -602,11 +602,13 @@ index 17d820b..a6c0fb3 100644
 +    const int argc = args.Length();
 +    CHECK_GE(argc, 2);
 +
-+    CHECK(args[0]->IsString());
-+    Local<String> code = args[0].As<String>();
-+
-+    CHECK(args[1]->IsString());
-+    Local<String> filename = args[1].As<String>();
++    Local<String> strings[2];
++    for (int index = 0; index < 2; ++index) {
++      CHECK(args[index]->IsString());
++      strings[index] = args[index].As<String>();
++    }
++    Local<String> code = strings[0];
++    Local<String> filename = strings[1];
 +
 +    int line_offset = 0;
 +    int column_offset = 0;
@@ -866,7 +868,7 @@ index 17d820b..a6c0fb3 100644
  }
  
  Maybe<void> StoreCodeCacheResult(
-@@ -1395,142 +1410,129 @@ void ContextifyFunction::CreatePerIsolateProperties(
+@@ -1395,142 +1412,129 @@ void ContextifyFunction::CreatePerIsolateProperties(
    SetMethod(isolate, target, "compileFunction", CompileFunction);
  }
  
@@ -1117,7 +1119,7 @@ index 17d820b..a6c0fb3 100644
  }
  
  static LocalVector<String> GetCJSParameters(IsolateData* data) {
-@@ -1672,7 +1674,7 @@ static const auto maybe_top_level_await_errors =
+@@ -1672,7 +1676,7 @@ static const auto maybe_top_level_await_errors =
  // If cached_data is provided, it would be used for the compilation and
  // the on-disk compilation cache from NODE_COMPILE_CACHE (if configured)
  // would be ignored.
@@ -1126,7 +1128,7 @@ index 17d820b..a6c0fb3 100644
      Environment* env,
      Local<Context> context,
      Local<String> code,
-@@ -1680,67 +1682,54 @@ static MaybeLocal<Function> CompileFunctionForCJSLoader(
+@@ -1680,67 +1684,54 @@ static MaybeLocal<Function> CompileFunctionForCJSLoader(
      bool* cache_rejected,
      bool is_cjs_scope,
      ScriptCompiler::CachedData* cached_data) {
