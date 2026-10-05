@@ -41,7 +41,10 @@ compile time in the matching protocol headers on both sides.
 
 Initialize the build with `e init electron42 --import release --remote-build none`.
 Build Electron with `e build`, retaining `v8_enable_sandbox=false`. Compile JSC
-with the `plasticity_jsc_compiler` target built from the same checkout and flags;
+with `e build --target electron:plasticity_jsc_compiler` from the same checkout
+and flags. The compiler uses the application's architecture; run an x64 Mac
+compiler on Intel or through Rosetta on ARM. Package the compiler from the
+build output root alongside its `snapshot_blob.bin`;
 an official Electron binary can have a different V8 cache identity. Apply Code
 Virtualizer to the linked executable (the Electron Framework binary on macOS).
 The same protected regions emit GNU SDK markers on macOS/Linux. All platforms

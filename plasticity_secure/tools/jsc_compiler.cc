@@ -1,4 +1,4 @@
-// Build-time host tool; never packaged with the application.
+// Target-native packaging tool; never shipped with the application.
 #ifdef UNSAFE_BUFFERS_BUILD
 #pragma allow_unsafe_buffers
 #endif
