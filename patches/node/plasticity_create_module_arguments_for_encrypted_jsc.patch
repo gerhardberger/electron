@@ -184,9 +184,9 @@ index f95f93d..9ad27d5 100644
 +    fe_invert(reciprocal, point.Z);
 +    fe_mul(x, point.X, reciprocal);
 +    fe_mul(y, point.Y, reciprocal);
-+    fe_tobytes(expected.data(), y);
++    FE_TO_BYTES(expected.data(), y);
 +    std::array<uint8_t, 32> encoded_x;
-+    fe_tobytes(encoded_x.data(), x);
++    FE_TO_BYTES(encoded_x.data(), x);
 +    expected[31] ^= (encoded_x[0] & 1) << 7;
 +    uint8_t difference = 0;
 +    for (size_t index = 0; index < expected.size(); ++index)
@@ -560,7 +560,7 @@ index 59f28b5..4c850a2 100644
  
  inline struct node_module* FindModule(struct node_module* list,
 diff --git a/src/node_contextify.cc b/src/node_contextify.cc
-index 17d820b..0bcd38f 100644
+index 17d820b..a6c0fb3 100644
 --- a/src/node_contextify.cc
 +++ b/src/node_contextify.cc
 @@ -21,6 +21,10 @@
@@ -590,7 +590,7 @@ index 17d820b..0bcd38f 100644
 -
 -  CHECK(args[0]->IsString());
 -  Local<String> code = args[0].As<String>();
-+__attribute__((noinline)) void ContextifyScript::New(const FunctionCallbackInfo<Value>& args) {
++VIRTUALIZER_LOADER_CODE void ContextifyScript::New(const FunctionCallbackInfo<Value>& args) {
 +  VIRTUALIZER_START;
 +  {
 +    Environment* env = Environment::GetCurrent(args);

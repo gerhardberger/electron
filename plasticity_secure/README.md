@@ -2,15 +2,21 @@
 
 `plasticity_secure` is a static-library target in the Plasticity Electron fork.
 The checks are shared across Windows, macOS and Linux on x64/ARM64 (Windows x64).
-Windows has full application validation. The macOS port has native component
-tests; full macOS/Linux Electron builds and application tests remain pending.
+Windows has full application validation. Linux reaches the license screen;
+macOS ARM64 passes protected JSC-loading smoke tests. Full macOS editor
+validation remains pending.
 
-The release asset pack contains the source string, V8 cached data and addon signature encrypted
+The release asset pack contains V8 cached data and the addon signature encrypted
 together with AEGIS-128L, plus the Electron, V8, platform, architecture, and
 runtime identities. Ed25519 signs the SHA-256 digest of the complete header and
 ciphertext. Content-key unwrapping, authenticated-decryption finalization, and JSC admission execute
-inside Code Virtualizer regions. Buffer allocation and the AEGIS bulk loop stay
-native.
+inside Code Virtualizer regions. The buffer copy, AEGIS bulk loop, and bulk
+plaintext wipe stay native; their setup and decryption finalization are protected.
+On ARM64, optimization is disabled only for `ContextifyScript::New` and
+`CodeSerializer::DeserializeEncrypted` to keep compiler-generated blocks within
+Oreans marker boundaries.
+The signed header records the original source length; V8 creates the matching
+placeholder string locally. Placeholder bytes are not packaged.
 
 `tools/generate-key-header.mjs` generates `src/key_config.h` from an Ed25519
 public verification key and a packaging-only wrapping master key. It derives

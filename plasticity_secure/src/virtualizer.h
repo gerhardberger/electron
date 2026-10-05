@@ -22,4 +22,11 @@
 #define VIRTUALIZER_STRING
 #endif
 
+// ARM64 loaders need stable block placement for Oreans.
+#if defined(__aarch64__)
+#define VIRTUALIZER_LOADER_CODE __attribute__((noinline, optnone))
+#else
+#define VIRTUALIZER_LOADER_CODE VIRTUALIZER_CODE __attribute__((noinline))
+#endif
+
 #endif  // PLASTICITY_SECURE_SRC_VIRTUALIZER_H_
