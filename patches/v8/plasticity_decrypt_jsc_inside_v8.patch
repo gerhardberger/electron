@@ -3,11 +3,12 @@ From: Plastic Software LLC <security@plasticity.xyz>
 Date: Sat, 26 Sep 2026 12:00:00 +0200
 Subject: plasticity: decrypt and verify application JSC inside V8
 
+
 diff --git a/BUILD.gn b/BUILD.gn
-index 7b6a683..e23f035 100644
+index a7f1259d9823f6c9a02550257ee0b617a6c13564..58ded10c52d69023607aacea63236c85c171a69f 100644
 --- a/BUILD.gn
 +++ b/BUILD.gn
-@@ -362,7 +362,7 @@ declare_args() {
+@@ -399,7 +399,7 @@ declare_args() {
  
    # Enable the V8 sandbox.
    # Sets -DV8_ENABLE_SANDBOX.
@@ -16,18 +17,18 @@ index 7b6a683..e23f035 100644
  
    # Enable experimental hardware support for the V8 sandbox if available.
    # Sets -DV8_ENABLE_SANDBOX_HARDWARE_SUPPORT
-@@ -6791,6 +6791,8 @@ v8_cluster_source_set("v8_base_without_compiler") {
+@@ -7400,6 +7400,8 @@ v8_cluster_source_set("v8_base_without_compiler") {
    ]
  
    deps = [
 +    "//electron:electron_version_header",
 +    "//electron/plasticity_secure:ed25519",
-     ":torque_generated_definitions",
      ":v8_bigint",
      ":v8_headers",
+     ":v8_heap_base",
 diff --git a/include/v8-plasticity.h b/include/v8-plasticity.h
 new file mode 100644
-index 0000000..7895495
+index 0000000000000000000000000000000000000000..7895495eb3c2053c3deb2302bb6424432cebdc20
 --- /dev/null
 +++ b/include/v8-plasticity.h
 @@ -0,0 +1,14 @@
@@ -46,7 +47,7 @@ index 0000000..7895495
 +
 +#endif  // INCLUDE_V8_PLASTICITY_H_
 diff --git a/src/api/api.cc b/src/api/api.cc
-index c6e361b..61c9b5d 100644
+index f40a3b6b70c361e111b3d65c959a221f2f873908..bd712ce779fee2d2f757123c854e465024c717ab 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
 @@ -4,6 +4,9 @@
@@ -59,7 +60,7 @@ index c6e361b..61c9b5d 100644
  #include <algorithm>  // For min
  #include <cmath>      // For isnan.
  #include <limits>
-@@ -2577,6 +2580,32 @@ i::ScriptDetails GetScriptDetails(
+@@ -2669,6 +2672,32 @@ i::ScriptDetails GetScriptDetails(
  
  }  // namespace
  
@@ -92,7 +93,7 @@ index c6e361b..61c9b5d 100644
  MaybeLocal<UnboundScript> ScriptCompiler::CompileUnboundInternal(
      Isolate* v8_isolate, Source* source, CompileOptions options,
      NoCacheReason no_cache_reason) {
-@@ -2810,23 +2839,13 @@ void ScriptCompiler::ConsumeCodeCacheTask::MergeWithExistingScript() {
+@@ -2902,23 +2931,13 @@ void ScriptCompiler::ConsumeCodeCacheTask::MergeWithExistingScript() {
  
  ScriptCompiler::ConsumeCodeCacheTask* ScriptCompiler::StartConsumingCodeCache(
      Isolate* v8_isolate, std::unique_ptr<CachedData> cached_data) {
@@ -119,13 +120,13 @@ index c6e361b..61c9b5d 100644
  
  namespace {
 diff --git a/src/snapshot/code-serializer.cc b/src/snapshot/code-serializer.cc
-index 6149ee8..99d967d 100644
+index 7d4f30ae6ea1d3f3b0a5c9d1bcefd4b3ec08d6b9..27270fdd2f68d383b016b8e75cc0a48f4d2dbd8c 100644
 --- a/src/snapshot/code-serializer.cc
 +++ b/src/snapshot/code-serializer.cc
-@@ -4,7 +4,30 @@
- 
+@@ -5,7 +5,30 @@
  #include "src/snapshot/code-serializer.h"
  
+ #include <algorithm>
 +#include <array>
 +#include <cstring>
 +#include <limits>
@@ -151,9 +152,9 @@ index 6149ee8..99d967d 100644
 +#include "electron/plasticity_secure/third_party/sha2/sha256.h"
 +}
  
- #include "src/base/fpu.h"
+ #include "src/base/container-utils.h"
  #include "src/base/logging.h"
-@@ -562,6 +585,367 @@ MaybeDirectHandle<SharedFunctionInfo> CodeSerializer::Deserialize(
+@@ -670,6 +693,368 @@ MaybeDirectHandle<SharedFunctionInfo> CodeSerializer::Deserialize(
    return scope.CloseAndEscape(result);
  }
  
@@ -494,7 +495,7 @@ index 6149ee8..99d967d 100644
 +  const SerializedCodeData code = SerializedCodeData::FromCachedData(
 +      isolate, &decrypted,
 +      SerializedCodeData::SourceHash(source, wrapped_arguments,
-+                                     script_details.origin_options),
++                                     script_details.origin_options, isolate),
 +      &rejection);
 +  if (rejection != SerializedCodeSanityCheckResult::kSuccess)
 +    FAIL();
@@ -518,26 +519,29 @@ index 6149ee8..99d967d 100644
 +  return scope.CloseAndEscape(result);
 +}
 +
- DirectHandle<Script> CodeSerializer::OffThreadDeserializeData::GetOnlyScript(
-     LocalHeap* heap) {
++
+ DirectHandle<Script> OffThreadDeserializeData::GetOnlyScript(LocalHeap* heap) {
    std::unique_ptr<PersistentHandles> previous_persistent_handles =
+       heap->DetachPersistentHandles();
 diff --git a/src/snapshot/code-serializer.h b/src/snapshot/code-serializer.h
-index ed22811..da699af 100644
+index bb2adba38e295d253364ce80a8c03488b0c28595..ef86ca9d20fa680f80af74247e313b9e2f038f4e 100644
 --- a/src/snapshot/code-serializer.h
 +++ b/src/snapshot/code-serializer.h
-@@ -66,10 +66,10 @@ class CodeSerializer : public Serializer {
+@@ -72,11 +72,11 @@ struct OffThreadDeserializeData {
+  private:
+   friend class CodeSerializer;
+   friend class SerializedCodeData;
++  SerializedCodeSanityCheckResult sanity_check_result =
++      SerializedCodeSanityCheckResult::kSuccess;
+   MaybeIndirectHandle<SharedFunctionInfo> maybe_result;
+   std::vector<IndirectHandle<Script>> scripts;
+   std::unique_ptr<PersistentHandles> persistent_handles;
+-  SerializedCodeSanityCheckResult sanity_check_result =
+-      SerializedCodeSanityCheckResult::kSuccess;
+   std::optional<SerializedCodeSanityCheckResult> source_sanity_check_result;
+ };
  
-    private:
-     friend class CodeSerializer;
-+    SerializedCodeSanityCheckResult sanity_check_result;
-     MaybeIndirectHandle<SharedFunctionInfo> maybe_result;
-     std::vector<IndirectHandle<Script>> scripts;
-     std::unique_ptr<PersistentHandles> persistent_handles;
--    SerializedCodeSanityCheckResult sanity_check_result;
-   };
- 
-   CodeSerializer(const CodeSerializer&) = delete;
-@@ -85,6 +85,11 @@ class CodeSerializer : public Serializer {
+@@ -207,6 +207,11 @@ class CodeSerializer : public Serializer {
                DirectHandle<String> source, const ScriptDetails& script_details,
                MaybeDirectHandle<Script> maybe_cached_script = {});
  
@@ -546,6 +550,6 @@ index ed22811..da699af 100644
 +                       DirectHandle<String> source,
 +                       const ScriptDetails& script_details);
 +
-   V8_WARN_UNUSED_RESULT static OffThreadDeserializeData
-   StartDeserializeOffThread(LocalIsolate* isolate,
-                             AlignedCachedData* cached_data);
+   static void StartDeserializeOffThread(LocalIsolate* isolate,
+                                         AlignedCachedData* cached_data,
+                                         OffThreadDeserializeData* data);

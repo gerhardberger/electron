@@ -3,8 +3,145 @@ From: Plastic Software LLC <security@plasticity.xyz>
 Date: Sat, 26 Sep 2026 12:00:00 +0200
 Subject: plasticity: private addon loader and encrypted JSC module
 
+
+diff --git a/lib/internal/modules/cjs/loader.js b/lib/internal/modules/cjs/loader.js
+index f778487e8a5786143ac6090f977077bf29950b01..5b7174ba9a6cc16a8189d93e86348296eadf7cb3 100644
+--- a/lib/internal/modules/cjs/loader.js
++++ b/lib/internal/modules/cjs/loader.js
+@@ -2173,6 +2173,22 @@ function isRelative(path) {
+ 
+ Module.createRequire = createRequire;
+ 
++Module._createPlasticityMain = function(filename, directory) {
++  const module = new Module(filename);
++  module.filename = filename;
++  module.paths = Module._nodeModulePaths(directory);
++  module.id = '.';
++  module[kIsMainSymbol] = true;
++  module[kIsCachedByESMLoader] = false;
++  module[kURL] = pathToFileURL(filename).href;
++  module[kFormat] = 'commonjs';
++  setOwnProperty(process, 'mainModule', module);
++  setOwnProperty(module.require, 'main', module);
++  Module._cache[filename] = module;
++  return [module.exports, makeRequireFunction(module), module,
++          filename, directory, process, globalThis];
++};
++
+ /**
+  * Define the paths to use for resolving a module.
+  */
+diff --git a/src/module_wrap.cc b/src/module_wrap.cc
+index 134fcd561af053e2a42f54398a28abaa0bf2b118..2d5768bec2723e7c37da682b9c05fbdbea56f4d5 100644
+--- a/src/module_wrap.cc
++++ b/src/module_wrap.cc
+@@ -1,5 +1,8 @@
+ #include "module_wrap.h"
+ 
++#include "electron/plasticity_secure/src/failure.h"
++#include "electron/plasticity_secure/src/virtualizer.h"
++
+ #include "env.h"
+ #include "memory_tracker-inl.h"
+ #include "node_contextify.h"
+@@ -493,7 +496,7 @@ void ModuleWrap::New(const FunctionCallbackInfo<Value>& args) {
+   args.GetReturnValue().Set(that);
+ }
+ 
+-MaybeLocal<Module> ModuleWrap::CompileSourceTextModule(
++__attribute__((noinline)) MaybeLocal<Module> ModuleWrap::CompileSourceTextModule(
+     Realm* realm,
+     Local<String> source_text,
+     Local<String> url,
+@@ -502,59 +505,33 @@ MaybeLocal<Module> ModuleWrap::CompileSourceTextModule(
+     Local<PrimitiveArray> host_defined_options,
+     std::optional<ScriptCompiler::CachedData*> user_cached_data,
+     bool* cache_rejected) {
+-  Isolate* isolate = realm->isolate();
+-  EscapableHandleScope scope(isolate);
+-  ScriptOrigin origin(url,
+-                      line_offset,
+-                      column_offset,
+-                      true,            // is cross origin
+-                      -1,              // script id
+-                      Local<Value>(),  // source map URL
+-                      false,           // is opaque (?)
+-                      false,           // is WASM
+-                      true,            // is ES Module
+-                      host_defined_options);
+-  ScriptCompiler::CachedData* cached_data = nullptr;
+-  CompileCacheEntry* cache_entry = nullptr;
+-  // When compiling for the default loader, user_cached_data is std::nullptr.
+-  // When compiling for vm.Module, it's either nullptr or a pointer to the
+-  // cached data.
+-  if (user_cached_data.has_value()) {
+-    cached_data = user_cached_data.value();
+-  } else if (realm->env()->use_compile_cache()) {
+-    cache_entry = realm->env()->compile_cache_handler()->GetOrInsert(
+-        source_text, url, CachedCodeType::kESM);
+-  }
+-
+-  if (cache_entry != nullptr && cache_entry->cache != nullptr) {
+-    // source will take ownership of cached_data.
+-    cached_data = cache_entry->CopyCache();
+-  }
+-
+-  ScriptCompiler::Source source(source_text, origin, cached_data);
+-  ScriptCompiler::CompileOptions options;
+-  if (cached_data == nullptr) {
+-    options = ScriptCompiler::kNoCompileOptions;
+-  } else {
+-    options = ScriptCompiler::kConsumeCodeCache;
+-  }
+-
+-  Local<Module> module;
+-  if (!ScriptCompiler::CompileModule(isolate, &source, options)
+-           .ToLocal(&module)) {
+-    return scope.EscapeMaybe(MaybeLocal<Module>());
+-  }
+-
+-  if (options == ScriptCompiler::kConsumeCodeCache) {
+-    *cache_rejected = source.GetCachedData()->rejected;
+-  }
+-
+-  if (cache_entry != nullptr) {
+-    realm->env()->compile_cache_handler()->MaybeSave(
+-        cache_entry, module, *cache_rejected);
+-  }
+-
+-  return scope.Escape(module);
++  MaybeLocal<Module> output;
++  VIRTUALIZER_START;
++  {
++    Isolate* isolate = realm->isolate();
++    EscapableHandleScope scope(isolate);
++    ScriptOrigin origin(url,
++                        line_offset,
++                        column_offset,
++                        true,            // is cross origin
++                        -1,              // script id
++                        Local<Value>(),  // source map URL
++                        false,           // is opaque (?)
++                        false,           // is WASM
++                        true,            // is ES Module
++                        host_defined_options);
++    if (user_cached_data.has_value() && user_cached_data.value() != nullptr)
++      FAIL();
++    ScriptCompiler::Source source(source_text, origin);
++    const auto options = ScriptCompiler::kNoCompileOptions;
++
++    Local<Module> module;
++    if (ScriptCompiler::CompileModule(isolate, &source, options)
++             .ToLocal(&module))
++      output = scope.Escape(module);
++  }
++  VIRTUALIZER_END
++  return output;
+ }
+ 
+ ModulePhase to_phase_constant(ModuleImportPhase phase) {
 diff --git a/src/node_api.cc b/src/node_api.cc
-index f95f93d..9ad27d5 100644
+index f95f93df7b25c7cb2f9262489721b12f60ef5531..0b3efec048844a6ef43f3c5c78b5c3dccd201249 100644
 --- a/src/node_api.cc
 +++ b/src/node_api.cc
 @@ -13,15 +13,318 @@
@@ -327,7 +464,7 @@ index f95f93d..9ad27d5 100644
  static void ThrowNodeApiVersionError(node::Environment* node_env,
                                       const char* module_name,
 diff --git a/src/node_binding.cc b/src/node_binding.cc
-index 59f28b5..4c850a2 100644
+index ba3f06b8df90bce623e656940a27fae2b4e0206d..37a18d09eb63ac71c88703cad44fdb775d7cb776 100644
 --- a/src/node_binding.cc
 +++ b/src/node_binding.cc
 @@ -4,6 +4,9 @@
@@ -338,9 +475,9 @@ index 59f28b5..4c850a2 100644
 +#include "electron/plasticity_secure/src/virtualizer.h"
 +#include "node_plasticity.h"
  #include "node_url_pattern.h"
+ #include "permission/permission.h"
  #include "util.h"
- 
-@@ -252,7 +255,9 @@ static bool libc_may_be_musl() { return false; }
+@@ -253,7 +256,9 @@ static bool libc_may_be_musl() { return false; }
  
  namespace node {
  
@@ -350,7 +487,7 @@ index 59f28b5..4c850a2 100644
  using v8::EscapableHandleScope;
  using v8::Exception;
  using v8::FunctionCallbackInfo;
-@@ -413,168 +418,53 @@ node_module* DLib::GetSavedModuleFromGlobalHandleMap() {
+@@ -414,170 +419,53 @@ node_module* DLib::GetSavedModuleFromGlobalHandleMap() {
    return global_handle_map.get_and_increase_refcount(handle_);
  }
  
@@ -419,6 +556,8 @@ index 59f28b5..4c850a2 100644
 -    return THROW_ERR_DLOPEN_DISABLED(
 -      env, "Cannot load native addon because loading addons is disabled.");
 -  }
+-  THROW_IF_INSUFFICIENT_PERMISSIONS(
+-      env, permission::PermissionScope::kAddon, "");
 -
 -  auto context = env->context();
 -
@@ -560,7 +699,7 @@ index 59f28b5..4c850a2 100644
  
  inline struct node_module* FindModule(struct node_module* list,
 diff --git a/src/node_contextify.cc b/src/node_contextify.cc
-index 17d820b..a6c0fb3 100644
+index 5801ee7773824a216cc6114fc602fd79071ebc28..41c4f685d3da2c1c625296ab6dab1ce19a18a32b 100644
 --- a/src/node_contextify.cc
 +++ b/src/node_contextify.cc
 @@ -21,6 +21,10 @@
@@ -574,7 +713,7 @@ index 17d820b..a6c0fb3 100644
  #include "base_object-inl.h"
  #include "cppgc/allocation.h"
  #include "debug_utils-inl.h"
-@@ -989,150 +993,163 @@ ContextifyScript* ContextifyScript::New(Environment* env,
+@@ -991,150 +995,163 @@ ContextifyScript* ContextifyScript::New(Environment* env,
        env->cppgc_allocation_handle(), env, object);
  }
  
@@ -582,26 +721,23 @@ index 17d820b..a6c0fb3 100644
 -  Environment* env = Environment::GetCurrent(args);
 -  Isolate* isolate = env->isolate();
 -  Local<Context> context = env->context();
--
--  CHECK(args.IsConstructCall());
--
--  const int argc = args.Length();
--  CHECK_GE(argc, 2);
--
--  CHECK(args[0]->IsString());
--  Local<String> code = args[0].As<String>();
 +VIRTUALIZER_LOADER_CODE void ContextifyScript::New(const FunctionCallbackInfo<Value>& args) {
 +  VIRTUALIZER_START;
 +  {
 +    Environment* env = Environment::GetCurrent(args);
 +    Isolate* isolate = env->isolate();
 +    Local<Context> context = env->context();
-+
+ 
+-  CHECK(args.IsConstructCall());
 +    CHECK(args.IsConstructCall());
-+
+ 
+-  const int argc = args.Length();
+-  CHECK_GE(argc, 2);
 +    const int argc = args.Length();
 +    CHECK_GE(argc, 2);
-+
+ 
+-  CHECK(args[0]->IsString());
+-  Local<String> code = args[0].As<String>();
 +    Local<String> strings[2];
 +    for (int index = 0; index < 2; ++index) {
 +      CHECK(args[index]->IsString());
@@ -853,14 +989,14 @@ index 17d820b..a6c0fb3 100644
 -                v8_script->GetSourceURL())
 -          .IsNothing()) {
 -    return;
-+    TRACE_EVENT_END0(TRACING_CATEGORY_NODE2(vm, script), "ContextifyScript::New");
-   }
+-  }
 -  if (self->Set(env->context(),
 -                env->source_map_url_string(),
 -                v8_script->GetSourceMappingURL())
 -          .IsNothing()) {
 -    return;
--  }
++    TRACE_EVENT_END0(TRACING_CATEGORY_NODE2(vm, script), "ContextifyScript::New");
+   }
 -
 -  TRACE_EVENT_END0(TRACING_CATEGORY_NODE2(vm, script), "ContextifyScript::New");
 +finished:
@@ -868,7 +1004,7 @@ index 17d820b..a6c0fb3 100644
  }
  
  Maybe<void> StoreCodeCacheResult(
-@@ -1395,142 +1412,129 @@ void ContextifyFunction::CreatePerIsolateProperties(
+@@ -1397,142 +1414,129 @@ void ContextifyFunction::CreatePerIsolateProperties(
    SetMethod(isolate, target, "compileFunction", CompileFunction);
  }
  
@@ -1119,7 +1255,7 @@ index 17d820b..a6c0fb3 100644
  }
  
  static LocalVector<String> GetCJSParameters(IsolateData* data) {
-@@ -1672,7 +1676,7 @@ static const auto maybe_top_level_await_errors =
+@@ -1674,7 +1678,7 @@ static const auto maybe_top_level_await_errors =
  // If cached_data is provided, it would be used for the compilation and
  // the on-disk compilation cache from NODE_COMPILE_CACHE (if configured)
  // would be ignored.
@@ -1128,7 +1264,7 @@ index 17d820b..a6c0fb3 100644
      Environment* env,
      Local<Context> context,
      Local<String> code,
-@@ -1680,67 +1684,54 @@ static MaybeLocal<Function> CompileFunctionForCJSLoader(
+@@ -1682,67 +1686,54 @@ static MaybeLocal<Function> CompileFunctionForCJSLoader(
      bool* cache_rejected,
      bool is_cjs_scope,
      ScriptCompiler::CachedData* cached_data) {
@@ -1242,118 +1378,9 @@ index 17d820b..a6c0fb3 100644
  }
  
  static std::string GetRequireEsmWarning(Local<String> filename) {
-diff --git a/src/module_wrap.cc b/src/module_wrap.cc
-index 5ab3050..375def0 100644
---- a/src/module_wrap.cc
-+++ b/src/module_wrap.cc
-@@ -1,5 +1,8 @@
- #include "module_wrap.h"
- 
-+#include "electron/plasticity_secure/src/failure.h"
-+#include "electron/plasticity_secure/src/virtualizer.h"
-+
- #include "env.h"
- #include "memory_tracker-inl.h"
- #include "node_contextify.h"
-@@ -493,7 +496,7 @@ void ModuleWrap::New(const FunctionCallbackInfo<Value>& args) {
-   args.GetReturnValue().Set(that);
- }
- 
--MaybeLocal<Module> ModuleWrap::CompileSourceTextModule(
-+__attribute__((noinline)) MaybeLocal<Module> ModuleWrap::CompileSourceTextModule(
-     Realm* realm,
-     Local<String> source_text,
-     Local<String> url,
-@@ -502,59 +505,33 @@ MaybeLocal<Module> ModuleWrap::CompileSourceTextModule(
-     Local<PrimitiveArray> host_defined_options,
-     std::optional<ScriptCompiler::CachedData*> user_cached_data,
-     bool* cache_rejected) {
--  Isolate* isolate = realm->isolate();
--  EscapableHandleScope scope(isolate);
--  ScriptOrigin origin(url,
--                      line_offset,
--                      column_offset,
--                      true,            // is cross origin
--                      -1,              // script id
--                      Local<Value>(),  // source map URL
--                      false,           // is opaque (?)
--                      false,           // is WASM
--                      true,            // is ES Module
--                      host_defined_options);
--  ScriptCompiler::CachedData* cached_data = nullptr;
--  CompileCacheEntry* cache_entry = nullptr;
--  // When compiling for the default loader, user_cached_data is std::nullptr.
--  // When compiling for vm.Module, it's either nullptr or a pointer to the
--  // cached data.
--  if (user_cached_data.has_value()) {
--    cached_data = user_cached_data.value();
--  } else if (realm->env()->use_compile_cache()) {
--    cache_entry = realm->env()->compile_cache_handler()->GetOrInsert(
--        source_text, url, CachedCodeType::kESM);
--  }
--
--  if (cache_entry != nullptr && cache_entry->cache != nullptr) {
--    // source will take ownership of cached_data.
--    cached_data = cache_entry->CopyCache();
--  }
--
--  ScriptCompiler::Source source(source_text, origin, cached_data);
--  ScriptCompiler::CompileOptions options;
--  if (cached_data == nullptr) {
--    options = ScriptCompiler::kNoCompileOptions;
--  } else {
--    options = ScriptCompiler::kConsumeCodeCache;
--  }
--
--  Local<Module> module;
--  if (!ScriptCompiler::CompileModule(isolate, &source, options)
--           .ToLocal(&module)) {
--    return scope.EscapeMaybe(MaybeLocal<Module>());
--  }
--
--  if (options == ScriptCompiler::kConsumeCodeCache) {
--    *cache_rejected = source.GetCachedData()->rejected;
--  }
--
--  if (cache_entry != nullptr) {
--    realm->env()->compile_cache_handler()->MaybeSave(
--        cache_entry, module, *cache_rejected);
--  }
--
--  return scope.Escape(module);
-+  MaybeLocal<Module> output;
-+  VIRTUALIZER_START;
-+  {
-+    Isolate* isolate = realm->isolate();
-+    EscapableHandleScope scope(isolate);
-+    ScriptOrigin origin(url,
-+                        line_offset,
-+                        column_offset,
-+                        true,            // is cross origin
-+                        -1,              // script id
-+                        Local<Value>(),  // source map URL
-+                        false,           // is opaque (?)
-+                        false,           // is WASM
-+                        true,            // is ES Module
-+                        host_defined_options);
-+    if (user_cached_data.has_value() && user_cached_data.value() != nullptr)
-+      FAIL();
-+    ScriptCompiler::Source source(source_text, origin);
-+    const auto options = ScriptCompiler::kNoCompileOptions;
-+
-+    Local<Module> module;
-+    if (ScriptCompiler::CompileModule(isolate, &source, options)
-+             .ToLocal(&module))
-+      output = scope.Escape(module);
-+  }
-+  VIRTUALIZER_END
-+  return output;
- }
- 
- ModulePhase to_phase_constant(ModuleImportPhase phase) {
 diff --git a/src/node_plasticity.h b/src/node_plasticity.h
 new file mode 100644
-index 0000000..0610e75
+index 0000000000000000000000000000000000000000..0610e75c0a3d352656cedb876de24c6d87261dee
 --- /dev/null
 +++ b/src/node_plasticity.h
 @@ -0,0 +1,22 @@
@@ -1380,10 +1407,10 @@ index 0000000..0610e75
 +
 +#endif  // SRC_NODE_PLASTICITY_H_
 diff --git a/unofficial.gni b/unofficial.gni
-index 95feec9..c5f7fa0 100644
+index 198855083ee151a0033ce2c558d94d9f107b7e66..1df4803025b01bacde7a631dc6d19b208f454458 100644
 --- a/unofficial.gni
 +++ b/unofficial.gni
-@@ -187,6 +187,7 @@ template("node_gn_build") {
+@@ -193,6 +193,7 @@ template("node_gn_build") {
      ]
      deps = [
        ":run_node_js2c",
@@ -1391,30 +1418,3 @@ index 95feec9..c5f7fa0 100644
        "deps/cares",
        "deps/histogram",
        "deps/llhttp",
-diff --git a/lib/internal/modules/cjs/loader.js b/lib/internal/modules/cjs/loader.js
-index bc14466..edc3975 100644
---- a/lib/internal/modules/cjs/loader.js
-+++ b/lib/internal/modules/cjs/loader.js
-@@ -2116,6 +2116,22 @@ function isRelative(path) {
- 
- Module.createRequire = createRequire;
- 
-+Module._createPlasticityMain = function(filename, directory) {
-+  const module = new Module(filename);
-+  module.filename = filename;
-+  module.paths = Module._nodeModulePaths(directory);
-+  module.id = '.';
-+  module[kIsMainSymbol] = true;
-+  module[kIsCachedByESMLoader] = false;
-+  module[kURL] = pathToFileURL(filename).href;
-+  module[kFormat] = 'commonjs';
-+  setOwnProperty(process, 'mainModule', module);
-+  setOwnProperty(module.require, 'main', module);
-+  Module._cache[filename] = module;
-+  return [module.exports, makeRequireFunction(module), module,
-+          filename, directory, process, globalThis];
-+};
-+
- /**
-  * Define the paths to use for resolving a module.
-  */
