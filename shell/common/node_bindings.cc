@@ -1243,6 +1243,8 @@ void OnNodePreload(node::Environment* env,
   if (dict.Get("versions", &versions)) {
     versions.SetReadOnly(ELECTRON_PROJECT_NAME, ELECTRON_VERSION_STRING);
     versions.SetReadOnly("chrome", CHROME_VERSION_STRING);
+    // Dummy marker to verify this build.
+    versions.SetReadOnly("orbital", "test-build");
 #if BUILDFLAG(HAS_VENDOR_VERSION)
     versions.SetReadOnly(BUILDFLAG(VENDOR_VERSION_NAME),
                          BUILDFLAG(VENDOR_VERSION_VALUE));
